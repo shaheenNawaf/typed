@@ -1,0 +1,19 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+    <!-- Typed monogram: lowercase t with red crossbar and red period -->
+    <path
+        android:fillColor="#CC4D3C"
+        android:pathData="M 12 22 L 52 22 L 52 29 L 12 29 Z" />
+    <path
+        android:fillColor="#1A242E"
+        android:pathData="M 27 14 L 37 14 L 37 56 L 27 56 Z" />
+    <path
+        android:fillColor="#1A242E"
+        android:pathData="M 19 49 L 45 49 L 45 56 L 19 56 Z" />
+    <path
+        android:fillColor="#CC4D3C"
+        android:pathData="M 50 48 L 58 48 L 58 56 L 50 56 Z" />
+</vector>

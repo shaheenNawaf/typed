@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">
+  <title>Typed app icon foreground</title>
+  <!-- Mark shifted up 20% from center for better visual balance -->
+  <g transform="translate(22, 12)">
+    <rect x="21" y="38" width="40" height="7" fill="#CC4D3C"/>
+    <rect x="36" y="22" width="10" height="50" fill="#1A242E"/>
+    <rect x="28" y="65" width="26" height="7" fill="#1A242E"/>
+    <rect x="50" y="60" width="8" height="8" fill="#CC4D3C"/>
+  </g>
+</svg>

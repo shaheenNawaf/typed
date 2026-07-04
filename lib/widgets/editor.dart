@@ -1,0 +1,1919 @@
+import 'dart:async';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:markdown/markdown.dart' as md;
+import 'package:path_provider/path_provider.dart';
+import '../models/money_entry.dart';
+import '../models/note.dart';
+import '../theme/app_colors.dart';
+import '../utils/finance_utils.dart';
+import 'editor_toolbar.dart';
+import 'entry_sheet.dart';
+import 'image_picker_sheet.dart';
+import 'table_picker_sheet.dart';
+
+typedef CreateNoteCallback = void Function([String? title]);
+
+class Editor extends StatefulWidget {
+  final Note? note;
+  final ValueChanged<String> onTitleChange;
+  final ValueChanged<String> onContentChange;
+  final CreateNoteCallback onCreateNote;
+  final ValueChanged<String> onImageAdded;
+  final bool previewMode;
+  final VoidCallback onTogglePreview;
+  final List<Note> allNotes;
+  final void Function(String noteId) onOpenNote;
+  final ValueChanged<String> onTypeChange;
+  final ValueChanged<String> onCurrencyChange;
+  final ValueChanged<List<MoneyEntry>> onAmountsChange;
+  final ValueChanged<List<String>> onTagsChange;
+  final void Function(Note)? onArchive;
+  final void Function(Note)? onDelete;
+  final void Function(Note)? onTogglePin;
+  final VoidCallback? onNewNote;
+  final List<String> customCategories;
+  final List<String> recentCategories;
+  final void Function(String)? onCategoryUsed;
+  final VoidCallback? onSaveNow;
+
+  const Editor({
+    super.key,
+    required this.note,
+    required this.onTitleChange,
+    required this.onContentChange,
+    required this.onCreateNote,
+    required this.onImageAdded,
+    required this.previewMode,
+    required this.onTogglePreview,
+    required this.allNotes,
+    required this.onOpenNote,
+    required this.onTypeChange,
+    required this.onCurrencyChange,
+    required this.onAmountsChange,
+    required this.onTagsChange,
+    this.onArchive,
+    this.onDelete,
+    this.onTogglePin,
+    this.onNewNote,
+    this.customCategories = const [],
+    this.recentCategories = const [],
+    this.onCategoryUsed,
+    this.onSaveNow,
+  });
+
+  @override
+  State<Editor> createState() => _EditorState();
+}
+
+class _EditorState extends State<Editor> {
+  late TextEditingController _titleCtrl;
+  late TextEditingController _contentCtrl;
+  late TextEditingController _newTagCtrl;
+  final FocusNode _newTagFocus = FocusNode();
+  bool _addingTag = false;
+  final ImagePicker _picker = ImagePicker();
+  List<Note> _linkSuggestions = [];
+  final TextRecognizer? _textRecognizer =
+      kIsWeb ? null : TextRecognizer(script: TextRecognitionScript.latin);
+  int? _checklistEditIdx;
+  final TextEditingController _checklistAddCtrl = TextEditingController();
+  final TextEditingController _checklistEditCtrl = TextEditingController();
+  final FocusNode _checklistEditFocus = FocusNode();
+  bool _suppressOnChanged = false;
+
+  double get _horizontalPad {
+    return MediaQuery.of(context).size.width >= 1024 ? 32.0 : 20.0;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _titleCtrl = TextEditingController(text: widget.note?.title ?? '');
+    _contentCtrl = TextEditingController(text: widget.note?.content ?? '');
+    _newTagCtrl = TextEditingController();
+    _contentCtrl.addListener(_onContentChange);
+  }
+
+  @override
+  void dispose() {
+    _contentCtrl.removeListener(_onContentChange);
+    _newTagFocus.dispose();
+    _titleCtrl.dispose();
+    _contentCtrl.dispose();
+    _newTagCtrl.dispose();
+    _checklistAddCtrl.dispose();
+    _checklistEditCtrl.dispose();
+    _checklistEditFocus.dispose();
+    try { _textRecognizer?.close(); } catch (_) {}
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(Editor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.note?.id != oldWidget.note?.id) {
+      _suppressOnChanged = true;
+      _titleCtrl.text = widget.note?.title ?? '';
+      _contentCtrl.text = widget.note?.content ?? '';
+      _suppressOnChanged = false;
+    }
+  }
+
+  int get _wordCount {
+    final text = _contentCtrl.text.trim();
+    return text.isEmpty ? 0 : text.split(RegExp(r'\s+')).length;
+  }
+
+  void _onContentChange() {
+    if (!mounted) return;
+    final text = _contentCtrl.text;
+    final sel = _contentCtrl.selection;
+    if (!sel.isValid || !sel.isCollapsed) {
+      if (_linkSuggestions.isNotEmpty) {
+        setState(() => _linkSuggestions = []);
+      }
+      return;
+    }
+    final cursor = sel.baseOffset;
+    int lastOpen = -1;
+    for (int i = cursor - 2; i >= 0; i--) {
+      if (text[i] == '[' && text[i + 1] == '[') {
+        lastOpen = i;
+        break;
+      }
+      if (text[i] == ']' || text[i] == '\n' || text[i] == '|') {
+        lastOpen = -1;
+        break;
+      }
+    }
+    if (lastOpen == -1) {
+      if (_linkSuggestions.isNotEmpty) {
+        setState(() => _linkSuggestions = []);
+      }
+      return;
+    }
+    final query = text.substring(lastOpen + 2, cursor);
+    if (query.length > 50 || query.contains('\n')) {
+      if (_linkSuggestions.isNotEmpty) {
+        setState(() => _linkSuggestions = []);
+      }
+      return;
+    }
+    final q = query.toLowerCase();
+    final matches = widget.allNotes
+        .where((n) =>
+            !n.isArchived &&
+            !n.isDeleted &&
+            n.id != widget.note?.id &&
+            n.title.toLowerCase().contains(q))
+        .take(5)
+        .toList();
+    setState(() => _linkSuggestions = matches);
+  }
+
+  void _insertLink(Note note) {
+    final text = _contentCtrl.text;
+    final cursor = _contentCtrl.selection.baseOffset;
+    int lastOpen = -1;
+    for (int i = cursor - 2; i >= 0; i--) {
+      if (text[i] == '[' && text[i + 1] == '[') {
+        lastOpen = i;
+        break;
+      }
+    }
+    if (lastOpen == -1) return;
+    final before = text.substring(0, lastOpen);
+    final after = text.substring(cursor);
+    // ponytail: id-encoded link so renames don't break it.
+    // Syntax: [[id|title]] — rendered as [title](#note:id) in preview.
+    final insertion = '[[${note.id}|${note.title}]]';
+    final newText = '$before$insertion$after';
+    _contentCtrl.text = newText;
+    _contentCtrl.selection =
+        TextSelection.collapsed(offset: before.length + insertion.length);
+    _syncContent();
+    setState(() => _linkSuggestions = []);
+  }
+
+  String _renderedContent() {
+    final text = _contentCtrl.text;
+    final byTitle = <String, String>{
+      for (final n in widget.allNotes) n.title: n.id,
+    };
+    // First pass: resolve [[id|title]] (new syntax)
+    var rendered = text.replaceAllMapped(
+      RegExp(r'\[\[([^\]\n|]+)\|([^\]\n]+)\]\]'),
+      (m) {
+        final id = m.group(1)?.trim() ?? '';
+        final title = m.group(2)?.trim() ?? '';
+        return '[$title](#note:$id)';
+      },
+    );
+    // Second pass: resolve [[title]] (old syntax, backward compat)
+    rendered = rendered.replaceAllMapped(
+      RegExp(r'\[\[([^\]\n|]+)\]\]'),
+      (m) {
+        final title = m.group(1)?.trim() ?? '';
+        final id = byTitle[title];
+        if (id == null) return m.group(0) ?? '';
+        return '[$title](#note:$id)';
+      },
+    );
+    final note = widget.note;
+    if (note != null && note.type != 'text' && note.amounts.isNotEmpty) {
+      rendered = '$rendered\n\n${_entriesMarkdown(note)}';
+    }
+    return rendered;
+  }
+
+  String _entriesMarkdown(Note note) {
+    final header = note.type == 'income' ? '## Income' : '## Expenses';
+    final sorted = note.amounts.toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+
+    final currencies = sorted
+        .map((e) => e.currency ?? note.currency)
+        .toSet();
+    final mixed = currencies.length > 1;
+
+    final rows = StringBuffer();
+    if (mixed) {
+      rows.write('| Date | Category | Currency | Amount |\n| --- | --- | --- | --- |\n');
+    } else {
+      rows.write('| Date | Category | Amount |\n| --- | --- | --- |\n');
+    }
+
+    final totals = <String?, double>{};
+    for (final e in sorted) {
+      final cur = e.currency ?? note.currency;
+      final sym = _currencySymbol(cur);
+      if (mixed) {
+        rows.writeln(
+          '| ${_formatDateShort(e.date)} | ${e.category} | $cur | $sym${_formatNumber(e.amount, cur)} |',
+        );
+      } else {
+        rows.writeln(
+          '| ${_formatDateShort(e.date)} | ${e.category} | $sym${_formatNumber(e.amount, cur)} |',
+        );
+      }
+      totals[cur] = (totals[cur] ?? 0) + e.amount;
+    }
+
+    if (mixed) {
+      for (final t in totals.entries) {
+        rows.writeln(
+          '| **Total (${t.key})** | | | **${_currencySymbol(t.key)}${_formatNumber(t.value, t.key)}** |',
+        );
+      }
+    } else {
+      final total = totals.values.fold<double>(0, (a, b) => a + b);
+      final cur = note.currency;
+      rows.write(
+        '| **Total** | | **${_currencySymbol(cur)}${_formatNumber(total, cur)}** |',
+      );
+    }
+
+    return '$header\n\n$rows';
+  }
+
+  String _currencySymbol(String? code) {
+    switch (code) {
+      case 'PHP':
+        return '₱';
+      case 'USD':
+        return r'$';
+      case 'EUR':
+        return '€';
+      case 'GBP':
+        return '£';
+      case 'JPY':
+        return '¥';
+      case 'INR':
+        return '₹';
+      case null:
+        return '₱';
+      default:
+        return code;
+    }
+  }
+
+  String _formatNumber(double value, String? currency) {
+    final decimals = currency == 'JPY' ? 0 : 2;
+    return formatNumber(value, decimals: decimals);
+  }
+
+  String _formatDateShort(DateTime d) {
+    return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  }
+
+  void _setType(String type) {
+    if (widget.note?.type == type) return;
+    widget.onTypeChange(type);
+  }
+
+  void _setCurrency(String currency) {
+    if (widget.note?.currency == currency) return;
+    widget.onCurrencyChange(currency);
+  }
+
+  void _addOrUpdateEntry(MoneyEntry entry) {
+    final note = widget.note;
+    if (note == null) return;
+    final list = note.amounts.toList();
+    final idx = list.indexWhere((e) => e.id == entry.id);
+    if (idx >= 0) {
+      list[idx] = entry;
+    } else {
+      list.add(entry);
+    }
+    list.sort((a, b) => b.date.compareTo(a.date));
+    widget.onAmountsChange(list);
+  }
+
+  void _removeEntry(String entryId) {
+    final note = widget.note;
+    if (note == null) return;
+    final list = note.amounts.where((e) => e.id != entryId).toList();
+    widget.onAmountsChange(list);
+  }
+
+  void _insertMD(String pattern) {
+    final parts = pattern.split('|');
+    final before = parts[0];
+    final after = parts.length > 1 ? parts[1] : '';
+    final selStart = _contentCtrl.selection.start;
+    final selEnd = _contentCtrl.selection.end;
+    final sel = _contentCtrl.text.substring(selStart, selEnd);
+
+    final newText = _contentCtrl.text.substring(0, selStart) +
+        before +
+        sel +
+        after +
+        _contentCtrl.text.substring(selEnd);
+    _contentCtrl.text = newText;
+    _contentCtrl.selection = TextSelection.collapsed(
+        offset: selStart + before.length);
+    _syncContent();
+  }
+
+  void _insertLine(String prefix) {
+    final selStart = _contentCtrl.selection.start;
+    final lastNewline = _contentCtrl.text.lastIndexOf('\n', selStart - 1);
+    final lineStart = lastNewline + 1;
+
+    final newText = _contentCtrl.text.substring(0, lineStart) +
+        prefix +
+        _contentCtrl.text.substring(lineStart);
+    _contentCtrl.text = newText;
+    _contentCtrl.selection =
+        TextSelection.collapsed(offset: lineStart + prefix.length);
+    _syncContent();
+  }
+
+  String _tableSep(TableAlign a) {
+    switch (a) {
+      case TableAlign.left:
+        return ':---';
+      case TableAlign.center:
+        return ':---:';
+      case TableAlign.right:
+        return '---:';
+    }
+  }
+
+  void _insertTable(int rows, int cols, TableAlign align) {
+    final widths = List.generate(cols, (i) => 'Col ${i + 1}'.length);
+    for (var i = 0; i < cols; i++) {
+      if (widths[i] < 5) widths[i] = 5;
+    }
+    final sepTemplate = _tableSep(align);
+    String pad(String s, int w) {
+      if (s.length >= w) return s;
+      final pad = w - s.length;
+      return s + (' ' * pad);
+    }
+    final headerCells = List.generate(
+        cols, (i) => pad('Col ${i + 1}', widths[i])).join(' | ');
+    final sepCells = List.generate(
+        cols, (i) => sepTemplate.padRight(widths[i])).join(' | ');
+    final bodyCells = List.generate(rows, (_) {
+      final cells = List.generate(
+          cols, (i) => ' '.padRight(widths[i])).join(' | ');
+      return '| $cells |';
+    }).join('\n');
+
+    final table = '\n| $headerCells |\n| $sepCells |\n$bodyCells\n';
+    final cur = _contentCtrl.text;
+    final needsLeadingNewline = cur.isNotEmpty && !cur.endsWith('\n');
+    final insertion = needsLeadingNewline ? '\n$table' : table;
+
+    final selStart = _contentCtrl.selection.start;
+    final newText = cur.substring(0, selStart) + insertion + cur.substring(selStart);
+    _contentCtrl.text = newText;
+    _contentCtrl.selection = TextSelection.collapsed(
+        offset: selStart + insertion.length);
+    _syncContent();
+  }
+
+  void _syncContent() {
+    widget.onTitleChange(_titleCtrl.text);
+    widget.onContentChange(_contentCtrl.text);
+  }
+
+  Future<void> _pickFromGallery() async {
+    try {
+      final picked = await _picker.pickImage(source: ImageSource.gallery);
+      if (picked == null) return;
+      await _saveAndInsert(picked);
+    } catch (e) {
+      _showError(e);
+    }
+  }
+
+  Future<void> _pickFromCamera() async {
+    try {
+      final picked = await _picker.pickImage(source: ImageSource.camera);
+      if (picked == null) return;
+      await _saveAndInsert(picked);
+    } catch (e) {
+      _showError(e);
+    }
+  }
+
+  Future<void> _saveAndInsert(XFile picked) async {
+    final noteId = widget.note?.id;
+    if (noteId == null) return;
+
+    final docsDir = await getApplicationDocumentsDirectory();
+    final imagesDir = Directory('${docsDir.path}/images/$noteId');
+    if (!await imagesDir.exists()) {
+      await imagesDir.create(recursive: true);
+    }
+
+    final imageId = DateTime.now().millisecondsSinceEpoch.toString();
+    final ext = picked.name.contains('.') ? picked.name.split('.').last : 'jpg';
+    final dest = File('${imagesDir.path}/$imageId.$ext');
+    await File(picked.path).copy(dest.path);
+
+    // Insert image markdown at the end of the content
+    final prefix = _contentCtrl.text.isEmpty || _contentCtrl.text.endsWith('\n\n')
+        ? ''
+        : '\n\n';
+    final imageMarkdown = '$prefix![image](${dest.path})\n';
+    _contentCtrl.text = _contentCtrl.text + imageMarkdown;
+    _contentCtrl.selection = TextSelection.collapsed(
+        offset: _contentCtrl.text.length);
+    _syncContent();
+    widget.onImageAdded(dest.path);
+
+    // Run OCR on the saved image in the background (mobile only)
+    if (!kIsWeb) {
+      unawaited(_runOcr(dest.path));
+    }
+  }
+
+  Future<void> _runOcr(String imagePath) async {
+    if (!mounted || kIsWeb || _textRecognizer == null) return;
+    try {
+      final inputImage = InputImage.fromFilePath(imagePath);
+      final result = await _textRecognizer.processImage(inputImage);
+      if (!mounted) return;
+      final text = result.text.trim();
+      if (text.isNotEmpty) {
+        final lines = text.split('\n').where((l) => l.trim().length > 2).length;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Extracted $lines lines from image'),
+              duration: const Duration(seconds: 6),
+              action: SnackBarAction(
+                label: 'Append',
+                onPressed: () {
+                  final quoted = text
+                      .split('\n')
+                      .map((l) => '> ${l.trim()}')
+                      .where((l) => l.length > 2)
+                      .join('\n');
+                  if (quoted.isNotEmpty) {
+                    final addition = '\n$quoted\n';
+                    _contentCtrl.text = _contentCtrl.text + addition;
+                    _contentCtrl.selection = TextSelection.collapsed(
+                        offset: _contentCtrl.text.length);
+                    _syncContent();
+                  }
+                },
+              ),
+            ),
+          );
+        }
+      }
+    } catch (_) {
+      // OCR is best-effort; silently skip on failure
+    }
+  }
+
+  void _showError(Object e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Image error: $e')),
+    );
+  }
+
+  void _openImagePicker() {
+    ImagePickerSheet.show(
+      context,
+      onGallery: _pickFromGallery,
+      onCamera: _pickFromCamera,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.note == null) return _emptyState();
+
+    return CallbackShortcuts(
+      bindings: {
+        SingleActivator(LogicalKeyboardKey.keyB, control: true):
+            () => _insertMD('**|**'),
+        SingleActivator(LogicalKeyboardKey.keyI, control: true):
+            () => _insertMD('*|*'),
+        SingleActivator(LogicalKeyboardKey.keyK, control: true):
+            () => _insertMD('[|](url)'),
+        SingleActivator(LogicalKeyboardKey.keyS, control: true): () {
+          _syncContent();
+          widget.onSaveNow?.call();
+        },
+      },
+      child: Container(
+      color: context.colors.bg,
+      child: Column(
+        children: [
+          _buildTitleBar(),
+          if (widget.note != null && widget.note!.type != 'expense' && widget.note!.type != 'income')
+            _buildTagBar(),
+          if (widget.note != null && (widget.note!.type == 'expense' || widget.note!.type == 'income'))
+            _buildFinanceContent(),
+          Expanded(
+            child: widget.note != null && widget.note!.type == 'todo'
+                ? _buildChecklistPanel()
+                : _buildBody(),
+          ),
+          EditorToolbar(
+              onInsertMD: (p) => _insertMD(p),
+              onInsertLine: (p) => _insertLine(p),
+              onInsertTable: (rows, cols, align) => _insertTable(rows, cols, align),
+              previewMode: widget.previewMode,
+              onTogglePreview: widget.onTogglePreview,
+              wordCount: _wordCount,
+              onImagePick: _openImagePicker,
+            ),
+        ],
+      ),
+    ),
+    );
+  }
+
+  Widget _buildTitleBar() {
+    final note = widget.note;
+    final isFinance = note != null && (note.type == 'expense' || note.type == 'income');
+    final isMobile = MediaQuery.of(context).size.width < 600;
+    return Container(
+      padding: EdgeInsets.fromLTRB(_horizontalPad, 14, _horizontalPad, 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _titleCtrl,
+              onChanged: (v) {
+                if (widget.note == null && v.trim().isNotEmpty) {
+                  widget.onCreateNote(v);
+                }
+                _syncContent();
+              },
+              style: GoogleFonts.dmSans(
+                fontSize: 22, fontWeight: FontWeight.w600,
+                color: context.colors.fg, height: 1.2,
+              ),
+              decoration: InputDecoration(
+                hintText: 'Note title...',
+                hintStyle: TextStyle(color: context.colors.muted),
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+          ),
+          if (note != null) ...[
+            if (!isMobile) ...[
+              const SizedBox(width: 8),
+              _TypeDropdown(
+                value: note.type,
+                onChanged: _setType,
+              ),
+              if (isFinance) ...[
+                const SizedBox(width: 8),
+                _CurrencyDropdown(
+                  value: note.currency ?? 'PHP',
+                  onChanged: _setCurrency,
+                ),
+              ],
+            ],
+           ],
+           if (note != null && (widget.onArchive != null || widget.onTogglePin != null))
+             PopupMenuButton<String>(
+               icon: Icon(Icons.more_horiz, size: 20, color: context.colors.muted),
+               tooltip: 'Note actions',
+               position: PopupMenuPosition.under,
+               onSelected: (action) {
+                 switch (action) {
+                   case 'pin':
+                     widget.onTogglePin?.call(note);
+                   case 'archive':
+                     widget.onArchive?.call(note);
+                   case 'delete':
+                     widget.onDelete?.call(note);
+                    case 'type:text':
+                      _setType('text');
+                    case 'type:todo':
+                      _setType('todo');
+                    case 'type:expense':
+                     _setType('expense');
+                   case 'type:income':
+                     _setType('income');
+                   case 'currency:PHP':
+                     _setCurrency('PHP');
+                   case 'currency:USD':
+                     _setCurrency('USD');
+                   case 'currency:EUR':
+                     _setCurrency('EUR');
+                   case 'currency:GBP':
+                     _setCurrency('GBP');
+                   case 'currency:JPY':
+                     _setCurrency('JPY');
+                   case 'currency:INR':
+                     _setCurrency('INR');
+                 }
+               },
+               itemBuilder: (_) {
+                 final isMobile2 = MediaQuery.of(context).size.width < 600;
+                 final items = <PopupMenuEntry<String>>[];
+                 items.add(
+                   PopupMenuItem(
+                     value: 'pin',
+                     child: Row(children: [
+                       Icon(note.isPinned ? Icons.push_pin : Icons.push_pin_outlined, size: 18),
+                       const SizedBox(width: 8),
+                       Text(note.isPinned ? 'Unpin' : 'Pin'),
+                     ]),
+                   ),
+                 );
+                 items.add(
+                   PopupMenuItem(
+                     value: 'archive',
+                     child: Row(children: [
+                       const Icon(Icons.archive_outlined, size: 18),
+                       const SizedBox(width: 8),
+                       const Text('Archive'),
+                     ]),
+                   ),
+                 );
+                 if (isMobile2) {
+                   items.add(const PopupMenuDivider());
+                   items.add(
+                     PopupMenuItem(
+                       value: 'type:text',
+                       child: Row(children: [
+                         const Icon(Icons.article_outlined, size: 18),
+                         const SizedBox(width: 8),
+                         Row(children: [
+                           Text('Type: ', style: TextStyle(color: context.colors.muted)),
+                           const Text('Text'),
+                         ]),
+                        ]),
+                      ),
+                    );
+                    items.add(
+                      PopupMenuItem(
+                        value: 'type:todo',
+                        child: Row(children: [
+                          const Icon(Icons.checklist_outlined, size: 18, color: Color(0xFFCC4D3C)),
+                          const SizedBox(width: 8),
+                          Row(children: [
+                            Text('Type: ', style: TextStyle(color: context.colors.muted)),
+                            const Text('Todo'),
+                          ]),
+                        ]),
+                      ),
+                    );
+                    items.add(
+                      PopupMenuItem(
+                        value: 'type:expense',
+                       child: Row(children: [
+                         const Icon(Icons.arrow_upward, size: 18, color: Color(0xFFCC4D3C)),
+                         const SizedBox(width: 8),
+                         Row(children: [
+                           Text('Type: ', style: TextStyle(color: context.colors.muted)),
+                           const Text('Expense'),
+                         ]),
+                       ]),
+                     ),
+                   );
+                   items.add(
+                     PopupMenuItem(
+                       value: 'type:income',
+                       child: Row(children: [
+                         const Icon(Icons.arrow_downward, size: 18, color: Color(0xFF2D8659)),
+                         const SizedBox(width: 8),
+                         Row(children: [
+                           Text('Type: ', style: TextStyle(color: context.colors.muted)),
+                           const Text('Income'),
+                         ]),
+                       ]),
+                     ),
+                   );
+                   if (isFinance) {
+                     items.add(const PopupMenuDivider());
+                     for (final c in _CurrencyDropdown.currencies) {
+                       items.add(
+                         PopupMenuItem(
+                           value: 'currency:$c',
+                           child: Row(children: [
+                             const Icon(Icons.attach_money, size: 18),
+                             const SizedBox(width: 8),
+                             Row(children: [
+                               Text('Currency: ', style: TextStyle(color: context.colors.muted)),
+                               Text(c),
+                             ]),
+                           ]),
+                         ),
+                       );
+                     }
+                   }
+                 }
+                 items.add(const PopupMenuDivider());
+                 items.add(
+                   PopupMenuItem(
+                     value: 'delete',
+                     child: Row(children: [
+                       Icon(Icons.delete_outline, size: 18, color: context.colors.destructive),
+                       const SizedBox(width: 8),
+                       Text('Delete', style: TextStyle(color: context.colors.destructive)),
+                     ]),
+                   ),
+                 );
+                 return items;
+               },
+             ),
+         ],
+       ),
+     );
+  }
+
+  Widget _buildFinanceContent() {
+    final note = widget.note;
+    if (note == null) return const SizedBox.shrink();
+
+    final expenses = note.amounts
+        .where((e) => (e.type ?? note.type) == 'expense')
+        .toList();
+    final incomes = note.amounts
+        .where((e) => (e.type ?? note.type) == 'income')
+        .toList();
+    final totalExpenses =
+        expenses.fold<double>(0, (s, e) => s + e.amount);
+    final totalIncome = incomes.fold<double>(0, (s, e) => s + e.amount);
+    final netAmount = totalIncome - totalExpenses;
+    final currency = note.currency ?? 'PHP';
+
+    return Container(
+      margin: EdgeInsets.fromLTRB(_horizontalPad, 12, _horizontalPad, 0),
+      decoration: BoxDecoration(
+        color: context.colors.listBg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: context.colors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildSummaryCards(totalExpenses, totalIncome, netAmount, currency),
+          if (note.amounts.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Divider(height: 1, color: context.colors.border.withAlpha(100)),
+            const SizedBox(height: 8),
+            ...note.amounts.asMap().entries.expand((e) => [
+              if (e.key > 0) const SizedBox(height: 8),
+              _buildTransactionItem(note, e.value),
+            ]),
+            const SizedBox(height: 6),
+            _buildAddEntryButton(note),
+            const SizedBox(height: 12),
+          ] else ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Center(
+                child: Text('No entries yet. Tap "+ Entry" to add one.',
+                    style: TextStyle(fontSize: 12, color: context.colors.muted)),
+              ),
+            ),
+            _buildAddEntryButton(note),
+            const SizedBox(height: 12),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSummaryCards(double totalExpenses, double totalIncome,
+      double netAmount, String currency) {
+    final expenseColor = const Color(0xFFCC4D3C);
+    final incomeColor = const Color(0xFF2D8659);
+    final netColor = netAmount >= 0 ? incomeColor : expenseColor;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Flexible(child: _summaryCard('EXPENSES', totalExpenses, expenseColor, currency)),
+              const SizedBox(width: 8),
+              Flexible(child: _summaryCard('INCOME', totalIncome, incomeColor, currency)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Flexible(child: _summaryCard('NET', netAmount, netColor, currency)),
+              const Spacer(),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _summaryCard(String label, double value, Color color, String currency) {
+    return Container(
+      height: 80,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withAlpha(20),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: color,
+                letterSpacing: 0.5,
+              )),
+          Text.rich(
+            TextSpan(
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+              children: [
+                currencySpan(currency, null),
+                TextSpan(
+                  text: formatNumber(value.abs(),
+                      decimals: currency == 'JPY' ? 0 : 2),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTransactionItem(Note note, MoneyEntry e) {
+    final effectiveCurrency = e.currency ?? note.currency;
+    final effectiveType = e.type ?? note.type;
+    final effectiveCurrencySym = effectiveCurrency ?? 'PHP';
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 64),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Icon(_categoryIcon(e.category),
+                size: 20, color: context.colors.muted),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(e.category,
+                      style: TextStyle(
+                        fontSize: 13, color: context.colors.fg,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                  if (e.note != null && e.note!.isNotEmpty)
+                    Text(e.note!,
+                        style: TextStyle(
+                          fontSize: 11, color: context.colors.muted,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text.rich(
+                  TextSpan(
+                    style: TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w500,
+                      color: effectiveType == 'income'
+                          ? context.colors.income
+                          : context.colors.fg,
+                    ),
+                    children: [
+                      currencySpan(effectiveCurrencySym, null),
+                      TextSpan(
+                        text: formatNumber(e.amount,
+                            decimals: effectiveCurrencySym == 'JPY' ? 0 : 2),
+                      ),
+                    ],
+                  ),
+                ),
+                Text(
+                  '${e.date.hour.toString().padLeft(2, '0')}:${e.date.minute.toString().padLeft(2, '0')}',
+                  style: TextStyle(
+                    fontSize: 10, fontFamily: context.colors.monoFontFamily,
+                    color: context.colors.muted,
+                  ),
+                ),
+              ],
+            ),
+            if (e.isRecurring)
+              Padding(
+                padding: const EdgeInsets.only(left: 8),
+                child: Icon(Icons.loop,
+                    size: 12, color: context.colors.muted),
+              ),
+            InkWell(
+              onTap: () => EntrySheet.show(
+                context,
+                entry: e,
+                onSave: _addOrUpdateEntry,
+                currencySymbol: _currencySymbol(effectiveCurrency),
+                noteCurrency: note.currency,
+                noteType: note.type,
+                customCategories: widget.customCategories,
+                recentCategories: widget.recentCategories,
+                onCategoryUsed: widget.onCategoryUsed,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(Icons.edit_outlined,
+                    size: 14, color: context.colors.muted),
+              ),
+            ),
+            InkWell(
+              onTap: () => _removeEntry(e.id),
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(Icons.close,
+                    size: 14, color: context.colors.muted),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAddEntryButton(Note note) {
+    return Align(
+      alignment: Alignment.centerRight,
+      child: TextButton.icon(
+        onPressed: () => EntrySheet.show(
+          context,
+          onSave: _addOrUpdateEntry,
+          currencySymbol: _currencySymbol(note.currency),
+          noteCurrency: note.currency,
+          noteType: note.type,
+          customCategories: widget.customCategories,
+          recentCategories: widget.recentCategories,
+          onCategoryUsed: widget.onCategoryUsed,
+        ),
+        icon: const Icon(Icons.add, size: 14),
+        label: const Text('Entry', style: TextStyle(fontSize: 13)),
+        style: TextButton.styleFrom(
+          foregroundColor: context.colors.accent,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+        ),
+      ),
+    );
+  }
+
+  IconData _categoryIcon(String category) {
+    switch (category.toLowerCase()) {
+      case 'food':
+      case 'dining':
+      case 'restaurant':
+        return Icons.restaurant_outlined;
+      case 'transport':
+      case 'transportation':
+      case 'gas':
+      case 'fuel':
+        return Icons.directions_car_outlined;
+      case 'shopping':
+      case 'clothing':
+        return Icons.shopping_bag_outlined;
+      case 'bills':
+      case 'utilities':
+      case 'electric':
+      case 'water':
+        return Icons.receipt_outlined;
+      case 'entertainment':
+      case 'movies':
+      case 'games':
+        return Icons.movie_outlined;
+      case 'health':
+      case 'medical':
+      case 'fitness':
+        return Icons.health_and_safety_outlined;
+      case 'education':
+      case 'school':
+      case 'tuition':
+        return Icons.school_outlined;
+      case 'salary':
+      case 'work':
+      case 'income':
+        return Icons.work_outlined;
+      case 'freelance':
+      case 'freelancing':
+        return Icons.laptop_outlined;
+      case 'investment':
+      case 'stocks':
+      case 'dividend':
+        return Icons.trending_up_outlined;
+      case 'groceries':
+      case 'supermarket':
+        return Icons.local_grocery_store_outlined;
+      case 'rent':
+      case 'housing':
+      case 'mortgage':
+        return Icons.home_outlined;
+      case 'travel':
+      case 'hotel':
+      case 'vacation':
+        return Icons.flight_outlined;
+      case 'coffee':
+      case 'cafe':
+      case 'drinks':
+        return Icons.coffee_outlined;
+      case 'insurance':
+        return Icons.shield_outlined;
+      case 'subscription':
+      case 'streaming':
+        return Icons.subscriptions_outlined;
+      case 'gift':
+      case 'donation':
+      case 'charity':
+        return Icons.card_giftcard_outlined;
+      default:
+        return Icons.circle_outlined;
+    }
+  }
+
+  // ---- Checklist helpers ----
+
+  List<_ChecklistItem> _parseChecklist(String text) {
+    final items = <_ChecklistItem>[];
+    final lines = text.split('\n');
+    for (int i = 0; i < lines.length; i++) {
+      final m = RegExp(r'^\s*-\s+\[([ x])\]\s+(.*)$').firstMatch(lines[i]);
+      if (m != null) {
+        items.add(_ChecklistItem(i, m.group(1) == 'x', m.group(2) ?? ''));
+      }
+    }
+    return items;
+  }
+
+  void _toggleItem(int lineIndex, bool checked) {
+    final lines = _contentCtrl.text.split('\n');
+    lines[lineIndex] = checked
+        ? lines[lineIndex].replaceFirst('- [ ]', '- [x]')
+        : lines[lineIndex].replaceFirst('- [x]', '- [ ]');
+    _contentCtrl.text = lines.join('\n');
+    _syncContent();
+    setState(() {});
+  }
+
+  void _deleteItem(int lineIndex) {
+    final lines = _contentCtrl.text.split('\n');
+    lines.removeAt(lineIndex);
+    _contentCtrl.text = lines.join('\n');
+    _syncContent();
+    setState(() {});
+  }
+
+  void _addItem(String text) {
+    if (text.trim().isEmpty) return;
+    _contentCtrl.text = '${_contentCtrl.text}- [ ] ${text.trim()}\n';
+    _checklistAddCtrl.clear();
+    _syncContent();
+    setState(() {});
+  }
+
+  void _startEdit(int idx, String text) {
+    _checklistEditIdx = idx;
+    _checklistEditCtrl.text = text;
+    _checklistEditFocus.requestFocus();
+    setState(() {});
+  }
+
+  void _submitEdit(int lineIndex, int visualIndex) {
+    final text = _checklistEditCtrl.text.trim();
+    if (text.isEmpty) {
+      if (visualIndex > 0) _deleteItem(lineIndex);
+      _checklistEditIdx = null;
+      setState(() {});
+      return;
+    }
+    final lines = _contentCtrl.text.split('\n');
+    final m = RegExp(r'^(\s*-\s+\[[ x]\]\s+).*$').firstMatch(lines[lineIndex]);
+    if (m != null) lines[lineIndex] = '${m.group(1)}$text';
+    lines.insert(lineIndex + 1, '- [ ] ');
+    _contentCtrl.text = lines.join('\n');
+    _syncContent();
+    _checklistEditIdx = visualIndex + 1;
+    _checklistEditCtrl.text = '';
+    _checklistEditFocus.requestFocus();
+    setState(() {});
+  }
+
+  Widget _buildChecklistPanel() {
+    final horizontalPad = _horizontalPad;
+    final c = context.colors;
+    final items = _parseChecklist(_contentCtrl.text);
+
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 640),
+        padding: EdgeInsets.fromLTRB(horizontalPad, 16, horizontalPad, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: items.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 40),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.checklist_outlined,
+                                size: 40, color: c.muted.withAlpha(80)),
+                            const SizedBox(height: 12),
+                            Text('No items yet',
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 18, fontWeight: FontWeight.w500,
+                                  color: c.fg)),
+                            const SizedBox(height: 4),
+                            Text('Add your first to-do item below.',
+                                style: TextStyle(
+                                  fontSize: 13, color: c.muted)),
+                          ],
+                        ),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: items.length,
+                      itemBuilder: (_, i) => _buildChecklistRow(items[i], i),
+                    ),
+            ),
+            _buildAddRow(c),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _showRawDialog,
+                icon: Icon(Icons.edit_outlined, size: 14, color: c.muted),
+                label: Text('Edit raw',
+                    style: TextStyle(fontSize: 12, color: c.muted)),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChecklistRow(_ChecklistItem item, int index) {
+    final c = context.colors;
+    final editing = _checklistEditIdx == index;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          GestureDetector(
+            onTap: () => _toggleItem(item.lineIndex, !item.checked),
+            child: Container(
+              width: 22, height: 22,
+              margin: const EdgeInsets.only(top: 3),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: item.checked ? c.accent : c.muted,
+                  width: 2,
+                ),
+                color: item.checked ? c.accent : Colors.transparent,
+              ),
+              child: item.checked
+                  ? Icon(Icons.check, size: 14, color: Colors.white)
+                  : null,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: editing
+                ? SizedBox(
+                    height: 30,
+                    child: TextField(
+                      controller: _checklistEditCtrl,
+                      focusNode: _checklistEditFocus,
+                      style: GoogleFonts.dmSans(
+                        fontSize: 14, fontWeight: FontWeight.w400,
+                        color: c.fg, height: 1.4),
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 0, vertical: 4),
+                        border: InputBorder.none,
+                      ),
+                      onSubmitted: (_) => _submitEdit(item.lineIndex, index),
+                      onTapOutside: (_) => _submitEdit(item.lineIndex, index),
+                    ),
+                  )
+                : GestureDetector(
+                    onTap: () => _startEdit(index, item.text),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Text(
+                        item.text,
+                        style: GoogleFonts.dmSans(
+                          fontSize: 14,
+                          fontWeight: item.checked
+                              ? FontWeight.w400
+                              : FontWeight.w500,
+                          color: item.checked ? c.muted : c.fg,
+                          decoration: item.checked
+                              ? TextDecoration.lineThrough
+                              : null,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ),
+          ),
+          if (!editing)
+            GestureDetector(
+              onTap: () => _deleteItem(item.lineIndex),
+              child: Padding(
+                padding: const EdgeInsets.only(left: 4, top: 4),
+                child: Icon(Icons.close, size: 16,
+                    color: c.muted.withAlpha(120)),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAddRow(AppColors c) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(
+        children: [
+          Icon(Icons.add_circle_outline,
+              size: 18, color: c.accent.withAlpha(180)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: SizedBox(
+              height: 32,
+              child: TextField(
+                controller: _checklistAddCtrl,
+                style: GoogleFonts.dmSans(
+                  fontSize: 14, fontWeight: FontWeight.w400,
+                  color: c.fg, height: 1.4),
+                decoration: InputDecoration(
+                  hintText: 'Add an item...',
+                  hintStyle: TextStyle(
+                      fontSize: 14, color: c.muted.withAlpha(150)),
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 0, vertical: 6),
+                  border: InputBorder.none,
+                ),
+                onSubmitted: (v) {
+                  _addItem(v);
+                  _checklistAddCtrl.clear();
+                },
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => _addItem(_checklistAddCtrl.text),
+            style: TextButton.styleFrom(
+              foregroundColor: c.accent,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('Add',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showRawDialog() {
+    final c = context.colors;
+    final ctrl = TextEditingController(text: _contentCtrl.text);
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: c.surface,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12)),
+        title: Text('Raw markdown',
+            style: TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w600, color: c.fg)),
+        content: SizedBox(
+          width: double.maxFinite,
+          height: 300.0,
+          child: TextField(
+            controller: ctrl,
+            maxLines: null,
+            expands: true,
+            style: GoogleFonts.jetBrainsMono(
+              fontSize: 12, color: c.fg, height: 1.5),
+            decoration: InputDecoration(
+              filled: true,
+              fillColor: c.bg,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(color: c.border),
+              ),
+              contentPadding: const EdgeInsets.all(12),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: TextStyle(color: c.muted)),
+          ),
+          TextButton(
+            onPressed: () {
+              _contentCtrl.text = ctrl.text;
+              _syncContent();
+              setState(() {});
+              Navigator.pop(context);
+            },
+            child: Text('Save', style: TextStyle(color: c.accent)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTagBar() {
+    final tags = widget.note?.tags ?? [];
+    final c = context.colors;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(_horizontalPad, 0, _horizontalPad, 8),
+      child: Wrap(
+        spacing: 4, runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          ...tags.map((t) => InkWell(
+                onTap: () => _removeTag(t),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: c.tagBg,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('#$t', style: TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.w400,
+                        color: c.tagFg,
+                      )),
+                      const SizedBox(width: 4),
+                      Icon(Icons.close, size: 12, color: c.tagFg),
+                    ],
+                  ),
+                ),
+              )),
+          if (_addingTag)
+            IntrinsicWidth(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 80),
+                child: TextField(
+                  controller: _newTagCtrl,
+                  focusNode: _newTagFocus,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 4),
+                    hintText: 'tag',
+                    hintStyle: TextStyle(
+                      fontSize: 12, color: c.muted,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(6),
+                      borderSide: BorderSide(color: c.border),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(6),
+                      borderSide: BorderSide(color: c.border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(6),
+                      borderSide: BorderSide(color: c.accent),
+                    ),
+                  ),
+                  style: TextStyle(
+                    fontSize: 12, color: c.fg,
+                  ),
+                  onSubmitted: _submitTag,
+                  onEditingComplete: () => _submitTag(_newTagCtrl.text),
+                  onTapOutside: (_) {
+                    if (_newTagCtrl.text.trim().isEmpty) {
+                      setState(() => _addingTag = false);
+                    }
+                  },
+                ),
+              ),
+            )
+          else
+            InkWell(
+              onTap: () {
+                setState(() => _addingTag = true);
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _newTagFocus.requestFocus();
+                });
+              },
+              borderRadius: BorderRadius.circular(6),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  border: Border.all(color: c.border),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.add, size: 12, color: c.muted),
+                    const SizedBox(width: 4),
+                    Text('tag', style: TextStyle(
+                      fontSize: 12, color: c.muted,
+                    )),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _submitTag(String value) {
+    final tag = value.trim().replaceAll(RegExp(r'\s+'), '-');
+    if (tag.isEmpty) {
+      setState(() {
+        _addingTag = false;
+        _newTagCtrl.clear();
+      });
+      return;
+    }
+    final current = List<String>.from(widget.note?.tags ?? const []);
+    if (current.contains(tag)) {
+      setState(() {
+        _addingTag = false;
+        _newTagCtrl.clear();
+      });
+      return;
+    }
+    current.add(tag);
+    widget.onTagsChange(current);
+    setState(() {
+      _newTagCtrl.clear();
+    });
+  }
+
+  void _removeTag(String tag) {
+    final current = List<String>.from(widget.note?.tags ?? const []);
+    current.remove(tag);
+    widget.onTagsChange(current);
+  }
+
+  Widget _buildBody() {
+    final horizontalPad = _horizontalPad;
+    if (widget.previewMode) {
+      return Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 640),
+          padding: EdgeInsets.fromLTRB(horizontalPad, 16, horizontalPad, 0),
+          child: SingleChildScrollView(
+            child: MarkdownBody(
+              data: _renderedContent(),
+              selectable: true,
+              styleSheet: _buildMarkdownStyle(context.colors),
+              onTapLink: (text, href, title) {
+                if (href != null && href.startsWith('#note:')) {
+                  widget.onOpenNote(href.substring(6));
+                }
+              },
+              builders: {
+                'pre': _CodeBlockBuilder(context.colors.sidebarFg),
+              },
+              sizedImageBuilder: (config) {
+                final path = config.uri.scheme == 'file'
+                    ? config.uri.path
+                    : config.uri.toString();
+                if (File(path).existsSync()) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.file(
+                        File(path),
+                        fit: BoxFit.contain,
+                        width: config.width ?? double.infinity,
+                        errorBuilder: (_, __, ___) =>
+                            _brokenImage(config.alt),
+                      ),
+                    ),
+                  );
+                }
+                return _brokenImage(config.alt);
+              },
+            ),
+          ),
+        ),
+      );
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const maxBodyWidth = 640.0;
+        final available = constraints.maxWidth - horizontalPad * 2;
+        final bodyWidth = available > maxBodyWidth ? maxBodyWidth : available;
+        final leftPad = (constraints.maxWidth - bodyWidth) / 2;
+        return Stack(
+          children: [
+            SizedBox.expand(),
+            Positioned(
+              left: leftPad,
+              right: leftPad,
+              top: 16,
+              bottom: 16,
+              child: TextField(
+                controller: _contentCtrl,
+                onChanged: (_) {
+                  _syncContent();
+                  if (!_suppressOnChanged) setState(() {});
+                },
+                maxLines: null,
+                expands: true,
+                style: GoogleFonts.dmSans(
+                  fontSize: 15, fontWeight: FontWeight.w400,
+                  color: context.colors.fg, height: 1.6),
+                decoration: InputDecoration(
+                  hintText: 'Start writing in Markdown...\n\n'
+                      'Type #tag to categorize this note. '
+                      'Use **bold**, *italic*, `code`, [[links]], and more.',
+                  hintStyle: TextStyle(color: context.colors.muted),
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ),
+            if (_linkSuggestions.isNotEmpty)
+              Positioned(
+                left: leftPad,
+                right: leftPad,
+                top: 16,
+                child: _buildLinkSuggestions(),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildLinkSuggestions() {
+    return Material(
+      elevation: 6,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        decoration: BoxDecoration(
+          color: context.colors.surface,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: context.colors.border),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: _linkSuggestions.map((n) => InkWell(
+            onTap: () => _insertLink(n),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 10),
+              child: Row(
+                children: [
+                  Icon(Icons.article_outlined,
+                      size: 14, color: context.colors.muted),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(n.title,
+                        style:  TextStyle(
+                          fontSize: 13,
+                          color: context.colors.fg,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                ],
+              ),
+            ),
+          )).toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _brokenImage(String? alt) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: context.colors.listBg,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: context.colors.border),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.broken_image_outlined,
+            color: context.colors.muted, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              alt ?? 'Image not found',
+              style:  TextStyle(
+                color: context.colors.muted, fontSize: 13, fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _emptyState() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.article_outlined, size: 36,
+            color: context.colors.muted.withAlpha(64)),
+          const SizedBox(height: 12),
+          Text('Nothing here yet',
+            style: GoogleFonts.dmSans(
+              fontSize: 18, fontWeight: FontWeight.w500,
+              color: context.colors.muted.withAlpha(100), height: 1.3)),
+          const SizedBox(height: 4),
+          Text('Ctrl+N \u2014 new note', style: TextStyle(
+            fontSize: 11, fontFamily: context.colors.monoFontFamily,
+            color: context.colors.muted.withAlpha(80), letterSpacing: 0.06,
+          ),),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChecklistItem {
+  final int lineIndex;
+  final bool checked;
+  final String text;
+  const _ChecklistItem(this.lineIndex, this.checked, this.text);
+}
+
+class _CodeBlockBuilder extends MarkdownElementBuilder {
+  final Color codeColor;
+  _CodeBlockBuilder(this.codeColor);
+
+  @override
+  Widget? visitText(md.Text text, TextStyle? preferredStyle) {
+    return Text(
+      text.textContent,
+      style: TextStyle(
+        fontSize: 13,
+        fontFamily: 'JetBrains Mono',
+        color: codeColor,
+        height: 1.55,
+      ),
+    );
+  }
+}
+
+MarkdownStyleSheet _buildMarkdownStyle(AppColors c) {
+  return MarkdownStyleSheet(
+    h1: GoogleFonts.dmSans(
+      fontSize: 24, fontWeight: FontWeight.w700,
+      color: c.fg, letterSpacing: -0.02, height: 1.3),
+    h2: GoogleFonts.dmSans(
+      fontSize: 18, fontWeight: FontWeight.w600,
+      color: c.fg, letterSpacing: -0.01, height: 1.3),
+    h3: GoogleFonts.dmSans(
+      fontSize: 16, fontWeight: FontWeight.w600,
+      color: c.fg, height: 1.3),
+    p: GoogleFonts.dmSans(
+      fontSize: 15, fontWeight: FontWeight.w400,
+      color: c.fg, height: 1.6),
+    code: TextStyle(
+      fontSize: 13, fontFamily: c.monoFontFamily,
+      backgroundColor: c.listBg, color: c.fg),
+    codeblockDecoration: BoxDecoration(
+      color: c.sidebarBg,
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: c.border),
+    ),
+    codeblockPadding: const EdgeInsets.all(14),
+    blockquoteDecoration: BoxDecoration(
+      border: Border(left: BorderSide(color: c.accent, width: 3))),
+    blockquotePadding: const EdgeInsets.fromLTRB(16, 2, 0, 2),
+    a: TextStyle(color: c.accent),
+    strong: const TextStyle(fontWeight: FontWeight.w600),
+    listBullet: GoogleFonts.dmSans(
+      fontSize: 15, color: c.fg),
+    checkbox: GoogleFonts.dmSans(
+      fontSize: 15, color: c.accent),
+    del: TextStyle(
+      decoration: TextDecoration.lineThrough,
+      color: c.muted),
+    em: const TextStyle(fontStyle: FontStyle.italic),
+  );
+}
+
+class _TypeDropdown extends StatelessWidget {
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  const _TypeDropdown({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final isFinance = value == 'expense' || value == 'income';
+    final isTodo = value == 'todo';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: isFinance ? context.colors.accentDim : isTodo ? context.colors.accentDim : context.colors.listBg,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: isFinance ? context.colors.accent : isTodo ? context.colors.accent : context.colors.border,
+        ),
+      ),
+      child: PopupMenuButton<String>(
+        tooltip: 'Note type',
+        onSelected: onChanged,
+        position: PopupMenuPosition.under,
+        itemBuilder: (_) => const [
+          PopupMenuItem(value: 'text', child: Text('Text')),
+          PopupMenuItem(value: 'todo', child: Text('Todo')),
+          PopupMenuItem(value: 'expense', child: Text('Expense')),
+          PopupMenuItem(value: 'income', child: Text('Income')),
+        ],
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_label(value),
+                style: TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.w500,
+                  color: isFinance || isTodo ? context.colors.accent : context.colors.muted,
+                )),
+            const SizedBox(width: 4),
+            Icon(Icons.arrow_drop_down,
+                size: 16,
+                color: isFinance || isTodo ? context.colors.accent : context.colors.muted),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _label(String v) {
+    switch (v) {
+      case 'todo':
+        return 'Todo';
+      case 'expense':
+        return 'Expense';
+      case 'income':
+        return 'Income';
+      default:
+        return 'Text';
+    }
+  }
+}
+
+class _CurrencyDropdown extends StatelessWidget {
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  const _CurrencyDropdown({required this.value, required this.onChanged});
+
+  static const currencies = ['PHP', 'USD', 'EUR', 'GBP', 'JPY', 'INR'];
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: context.colors.listBg,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: context.colors.border),
+      ),
+      child: PopupMenuButton<String>(
+        tooltip: 'Currency',
+        onSelected: onChanged,
+        position: PopupMenuPosition.under,
+        itemBuilder: (_) => currencies
+            .map((code) => PopupMenuItem(
+                  value: code,
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        currencySpan(code, null),
+                        const TextSpan(text: ' '),
+                        TextSpan(text: code),
+                      ],
+                    ),
+                  ),
+                ))
+            .toList(),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text.rich(
+              TextSpan(
+                style: TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.w500,
+                  color: context.colors.fg,
+                ),
+                children: [
+                  currencySpan(value, null),
+                  const TextSpan(text: ' '),
+                  TextSpan(text: value),
+                ],
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(Icons.arrow_drop_down,
+                size: 16, color: context.colors.muted),
+          ],
+        ),
+      ),
+    );
+  }
+}

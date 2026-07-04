@@ -1,0 +1,25 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Mark shifted up 20% so the foot doesn't sit on the bottom edge -->
+    <group android:translateX="22" android:translateY="12">
+        <!-- Accent crossbar (slight overshoot on both sides) -->
+        <path
+            android:fillColor="#CC4D3C"
+            android:pathData="M 21 38 L 61 38 L 61 45 L 21 45 Z" />
+        <!-- Main stem -->
+        <path
+            android:fillColor="#1A242E"
+            android:pathData="M 36 22 L 46 22 L 46 65 L 36 65 Z" />
+        <!-- Base foot -->
+        <path
+            android:fillColor="#1A242E"
+            android:pathData="M 28 65 L 54 65 L 54 72 L 28 72 Z" />
+        <!-- Period: accent red square to the right of the foot -->
+        <path
+            android:fillColor="#CC4D3C"
+            android:pathData="M 50 60 L 58 60 L 58 68 L 50 68 Z" />
+    </group>
+</vector>

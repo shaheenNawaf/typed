@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 64" width="220" height="64">
+  <title>Typed wordmark</title>
+  <style>
+    .wm { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 52px; font-weight: 600; letter-spacing: -1.5px; }
+    .dark { fill: #1A242E; }
+    .accent { fill: #CC4D3C; }
+  </style>
+  <text x="0" y="48" class="wm">
+    <tspan class="dark">T</tspan><tspan class="dark">p</tspan><tspan class="accent">y</tspan><tspan class="dark">ped</tspan>
+  </text>
+</svg>
