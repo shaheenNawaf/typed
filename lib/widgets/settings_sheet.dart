@@ -8,12 +8,14 @@ class SettingsSheet extends StatelessWidget {
   final Future<void> Function() onExport;
   final Future<void> Function() onImport;
   final Future<void> Function()? onExportFinance;
+  final VoidCallback? onShowOnboarding;
 
   const SettingsSheet({
     super.key,
     required this.onExport,
     required this.onImport,
     this.onExportFinance,
+    this.onShowOnboarding,
   });
 
   static Future<void> show(
@@ -21,6 +23,7 @@ class SettingsSheet extends StatelessWidget {
     required Future<void> Function() onExport,
     required Future<void> Function() onImport,
     Future<void> Function()? onExportFinance,
+    VoidCallback? onShowOnboarding,
   }) {
     return showModalBottomSheet(
       context: context,
@@ -34,6 +37,7 @@ class SettingsSheet extends StatelessWidget {
           onExport: onExport,
           onImport: onImport,
           onExportFinance: onExportFinance,
+          onShowOnboarding: onShowOnboarding,
         ),
       ),
     );
@@ -190,6 +194,18 @@ class SettingsSheet extends StatelessWidget {
                   selected: controller.fontId == f.id,
                   onTap: () => controller.setFont(f.id),
                 ),
+              ),
+            ],
+            if (onShowOnboarding != null) ...[
+              const SizedBox(height: 4),
+              const Divider(height: 16, indent: 20, endIndent: 20),
+              _Option(
+                icon: Icons.tips_and_updates_outlined,
+                label: 'Show Welcome Note',
+                onTap: () {
+                  Navigator.pop(context);
+                  onShowOnboarding?.call();
+                },
               ),
             ],
             const SizedBox(height: 8),

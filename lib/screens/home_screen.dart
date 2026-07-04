@@ -12,6 +12,7 @@ import '../theme/app_colors.dart';
 import '../utils/backup.dart';
 import '../utils/finance_utils.dart';
 import '../utils/note_storage.dart';
+import '../utils/onboarding.dart';
 import '../utils/templates.dart';
 import '../widgets/brand_mark.dart';
 import '../widgets/settings_sheet.dart';
@@ -68,6 +69,19 @@ class _HomeScreenState extends State<HomeScreen> {
     if (hasData) {
       final loaded = await _storage.load();
       if (mounted) setState(() => notes = loaded);
+    } else {
+      final data = createOnboardingData();
+      if (mounted) {
+        setState(() {
+          notes = data.notes;
+          _budgets = data.budgets;
+          _currentNoteId = data.notes.first.id;
+          _showEditor = true;
+          _previewMode = true;
+        });
+      }
+      _storage.save(data.notes);
+      _storage.saveBudgets(data.budgets);
     }
     _generateRecurringEntries();
     final prefs = await SharedPreferences.getInstance();
@@ -770,12 +784,30 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _showOnboarding() {
+    final existing = notes.where((n) => n.id.endsWith('_welcome'));
+    if (existing.isNotEmpty) {
+      _selectNote(existing.first.id);
+    } else {
+      final data = createOnboardingData();
+      setState(() {
+        notes = [...data.notes, ...notes];
+        _currentNoteId = data.notes.first.id;
+        _showEditor = true;
+        _previewMode = true;
+      });
+      _storage.save(notes);
+    }
+    _showSnackBar('Welcome note created');
+  }
+
   void _openSettings() {
     SettingsSheet.show(
       context,
       onExport: _exportNotes,
       onImport: _importNotes,
       onExportFinance: _exportFinance,
+      onShowOnboarding: _showOnboarding,
     );
   }
 
