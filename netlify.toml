@@ -1,0 +1,6 @@
+[build]
+  command = "git clone --depth 1 -b stable https://github.com/flutter/flutter.git flutter_sdk && flutter_sdk/bin/flutter config --suppress-analytics && flutter_sdk/bin/flutter build web --release"
+  publish = "build/web"
+
+[build.environment]
+  FLUTTER_SUPPRESS_ANALYTICS = "true"
