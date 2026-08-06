@@ -7,7 +7,7 @@
     <!-- Typed splash logo: clean t. centered, using brand colors -->
     <group android:translateX="24" android:translateY="20">
         <path
-            android:fillColor="#CC4D3C"
+            android:fillColor="#1A242E"
             android:pathData="M 0 26 L 72 26 L 72 36 L 0 36 Z" />
         <path
             android:fillColor="#1A242E"

@@ -1,6 +1,7 @@
 import '../models/budget.dart';
 import '../models/money_entry.dart';
 import '../models/note.dart';
+import 'id.dart';
 
 class OnboardingData {
   final List<Note> notes;
@@ -9,7 +10,8 @@ class OnboardingData {
   const OnboardingData({required this.notes, required this.budgets});
 }
 
-const String kWelcomeContent = '# 👋 Welcome to Typed\n\n'
+const String kWelcomeContent =
+    '# 👋 Welcome to Typed\n\n'
     'Typed is a private, local-first workspace for notes and finances — '
     'everything stays on your device.\n\n'
     '## ✍️ Notes & Types\n'
@@ -35,18 +37,27 @@ const String kWelcomeContent = '# 👋 Welcome to Typed\n\n'
 
 OnboardingData createOnboardingData() {
   final now = DateTime.now();
-  final ts = now.millisecondsSinceEpoch;
   final today = DateTime(now.year, now.month, now.day);
   final yesterday = today.subtract(const Duration(days: 1));
 
   const months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
   final dateLabel = '${months[now.month - 1]} ${now.day}';
 
   final welcome = Note(
-    id: 'n${ts}_welcome',
+    id: '${generateId('n')}_welcome',
     title: 'Welcome to Typed',
     content: kWelcomeContent,
     tags: [],
@@ -57,9 +68,10 @@ OnboardingData createOnboardingData() {
   );
 
   final sampleFinance = Note(
-    id: 'n${ts}_finance',
+    id: '${generateId('n')}_finance',
     title: 'Quick expenses — $dateLabel',
-    content: '# Sample transactions\n\n'
+    content:
+        '# Sample transactions\n\n'
         'These entries show how finance tracking works. '
         'Add your own or delete these to start fresh.\n',
     tags: ['finance'],
@@ -67,7 +79,7 @@ OnboardingData createOnboardingData() {
     currency: 'PHP',
     amounts: [
       MoneyEntry(
-        id: 'm${ts}_income',
+        id: generateId('m'),
         amount: 15000,
         category: 'Freelance',
         date: yesterday,
@@ -76,7 +88,7 @@ OnboardingData createOnboardingData() {
         currency: 'PHP',
       ),
       MoneyEntry(
-        id: 'm${ts}_expense',
+        id: generateId('m'),
         amount: 180,
         category: 'Food & Drink',
         date: today,
@@ -92,11 +104,7 @@ OnboardingData createOnboardingData() {
   return OnboardingData(
     notes: [welcome, sampleFinance],
     budgets: [
-      Budget(
-        id: 'b${ts}_food',
-        category: 'Food & Drink',
-        limit: 10000,
-      ),
+      Budget(id: generateId('b'), category: 'Food & Drink', limit: 10000),
     ],
   );
 }

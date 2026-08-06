@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +14,7 @@ import '../models/money_entry.dart';
 import '../models/note.dart';
 import '../theme/app_colors.dart';
 import '../utils/finance_utils.dart';
+import '../utils/id.dart';
 import 'editor_toolbar.dart';
 import 'entry_sheet.dart';
 import 'image_picker_sheet.dart';
@@ -80,8 +82,9 @@ class _EditorState extends State<Editor> {
   bool _addingTag = false;
   final ImagePicker _picker = ImagePicker();
   List<Note> _linkSuggestions = [];
-  final TextRecognizer? _textRecognizer =
-      kIsWeb ? null : TextRecognizer(script: TextRecognitionScript.latin);
+  final TextRecognizer? _textRecognizer = kIsWeb
+      ? null
+      : TextRecognizer(script: TextRecognitionScript.latin);
   int? _checklistEditIdx;
   final TextEditingController _checklistAddCtrl = TextEditingController();
   final TextEditingController _checklistEditCtrl = TextEditingController();
@@ -111,7 +114,9 @@ class _EditorState extends State<Editor> {
     _checklistAddCtrl.dispose();
     _checklistEditCtrl.dispose();
     _checklistEditFocus.dispose();
-    try { _textRecognizer?.close(); } catch (_) {}
+    try {
+      _textRecognizer?.close();
+    } catch (_) {}
     super.dispose();
   }
 
@@ -168,11 +173,13 @@ class _EditorState extends State<Editor> {
     }
     final q = query.toLowerCase();
     final matches = widget.allNotes
-        .where((n) =>
-            !n.isArchived &&
-            !n.isDeleted &&
-            n.id != widget.note?.id &&
-            n.title.toLowerCase().contains(q))
+        .where(
+          (n) =>
+              !n.isArchived &&
+              !n.isDeleted &&
+              n.id != widget.note?.id &&
+              n.title.toLowerCase().contains(q),
+        )
         .take(5)
         .toList();
     setState(() => _linkSuggestions = matches);
@@ -196,8 +203,9 @@ class _EditorState extends State<Editor> {
     final insertion = '[[${note.id}|${note.title}]]';
     final newText = '$before$insertion$after';
     _contentCtrl.text = newText;
-    _contentCtrl.selection =
-        TextSelection.collapsed(offset: before.length + insertion.length);
+    _contentCtrl.selection = TextSelection.collapsed(
+      offset: before.length + insertion.length,
+    );
     _syncContent();
     setState(() => _linkSuggestions = []);
   }
@@ -217,15 +225,12 @@ class _EditorState extends State<Editor> {
       },
     );
     // Second pass: resolve [[title]] (old syntax, backward compat)
-    rendered = rendered.replaceAllMapped(
-      RegExp(r'\[\[([^\]\n|]+)\]\]'),
-      (m) {
-        final title = m.group(1)?.trim() ?? '';
-        final id = byTitle[title];
-        if (id == null) return m.group(0) ?? '';
-        return '[$title](#note:$id)';
-      },
-    );
+    rendered = rendered.replaceAllMapped(RegExp(r'\[\[([^\]\n|]+)\]\]'), (m) {
+      final title = m.group(1)?.trim() ?? '';
+      final id = byTitle[title];
+      if (id == null) return m.group(0) ?? '';
+      return '[$title](#note:$id)';
+    });
     final note = widget.note;
     if (note != null && note.type != 'text' && note.amounts.isNotEmpty) {
       rendered = '$rendered\n\n${_entriesMarkdown(note)}';
@@ -238,14 +243,14 @@ class _EditorState extends State<Editor> {
     final sorted = note.amounts.toList()
       ..sort((a, b) => b.date.compareTo(a.date));
 
-    final currencies = sorted
-        .map((e) => e.currency ?? note.currency)
-        .toSet();
+    final currencies = sorted.map((e) => e.currency ?? note.currency).toSet();
     final mixed = currencies.length > 1;
 
     final rows = StringBuffer();
     if (mixed) {
-      rows.write('| Date | Category | Currency | Amount |\n| --- | --- | --- | --- |\n');
+      rows.write(
+        '| Date | Category | Currency | Amount |\n| --- | --- | --- | --- |\n',
+      );
     } else {
       rows.write('| Date | Category | Amount |\n| --- | --- | --- |\n');
     }
@@ -352,14 +357,16 @@ class _EditorState extends State<Editor> {
     final selEnd = _contentCtrl.selection.end;
     final sel = _contentCtrl.text.substring(selStart, selEnd);
 
-    final newText = _contentCtrl.text.substring(0, selStart) +
+    final newText =
+        _contentCtrl.text.substring(0, selStart) +
         before +
         sel +
         after +
         _contentCtrl.text.substring(selEnd);
     _contentCtrl.text = newText;
     _contentCtrl.selection = TextSelection.collapsed(
-        offset: selStart + before.length);
+      offset: selStart + before.length,
+    );
     _syncContent();
   }
 
@@ -368,12 +375,14 @@ class _EditorState extends State<Editor> {
     final lastNewline = _contentCtrl.text.lastIndexOf('\n', selStart - 1);
     final lineStart = lastNewline + 1;
 
-    final newText = _contentCtrl.text.substring(0, lineStart) +
+    final newText =
+        _contentCtrl.text.substring(0, lineStart) +
         prefix +
         _contentCtrl.text.substring(lineStart);
     _contentCtrl.text = newText;
-    _contentCtrl.selection =
-        TextSelection.collapsed(offset: lineStart + prefix.length);
+    _contentCtrl.selection = TextSelection.collapsed(
+      offset: lineStart + prefix.length,
+    );
     _syncContent();
   }
 
@@ -399,13 +408,20 @@ class _EditorState extends State<Editor> {
       final pad = w - s.length;
       return s + (' ' * pad);
     }
+
     final headerCells = List.generate(
-        cols, (i) => pad('Col ${i + 1}', widths[i])).join(' | ');
+      cols,
+      (i) => pad('Col ${i + 1}', widths[i]),
+    ).join(' | ');
     final sepCells = List.generate(
-        cols, (i) => sepTemplate.padRight(widths[i])).join(' | ');
+      cols,
+      (i) => sepTemplate.padRight(widths[i]),
+    ).join(' | ');
     final bodyCells = List.generate(rows, (_) {
       final cells = List.generate(
-          cols, (i) => ' '.padRight(widths[i])).join(' | ');
+        cols,
+        (i) => ' '.padRight(widths[i]),
+      ).join(' | ');
       return '| $cells |';
     }).join('\n');
 
@@ -415,10 +431,12 @@ class _EditorState extends State<Editor> {
     final insertion = needsLeadingNewline ? '\n$table' : table;
 
     final selStart = _contentCtrl.selection.start;
-    final newText = cur.substring(0, selStart) + insertion + cur.substring(selStart);
+    final newText =
+        cur.substring(0, selStart) + insertion + cur.substring(selStart);
     _contentCtrl.text = newText;
     _contentCtrl.selection = TextSelection.collapsed(
-        offset: selStart + insertion.length);
+      offset: selStart + insertion.length,
+    );
     _syncContent();
   }
 
@@ -451,25 +469,47 @@ class _EditorState extends State<Editor> {
     final noteId = widget.note?.id;
     if (noteId == null) return;
 
+    if (kIsWeb) {
+      final bytes = await picked.readAsBytes();
+      final ext = picked.name.contains('.')
+          ? picked.name.split('.').last.toLowerCase()
+          : 'jpeg';
+      final mime = ext == 'png' ? 'image/png' : 'image/jpeg';
+      final dataUri = 'data:$mime;base64,${base64Encode(bytes)}';
+      final prefix =
+          _contentCtrl.text.isEmpty || _contentCtrl.text.endsWith('\n\n')
+          ? ''
+          : '\n\n';
+      _contentCtrl.text = '${_contentCtrl.text}$prefix![image]($dataUri)\n';
+      _contentCtrl.selection = TextSelection.collapsed(
+        offset: _contentCtrl.text.length,
+      );
+      _syncContent();
+      widget.onImageAdded(dataUri);
+      return;
+    }
+
     final docsDir = await getApplicationDocumentsDirectory();
     final imagesDir = Directory('${docsDir.path}/images/$noteId');
     if (!await imagesDir.exists()) {
       await imagesDir.create(recursive: true);
     }
 
-    final imageId = DateTime.now().millisecondsSinceEpoch.toString();
+    final imageId = generateId('img');
     final ext = picked.name.contains('.') ? picked.name.split('.').last : 'jpg';
     final dest = File('${imagesDir.path}/$imageId.$ext');
     await File(picked.path).copy(dest.path);
 
     // Insert image markdown at the end of the content
-    final prefix = _contentCtrl.text.isEmpty || _contentCtrl.text.endsWith('\n\n')
+    final prefix =
+        _contentCtrl.text.isEmpty || _contentCtrl.text.endsWith('\n\n')
         ? ''
         : '\n\n';
     final imageMarkdown = '$prefix![image](${dest.path})\n';
     _contentCtrl.text = _contentCtrl.text + imageMarkdown;
     _contentCtrl.selection = TextSelection.collapsed(
-        offset: _contentCtrl.text.length);
+      offset: _contentCtrl.text.length,
+    );
     _syncContent();
     widget.onImageAdded(dest.path);
 
@@ -505,7 +545,8 @@ class _EditorState extends State<Editor> {
                     final addition = '\n$quoted\n';
                     _contentCtrl.text = _contentCtrl.text + addition;
                     _contentCtrl.selection = TextSelection.collapsed(
-                        offset: _contentCtrl.text.length);
+                      offset: _contentCtrl.text.length,
+                    );
                     _syncContent();
                   }
                 },
@@ -521,9 +562,9 @@ class _EditorState extends State<Editor> {
 
   void _showError(Object e) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Image error: $e')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Image error: $e')));
   }
 
   void _openImagePicker() {
@@ -540,49 +581,55 @@ class _EditorState extends State<Editor> {
 
     return CallbackShortcuts(
       bindings: {
-        SingleActivator(LogicalKeyboardKey.keyB, control: true):
-            () => _insertMD('**|**'),
-        SingleActivator(LogicalKeyboardKey.keyI, control: true):
-            () => _insertMD('*|*'),
-        SingleActivator(LogicalKeyboardKey.keyK, control: true):
-            () => _insertMD('[|](url)'),
+        SingleActivator(LogicalKeyboardKey.keyB, control: true): () =>
+            _insertMD('**|**'),
+        SingleActivator(LogicalKeyboardKey.keyI, control: true): () =>
+            _insertMD('*|*'),
+        SingleActivator(LogicalKeyboardKey.keyK, control: true): () =>
+            _insertMD('[|](url)'),
         SingleActivator(LogicalKeyboardKey.keyS, control: true): () {
           _syncContent();
           widget.onSaveNow?.call();
         },
       },
       child: Container(
-      color: context.colors.bg,
-      child: Column(
-        children: [
-          _buildTitleBar(),
-          if (widget.note != null && widget.note!.type != 'expense' && widget.note!.type != 'income')
-            _buildTagBar(),
-          if (widget.note != null && (widget.note!.type == 'expense' || widget.note!.type == 'income'))
-            _buildFinanceContent(),
-          Expanded(
-            child: widget.note != null && widget.note!.type == 'todo'
-                ? _buildChecklistPanel()
-                : _buildBody(),
-          ),
-          EditorToolbar(
+        color: context.colors.bg,
+        child: Column(
+          children: [
+            _buildTitleBar(),
+            if (widget.note != null &&
+                widget.note!.type != 'expense' &&
+                widget.note!.type != 'income')
+              _buildTagBar(),
+            if (widget.note != null &&
+                (widget.note!.type == 'expense' ||
+                    widget.note!.type == 'income'))
+              _buildFinanceContent(),
+            Expanded(
+              child: widget.note != null && widget.note!.type == 'todo'
+                  ? _buildChecklistPanel()
+                  : _buildBody(),
+            ),
+            EditorToolbar(
               onInsertMD: (p) => _insertMD(p),
               onInsertLine: (p) => _insertLine(p),
-              onInsertTable: (rows, cols, align) => _insertTable(rows, cols, align),
+              onInsertTable: (rows, cols, align) =>
+                  _insertTable(rows, cols, align),
               previewMode: widget.previewMode,
               onTogglePreview: widget.onTogglePreview,
               wordCount: _wordCount,
               onImagePick: _openImagePicker,
             ),
-        ],
+          ],
+        ),
       ),
-    ),
     );
   }
 
   Widget _buildTitleBar() {
     final note = widget.note;
-    final isFinance = note != null && (note.type == 'expense' || note.type == 'income');
+    final isFinance =
+        note != null && (note.type == 'expense' || note.type == 'income');
     final isMobile = MediaQuery.of(context).size.width < 600;
     return Container(
       padding: EdgeInsets.fromLTRB(_horizontalPad, 14, _horizontalPad, 10),
@@ -599,8 +646,10 @@ class _EditorState extends State<Editor> {
                 _syncContent();
               },
               style: GoogleFonts.dmSans(
-                fontSize: 22, fontWeight: FontWeight.w600,
-                color: context.colors.fg, height: 1.2,
+                fontSize: 22,
+                fontWeight: FontWeight.w600,
+                color: context.colors.fg,
+                height: 1.2,
               ),
               decoration: InputDecoration(
                 hintText: 'Note title...',
@@ -613,10 +662,7 @@ class _EditorState extends State<Editor> {
           if (note != null) ...[
             if (!isMobile) ...[
               const SizedBox(width: 8),
-              _TypeDropdown(
-                value: note.type,
-                onChanged: _setType,
-              ),
+              _TypeDropdown(value: note.type, onChanged: _setType),
               if (isFinance) ...[
                 const SizedBox(width: 8),
                 _CurrencyDropdown(
@@ -625,213 +671,308 @@ class _EditorState extends State<Editor> {
                 ),
               ],
             ],
-           ],
-           if (note != null && (widget.onArchive != null || widget.onTogglePin != null))
-             PopupMenuButton<String>(
-               icon: Icon(Icons.more_horiz, size: 20, color: context.colors.muted),
-               tooltip: 'Note actions',
-               position: PopupMenuPosition.under,
-               onSelected: (action) {
-                 switch (action) {
-                   case 'pin':
-                     widget.onTogglePin?.call(note);
-                   case 'archive':
-                     widget.onArchive?.call(note);
-                   case 'delete':
-                     widget.onDelete?.call(note);
-                    case 'type:text':
-                      _setType('text');
-                    case 'type:todo':
-                      _setType('todo');
-                    case 'type:expense':
-                     _setType('expense');
-                   case 'type:income':
-                     _setType('income');
-                   case 'currency:PHP':
-                     _setCurrency('PHP');
-                   case 'currency:USD':
-                     _setCurrency('USD');
-                   case 'currency:EUR':
-                     _setCurrency('EUR');
-                   case 'currency:GBP':
-                     _setCurrency('GBP');
-                   case 'currency:JPY':
-                     _setCurrency('JPY');
-                   case 'currency:INR':
-                     _setCurrency('INR');
-                 }
-               },
-               itemBuilder: (_) {
-                 final isMobile2 = MediaQuery.of(context).size.width < 600;
-                 final items = <PopupMenuEntry<String>>[];
-                 items.add(
-                   PopupMenuItem(
-                     value: 'pin',
-                     child: Row(children: [
-                       Icon(note.isPinned ? Icons.push_pin : Icons.push_pin_outlined, size: 18),
-                       const SizedBox(width: 8),
-                       Text(note.isPinned ? 'Unpin' : 'Pin'),
-                     ]),
-                   ),
-                 );
-                 items.add(
-                   PopupMenuItem(
-                     value: 'archive',
-                     child: Row(children: [
-                       const Icon(Icons.archive_outlined, size: 18),
-                       const SizedBox(width: 8),
-                       const Text('Archive'),
-                     ]),
-                   ),
-                 );
-                 if (isMobile2) {
-                   items.add(const PopupMenuDivider());
-                   items.add(
-                     PopupMenuItem(
-                       value: 'type:text',
-                       child: Row(children: [
-                         const Icon(Icons.article_outlined, size: 18),
-                         const SizedBox(width: 8),
-                         Row(children: [
-                           Text('Type: ', style: TextStyle(color: context.colors.muted)),
-                           const Text('Text'),
-                         ]),
-                        ]),
-                      ),
-                    );
-                    items.add(
-                      PopupMenuItem(
-                        value: 'type:todo',
-                        child: Row(children: [
-                          const Icon(Icons.checklist_outlined, size: 18, color: Color(0xFFCC4D3C)),
+          ],
+          if (note != null &&
+              (widget.onArchive != null || widget.onTogglePin != null))
+            PopupMenuButton<String>(
+              icon: Icon(
+                Icons.more_horiz,
+                size: 20,
+                color: context.colors.muted,
+              ),
+              tooltip: 'Note actions',
+              position: PopupMenuPosition.under,
+              onSelected: (action) {
+                switch (action) {
+                  case 'pin':
+                    widget.onTogglePin?.call(note);
+                  case 'archive':
+                    widget.onArchive?.call(note);
+                  case 'delete':
+                    widget.onDelete?.call(note);
+                  case 'type:text':
+                    _setType('text');
+                  case 'type:todo':
+                    _setType('todo');
+                  case 'type:expense':
+                    _setType('expense');
+                  case 'type:income':
+                    _setType('income');
+                  case 'currency:PHP':
+                    _setCurrency('PHP');
+                  case 'currency:USD':
+                    _setCurrency('USD');
+                  case 'currency:EUR':
+                    _setCurrency('EUR');
+                  case 'currency:GBP':
+                    _setCurrency('GBP');
+                  case 'currency:JPY':
+                    _setCurrency('JPY');
+                  case 'currency:INR':
+                    _setCurrency('INR');
+                }
+              },
+              itemBuilder: (_) {
+                final isMobile2 = MediaQuery.of(context).size.width < 600;
+                final items = <PopupMenuEntry<String>>[];
+                items.add(
+                  PopupMenuItem(
+                    value: 'pin',
+                    child: Row(
+                      children: [
+                        Icon(
+                          note.isPinned
+                              ? Icons.push_pin
+                              : Icons.push_pin_outlined,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(note.isPinned ? 'Unpin' : 'Pin'),
+                      ],
+                    ),
+                  ),
+                );
+                items.add(
+                  PopupMenuItem(
+                    value: 'archive',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.archive_outlined, size: 18),
+                        const SizedBox(width: 8),
+                        const Text('Archive'),
+                      ],
+                    ),
+                  ),
+                );
+                if (isMobile2) {
+                  items.add(const PopupMenuDivider());
+                  items.add(
+                    PopupMenuItem(
+                      value: 'type:text',
+                      child: Row(
+                        children: [
+                          const Icon(Icons.article_outlined, size: 18),
                           const SizedBox(width: 8),
-                          Row(children: [
-                            Text('Type: ', style: TextStyle(color: context.colors.muted)),
-                            const Text('Todo'),
-                          ]),
-                        ]),
+                          Row(
+                            children: [
+                              Text(
+                                'Type: ',
+                                style: TextStyle(color: context.colors.muted),
+                              ),
+                              const Text('Text'),
+                            ],
+                          ),
+                        ],
                       ),
-                    );
-                    items.add(
-                      PopupMenuItem(
-                        value: 'type:expense',
-                       child: Row(children: [
-                         const Icon(Icons.arrow_upward, size: 18, color: Color(0xFFCC4D3C)),
-                         const SizedBox(width: 8),
-                         Row(children: [
-                           Text('Type: ', style: TextStyle(color: context.colors.muted)),
-                           const Text('Expense'),
-                         ]),
-                       ]),
-                     ),
-                   );
-                   items.add(
-                     PopupMenuItem(
-                       value: 'type:income',
-                       child: Row(children: [
-                         const Icon(Icons.arrow_downward, size: 18, color: Color(0xFF2D8659)),
-                         const SizedBox(width: 8),
-                         Row(children: [
-                           Text('Type: ', style: TextStyle(color: context.colors.muted)),
-                           const Text('Income'),
-                         ]),
-                       ]),
-                     ),
-                   );
-                   if (isFinance) {
-                     items.add(const PopupMenuDivider());
-                     for (final c in _CurrencyDropdown.currencies) {
-                       items.add(
-                         PopupMenuItem(
-                           value: 'currency:$c',
-                           child: Row(children: [
-                             const Icon(Icons.attach_money, size: 18),
-                             const SizedBox(width: 8),
-                             Row(children: [
-                               Text('Currency: ', style: TextStyle(color: context.colors.muted)),
-                               Text(c),
-                             ]),
-                           ]),
-                         ),
-                       );
-                     }
-                   }
-                 }
-                 items.add(const PopupMenuDivider());
-                 items.add(
-                   PopupMenuItem(
-                     value: 'delete',
-                     child: Row(children: [
-                       Icon(Icons.delete_outline, size: 18, color: context.colors.destructive),
-                       const SizedBox(width: 8),
-                       Text('Delete', style: TextStyle(color: context.colors.destructive)),
-                     ]),
-                   ),
-                 );
-                 return items;
-               },
-             ),
-         ],
-       ),
-     );
+                    ),
+                  );
+                  items.add(
+                    PopupMenuItem(
+                      value: 'type:todo',
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.checklist_outlined,
+                            size: 18,
+                            color: Color(0xFFCC4D3C),
+                          ),
+                          const SizedBox(width: 8),
+                          Row(
+                            children: [
+                              Text(
+                                'Type: ',
+                                style: TextStyle(color: context.colors.muted),
+                              ),
+                              const Text('Todo'),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                  items.add(
+                    PopupMenuItem(
+                      value: 'type:expense',
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.arrow_upward,
+                            size: 18,
+                            color: Color(0xFFCC4D3C),
+                          ),
+                          const SizedBox(width: 8),
+                          Row(
+                            children: [
+                              Text(
+                                'Type: ',
+                                style: TextStyle(color: context.colors.muted),
+                              ),
+                              const Text('Expense'),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                  items.add(
+                    PopupMenuItem(
+                      value: 'type:income',
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.arrow_downward,
+                            size: 18,
+                            color: Color(0xFF2D8659),
+                          ),
+                          const SizedBox(width: 8),
+                          Row(
+                            children: [
+                              Text(
+                                'Type: ',
+                                style: TextStyle(color: context.colors.muted),
+                              ),
+                              const Text('Income'),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                  if (isFinance) {
+                    items.add(const PopupMenuDivider());
+                    for (final c in _CurrencyDropdown.currencies) {
+                      items.add(
+                        PopupMenuItem(
+                          value: 'currency:$c',
+                          child: Row(
+                            children: [
+                              const Icon(Icons.attach_money, size: 18),
+                              const SizedBox(width: 8),
+                              Row(
+                                children: [
+                                  Text(
+                                    'Currency: ',
+                                    style: TextStyle(
+                                      color: context.colors.muted,
+                                    ),
+                                  ),
+                                  Text(c),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }
+                  }
+                }
+                items.add(const PopupMenuDivider());
+                items.add(
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.delete_outline,
+                          size: 18,
+                          color: context.colors.destructive,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Delete',
+                          style: TextStyle(color: context.colors.destructive),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+                return items;
+              },
+            ),
+        ],
+      ),
+    );
   }
 
   Widget _buildFinanceContent() {
     final note = widget.note;
     if (note == null) return const SizedBox.shrink();
 
+    final currencyCounts = <String, int>{};
+    for (final entry in note.amounts) {
+      final currency = entry.currency ?? note.currency ?? 'PHP';
+      currencyCounts[currency] = (currencyCounts[currency] ?? 0) + 1;
+    }
+    final currency = currencyCounts.entries.fold<String>(
+      note.currency ?? 'PHP',
+      (current, entry) =>
+          entry.value > (currencyCounts[current] ?? 0) ? entry.key : current,
+    );
     final expenses = note.amounts
-        .where((e) => (e.type ?? note.type) == 'expense')
+        .where((e) =>
+            (e.type ?? note.type) == 'expense' &&
+            (e.currency ?? note.currency ?? 'PHP') == currency)
         .toList();
     final incomes = note.amounts
-        .where((e) => (e.type ?? note.type) == 'income')
+        .where((e) =>
+            (e.type ?? note.type) == 'income' &&
+            (e.currency ?? note.currency ?? 'PHP') == currency)
         .toList();
-    final totalExpenses =
-        expenses.fold<double>(0, (s, e) => s + e.amount);
+    final totalExpenses = expenses.fold<double>(0, (s, e) => s + e.amount);
     final totalIncome = incomes.fold<double>(0, (s, e) => s + e.amount);
     final netAmount = totalIncome - totalExpenses;
-    final currency = note.currency ?? 'PHP';
-
-    return Container(
-      margin: EdgeInsets.fromLTRB(_horizontalPad, 12, _horizontalPad, 0),
-      decoration: BoxDecoration(
-        color: context.colors.listBg,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: context.colors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildSummaryCards(totalExpenses, totalIncome, netAmount, currency),
-          if (note.amounts.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Divider(height: 1, color: context.colors.border.withAlpha(100)),
-            const SizedBox(height: 8),
-            ...note.amounts.asMap().entries.expand((e) => [
-              if (e.key > 0) const SizedBox(height: 8),
-              _buildTransactionItem(note, e.value),
-            ]),
-            const SizedBox(height: 6),
-            _buildAddEntryButton(note),
-            const SizedBox(height: 12),
-          ] else ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              child: Center(
-                child: Text('No entries yet. Tap "+ Entry" to add one.',
-                    style: TextStyle(fontSize: 12, color: context.colors.muted)),
+    return Flexible(
+      child: Container(
+        margin: EdgeInsets.fromLTRB(_horizontalPad, 12, _horizontalPad, 0),
+        decoration: BoxDecoration(
+          color: context.colors.listBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: context.colors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildSummaryCards(totalExpenses, totalIncome, netAmount, currency),
+            if (note.amounts.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Divider(height: 1, color: context.colors.border.withAlpha(100)),
+              const SizedBox(height: 8),
+              Expanded(
+                child: ListView.separated(
+                  padding: EdgeInsets.zero,
+                  itemCount: note.amounts.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (_, index) =>
+                      _buildTransactionItem(note, note.amounts[index]),
+                ),
               ),
-            ),
-            _buildAddEntryButton(note),
-            const SizedBox(height: 12),
+              const SizedBox(height: 6),
+              _buildAddEntryButton(note),
+              const SizedBox(height: 12),
+            ] else ...[
+              Expanded(
+                child: Center(
+                  child: Text(
+                    'No entries yet. Tap "+ Entry" to add one.',
+                    style: TextStyle(fontSize: 12, color: context.colors.muted),
+                  ),
+                ),
+              ),
+              _buildAddEntryButton(note),
+              const SizedBox(height: 12),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
 
-  Widget _buildSummaryCards(double totalExpenses, double totalIncome,
-      double netAmount, String currency) {
+  Widget _buildSummaryCards(
+    double totalExpenses,
+    double totalIncome,
+    double netAmount,
+    String currency,
+  ) {
     final expenseColor = const Color(0xFFCC4D3C);
     final incomeColor = const Color(0xFF2D8659);
     final netColor = netAmount >= 0 ? incomeColor : expenseColor;
@@ -842,15 +983,31 @@ class _EditorState extends State<Editor> {
         children: [
           Row(
             children: [
-              Flexible(child: _summaryCard('EXPENSES', totalExpenses, expenseColor, currency)),
+              Flexible(
+                child: _summaryCard(
+                  'EXPENSES',
+                  totalExpenses,
+                  expenseColor,
+                  currency,
+                ),
+              ),
               const SizedBox(width: 8),
-              Flexible(child: _summaryCard('INCOME', totalIncome, incomeColor, currency)),
+              Flexible(
+                child: _summaryCard(
+                  'INCOME',
+                  totalIncome,
+                  incomeColor,
+                  currency,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 8),
           Row(
             children: [
-              Flexible(child: _summaryCard('NET', netAmount, netColor, currency)),
+              Flexible(
+                child: _summaryCard('NET', netAmount, netColor, currency),
+              ),
               const Spacer(),
             ],
           ),
@@ -859,7 +1016,12 @@ class _EditorState extends State<Editor> {
     );
   }
 
-  Widget _summaryCard(String label, double value, Color color, String currency) {
+  Widget _summaryCard(
+    String label,
+    double value,
+    Color color,
+    String currency,
+  ) {
     return Container(
       height: 80,
       padding: const EdgeInsets.all(12),
@@ -871,13 +1033,15 @@ class _EditorState extends State<Editor> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                color: color,
-                letterSpacing: 0.5,
-              )),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: color,
+              letterSpacing: 0.5,
+            ),
+          ),
           Text.rich(
             TextSpan(
               style: TextStyle(
@@ -888,8 +1052,10 @@ class _EditorState extends State<Editor> {
               children: [
                 currencySpan(currency, null),
                 TextSpan(
-                  text: formatNumber(value.abs(),
-                      decimals: currency == 'JPY' ? 0 : 2),
+                  text: formatNumber(
+                    value,
+                    decimals: currency == 'JPY' ? 0 : 2,
+                  ),
                 ),
               ],
             ),
@@ -911,27 +1077,33 @@ class _EditorState extends State<Editor> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Icon(_categoryIcon(e.category),
-                size: 20, color: context.colors.muted),
+            Icon(
+              _categoryIcon(e.category),
+              size: 20,
+              color: context.colors.muted,
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(e.category,
+                  Text(
+                    e.category,
+                    style: TextStyle(fontSize: 13, color: context.colors.fg),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (e.note != null && e.note!.isNotEmpty)
+                    Text(
+                      e.note!,
                       style: TextStyle(
-                        fontSize: 13, color: context.colors.fg,
+                        fontSize: 11,
+                        color: context.colors.muted,
                       ),
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
-                  if (e.note != null && e.note!.isNotEmpty)
-                    Text(e.note!,
-                        style: TextStyle(
-                          fontSize: 11, color: context.colors.muted,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                 ],
               ),
             ),
@@ -943,7 +1115,8 @@ class _EditorState extends State<Editor> {
                 Text.rich(
                   TextSpan(
                     style: TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w500,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
                       color: effectiveType == 'income'
                           ? context.colors.income
                           : context.colors.fg,
@@ -951,8 +1124,10 @@ class _EditorState extends State<Editor> {
                     children: [
                       currencySpan(effectiveCurrencySym, null),
                       TextSpan(
-                        text: formatNumber(e.amount,
-                            decimals: effectiveCurrencySym == 'JPY' ? 0 : 2),
+                        text: formatNumber(
+                          e.amount,
+                          decimals: effectiveCurrencySym == 'JPY' ? 0 : 2,
+                        ),
                       ),
                     ],
                   ),
@@ -960,7 +1135,8 @@ class _EditorState extends State<Editor> {
                 Text(
                   '${e.date.hour.toString().padLeft(2, '0')}:${e.date.minute.toString().padLeft(2, '0')}',
                   style: TextStyle(
-                    fontSize: 10, fontFamily: context.colors.monoFontFamily,
+                    fontSize: 10,
+                    fontFamily: context.colors.monoFontFamily,
                     color: context.colors.muted,
                   ),
                 ),
@@ -969,8 +1145,7 @@ class _EditorState extends State<Editor> {
             if (e.isRecurring)
               Padding(
                 padding: const EdgeInsets.only(left: 8),
-                child: Icon(Icons.loop,
-                    size: 12, color: context.colors.muted),
+                child: Icon(Icons.loop, size: 12, color: context.colors.muted),
               ),
             InkWell(
               onTap: () => EntrySheet.show(
@@ -986,16 +1161,18 @@ class _EditorState extends State<Editor> {
               ),
               child: Padding(
                 padding: const EdgeInsets.all(4),
-                child: Icon(Icons.edit_outlined,
-                    size: 14, color: context.colors.muted),
+                child: Icon(
+                  Icons.edit_outlined,
+                  size: 14,
+                  color: context.colors.muted,
+                ),
               ),
             ),
             InkWell(
               onTap: () => _removeEntry(e.id),
               child: Padding(
                 padding: const EdgeInsets.all(4),
-                child: Icon(Icons.close,
-                    size: 14, color: context.colors.muted),
+                child: Icon(Icons.close, size: 14, color: context.colors.muted),
               ),
             ),
           ],
@@ -1105,9 +1282,11 @@ class _EditorState extends State<Editor> {
     final items = <_ChecklistItem>[];
     final lines = text.split('\n');
     for (int i = 0; i < lines.length; i++) {
-      final m = RegExp(r'^\s*-\s+\[([ x])\]\s+(.*)$').firstMatch(lines[i]);
+      final m = RegExp(r'^\s*-\s+\[([ xX])\]\s+(.*)$').firstMatch(lines[i]);
       if (m != null) {
-        items.add(_ChecklistItem(i, m.group(1) == 'x', m.group(2) ?? ''));
+        items.add(
+          _ChecklistItem(i, m.group(1)!.toLowerCase() == 'x', m.group(2) ?? ''),
+        );
       }
     }
     return items;
@@ -1115,9 +1294,10 @@ class _EditorState extends State<Editor> {
 
   void _toggleItem(int lineIndex, bool checked) {
     final lines = _contentCtrl.text.split('\n');
-    lines[lineIndex] = checked
-        ? lines[lineIndex].replaceFirst('- [ ]', '- [x]')
-        : lines[lineIndex].replaceFirst('- [x]', '- [ ]');
+    lines[lineIndex] = lines[lineIndex].replaceFirst(
+      RegExp(r'\[[ xX]\]'),
+      checked ? '[x]' : '[ ]',
+    );
     _contentCtrl.text = lines.join('\n');
     _syncContent();
     setState(() {});
@@ -1146,7 +1326,7 @@ class _EditorState extends State<Editor> {
     setState(() {});
   }
 
-  void _submitEdit(int lineIndex, int visualIndex) {
+  void _submitEdit(int lineIndex, int visualIndex, {bool addNext = false}) {
     final text = _checklistEditCtrl.text.trim();
     if (text.isEmpty) {
       if (visualIndex > 0) _deleteItem(lineIndex);
@@ -1157,6 +1337,13 @@ class _EditorState extends State<Editor> {
     final lines = _contentCtrl.text.split('\n');
     final m = RegExp(r'^(\s*-\s+\[[ x]\]\s+).*$').firstMatch(lines[lineIndex]);
     if (m != null) lines[lineIndex] = '${m.group(1)}$text';
+    if (!addNext) {
+      _contentCtrl.text = lines.join('\n');
+      _syncContent();
+      _checklistEditIdx = null;
+      setState(() {});
+      return;
+    }
     lines.insert(lineIndex + 1, '- [ ] ');
     _contentCtrl.text = lines.join('\n');
     _syncContent();
@@ -1186,17 +1373,25 @@ class _EditorState extends State<Editor> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.checklist_outlined,
-                                size: 40, color: c.muted.withAlpha(80)),
+                            Icon(
+                              Icons.checklist_outlined,
+                              size: 40,
+                              color: c.muted.withAlpha(80),
+                            ),
                             const SizedBox(height: 12),
-                            Text('No items yet',
-                                style: GoogleFonts.dmSans(
-                                  fontSize: 18, fontWeight: FontWeight.w500,
-                                  color: c.fg)),
+                            Text(
+                              'No items yet',
+                              style: GoogleFonts.dmSans(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w500,
+                                color: c.fg,
+                              ),
+                            ),
                             const SizedBox(height: 4),
-                            Text('Add your first to-do item below.',
-                                style: TextStyle(
-                                  fontSize: 13, color: c.muted)),
+                            Text(
+                              'Add your first to-do item below.',
+                              style: TextStyle(fontSize: 13, color: c.muted),
+                            ),
                           ],
                         ),
                       ),
@@ -1213,8 +1408,10 @@ class _EditorState extends State<Editor> {
               child: TextButton.icon(
                 onPressed: _showRawDialog,
                 icon: Icon(Icons.edit_outlined, size: 14, color: c.muted),
-                label: Text('Edit raw',
-                    style: TextStyle(fontSize: 12, color: c.muted)),
+                label: Text(
+                  'Edit raw',
+                  style: TextStyle(fontSize: 12, color: c.muted),
+                ),
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
                   minimumSize: Size.zero,
@@ -1234,29 +1431,41 @@ class _EditorState extends State<Editor> {
     final editing = _checklistEditIdx == index;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(vertical: 1),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          GestureDetector(
-            onTap: () => _toggleItem(item.lineIndex, !item.checked),
-            child: Container(
-              width: 22, height: 22,
-              margin: const EdgeInsets.only(top: 3),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: item.checked ? c.accent : c.muted,
-                  width: 2,
+          Semantics(
+            button: true,
+            checked: item.checked,
+            label: item.text.isEmpty ? 'Checklist item' : item.text,
+            child: InkWell(
+              onTap: () => _toggleItem(item.lineIndex, !item.checked),
+              borderRadius: BorderRadius.circular(20),
+              child: SizedBox(
+                width: 40,
+                height: 40,
+                child: Center(
+                  child: Container(
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: item.checked ? c.accent : c.muted,
+                        width: 2,
+                      ),
+                      color: item.checked ? c.accent : Colors.transparent,
+                    ),
+                    child: item.checked
+                        ? const Icon(Icons.check, size: 14, color: Colors.white)
+                        : null,
+                  ),
                 ),
-                color: item.checked ? c.accent : Colors.transparent,
               ),
-              child: item.checked
-                  ? Icon(Icons.check, size: 14, color: Colors.white)
-                  : null,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 4),
           Expanded(
             child: editing
                 ? SizedBox(
@@ -1265,15 +1474,21 @@ class _EditorState extends State<Editor> {
                       controller: _checklistEditCtrl,
                       focusNode: _checklistEditFocus,
                       style: GoogleFonts.dmSans(
-                        fontSize: 14, fontWeight: FontWeight.w400,
-                        color: c.fg, height: 1.4),
+                        fontSize: 14,
+                        fontWeight: FontWeight.w400,
+                        color: c.fg,
+                        height: 1.4,
+                      ),
                       decoration: const InputDecoration(
                         isDense: true,
                         contentPadding: EdgeInsets.symmetric(
-                          horizontal: 0, vertical: 4),
+                          horizontal: 0,
+                          vertical: 4,
+                        ),
                         border: InputBorder.none,
                       ),
-                      onSubmitted: (_) => _submitEdit(item.lineIndex, index),
+                      onSubmitted: (_) =>
+                          _submitEdit(item.lineIndex, index, addNext: true),
                       onTapOutside: (_) => _submitEdit(item.lineIndex, index),
                     ),
                   )
@@ -1303,8 +1518,11 @@ class _EditorState extends State<Editor> {
               onTap: () => _deleteItem(item.lineIndex),
               child: Padding(
                 padding: const EdgeInsets.only(left: 4, top: 4),
-                child: Icon(Icons.close, size: 16,
-                    color: c.muted.withAlpha(120)),
+                child: Icon(
+                  Icons.close,
+                  size: 16,
+                  color: c.muted.withAlpha(120),
+                ),
               ),
             ),
         ],
@@ -1317,8 +1535,11 @@ class _EditorState extends State<Editor> {
       padding: const EdgeInsets.only(top: 8),
       child: Row(
         children: [
-          Icon(Icons.add_circle_outline,
-              size: 18, color: c.accent.withAlpha(180)),
+          Icon(
+            Icons.add_circle_outline,
+            size: 18,
+            color: c.accent.withAlpha(180),
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: SizedBox(
@@ -1326,15 +1547,22 @@ class _EditorState extends State<Editor> {
               child: TextField(
                 controller: _checklistAddCtrl,
                 style: GoogleFonts.dmSans(
-                  fontSize: 14, fontWeight: FontWeight.w400,
-                  color: c.fg, height: 1.4),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                  color: c.fg,
+                  height: 1.4,
+                ),
                 decoration: InputDecoration(
                   hintText: 'Add an item...',
                   hintStyle: TextStyle(
-                      fontSize: 14, color: c.muted.withAlpha(150)),
+                    fontSize: 14,
+                    color: c.muted.withAlpha(150),
+                  ),
                   isDense: true,
                   contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 0, vertical: 6),
+                    horizontal: 0,
+                    vertical: 6,
+                  ),
                   border: InputBorder.none,
                 ),
                 onSubmitted: (v) {
@@ -1352,8 +1580,10 @@ class _EditorState extends State<Editor> {
               minimumSize: Size.zero,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-            child: const Text('Add',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+            child: const Text(
+              'Add',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+            ),
           ),
         ],
       ),
@@ -1367,11 +1597,15 @@ class _EditorState extends State<Editor> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: c.surface,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12)),
-        title: Text('Raw markdown',
-            style: TextStyle(
-                fontSize: 14, fontWeight: FontWeight.w600, color: c.fg)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Text(
+          'Raw markdown',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: c.fg,
+          ),
+        ),
         content: SizedBox(
           width: double.maxFinite,
           height: 300.0,
@@ -1380,7 +1614,10 @@ class _EditorState extends State<Editor> {
             maxLines: null,
             expands: true,
             style: GoogleFonts.jetBrainsMono(
-              fontSize: 12, color: c.fg, height: 1.5),
+              fontSize: 12,
+              color: c.fg,
+              height: 1.5,
+            ),
             decoration: InputDecoration(
               filled: true,
               fillColor: c.bg,
@@ -1417,32 +1654,38 @@ class _EditorState extends State<Editor> {
     return Padding(
       padding: EdgeInsets.fromLTRB(_horizontalPad, 0, _horizontalPad, 8),
       child: Wrap(
-        spacing: 4, runSpacing: 4,
+        spacing: 4,
+        runSpacing: 4,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          ...tags.map((t) => InkWell(
-                onTap: () => _removeTag(t),
-                borderRadius: BorderRadius.circular(6),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: c.tagBg,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text('#$t', style: TextStyle(
-                        fontSize: 12, fontWeight: FontWeight.w400,
-                        color: c.tagFg,
-                      )),
-                      const SizedBox(width: 4),
-                      Icon(Icons.close, size: 12, color: c.tagFg),
-                    ],
-                  ),
+          ...tags.map(
+            (t) => InkWell(
+              onTap: () => _removeTag(t),
+              borderRadius: BorderRadius.circular(6),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: c.tagBg,
+                  borderRadius: BorderRadius.circular(6),
                 ),
-              )),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '#$t',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w400,
+                        color: c.tagFg,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(Icons.close, size: 12, color: c.tagFg),
+                  ],
+                ),
+              ),
+            ),
+          ),
           if (_addingTag)
             IntrinsicWidth(
               child: ConstrainedBox(
@@ -1454,11 +1697,11 @@ class _EditorState extends State<Editor> {
                   decoration: InputDecoration(
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4),
-                    hintText: 'tag',
-                    hintStyle: TextStyle(
-                      fontSize: 12, color: c.muted,
+                      horizontal: 8,
+                      vertical: 4,
                     ),
+                    hintText: 'tag',
+                    hintStyle: TextStyle(fontSize: 12, color: c.muted),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(6),
                       borderSide: BorderSide(color: c.border),
@@ -1472,9 +1715,7 @@ class _EditorState extends State<Editor> {
                       borderSide: BorderSide(color: c.accent),
                     ),
                   ),
-                  style: TextStyle(
-                    fontSize: 12, color: c.fg,
-                  ),
+                  style: TextStyle(fontSize: 12, color: c.fg),
                   onSubmitted: _submitTag,
                   onEditingComplete: () => _submitTag(_newTagCtrl.text),
                   onTapOutside: (_) {
@@ -1495,8 +1736,7 @@ class _EditorState extends State<Editor> {
               },
               borderRadius: BorderRadius.circular(6),
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   border: Border.all(color: c.border),
                   borderRadius: BorderRadius.circular(6),
@@ -1506,9 +1746,7 @@ class _EditorState extends State<Editor> {
                   children: [
                     Icon(Icons.add, size: 12, color: c.muted),
                     const SizedBox(width: 4),
-                    Text('tag', style: TextStyle(
-                      fontSize: 12, color: c.muted,
-                    )),
+                    Text('tag', style: TextStyle(fontSize: 12, color: c.muted)),
                   ],
                 ),
               ),
@@ -1565,14 +1803,35 @@ class _EditorState extends State<Editor> {
                   widget.onOpenNote(href.substring(6));
                 }
               },
-              builders: {
-                'pre': _CodeBlockBuilder(context.colors.sidebarFg),
-              },
+              builders: {'pre': _CodeBlockBuilder(context.colors.sidebarFg)},
               sizedImageBuilder: (config) {
                 final path = config.uri.scheme == 'file'
                     ? config.uri.path
                     : config.uri.toString();
-                if (File(path).existsSync()) {
+                if (kIsWeb && path.startsWith('data:image/')) {
+                  final comma = path.indexOf(',');
+                  if (comma > 0) {
+                    try {
+                      final bytes = base64Decode(path.substring(comma + 1));
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.memory(
+                            Uint8List.fromList(bytes),
+                            fit: BoxFit.contain,
+                            width: config.width ?? double.infinity,
+                            errorBuilder: (_, __, ___) =>
+                                _brokenImage(config.alt),
+                          ),
+                        ),
+                      );
+                    } catch (_) {
+                      return _brokenImage(config.alt);
+                    }
+                  }
+                }
+                if (!kIsWeb && File(path).existsSync()) {
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: ClipRRect(
@@ -1581,8 +1840,7 @@ class _EditorState extends State<Editor> {
                         File(path),
                         fit: BoxFit.contain,
                         width: config.width ?? double.infinity,
-                        errorBuilder: (_, __, ___) =>
-                            _brokenImage(config.alt),
+                        errorBuilder: (_, __, ___) => _brokenImage(config.alt),
                       ),
                     ),
                   );
@@ -1617,10 +1875,14 @@ class _EditorState extends State<Editor> {
                 maxLines: null,
                 expands: true,
                 style: GoogleFonts.dmSans(
-                  fontSize: 15, fontWeight: FontWeight.w400,
-                  color: context.colors.fg, height: 1.6),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w400,
+                  color: context.colors.fg,
+                  height: 1.6,
+                ),
                 decoration: InputDecoration(
-                  hintText: 'Start writing in Markdown...\n\n'
+                  hintText:
+                      'Start writing in Markdown...\n\n'
                       'Type #tag to categorize this note. '
                       'Use **bold**, *italic*, `code`, [[links]], and more.',
                   hintStyle: TextStyle(color: context.colors.muted),
@@ -1654,29 +1916,40 @@ class _EditorState extends State<Editor> {
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: _linkSuggestions.map((n) => InkWell(
-            onTap: () => _insertLink(n),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 10),
-              child: Row(
-                children: [
-                  Icon(Icons.article_outlined,
-                      size: 14, color: context.colors.muted),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(n.title,
-                        style:  TextStyle(
-                          fontSize: 13,
-                          color: context.colors.fg,
+          children: _linkSuggestions
+              .map(
+                (n) => InkWell(
+                  onTap: () => _insertLink(n),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.article_outlined,
+                          size: 14,
+                          color: context.colors.muted,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            n.title,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: context.colors.fg,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ],
-              ),
-            ),
-          )).toList(),
+                ),
+              )
+              .toList(),
         ),
       ),
     );
@@ -1693,14 +1966,19 @@ class _EditorState extends State<Editor> {
       ),
       child: Row(
         children: [
-          Icon(Icons.broken_image_outlined,
-            color: context.colors.muted, size: 20),
+          Icon(
+            Icons.broken_image_outlined,
+            color: context.colors.muted,
+            size: 20,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               alt ?? 'Image not found',
-              style:  TextStyle(
-                color: context.colors.muted, fontSize: 13, fontStyle: FontStyle.italic,
+              style: TextStyle(
+                color: context.colors.muted,
+                fontSize: 13,
+                fontStyle: FontStyle.italic,
               ),
             ),
           ),
@@ -1714,18 +1992,31 @@ class _EditorState extends State<Editor> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.article_outlined, size: 36,
-            color: context.colors.muted.withAlpha(64)),
+          Icon(
+            Icons.article_outlined,
+            size: 36,
+            color: context.colors.muted.withAlpha(64),
+          ),
           const SizedBox(height: 12),
-          Text('Nothing here yet',
+          Text(
+            'Nothing here yet',
             style: GoogleFonts.dmSans(
-              fontSize: 18, fontWeight: FontWeight.w500,
-              color: context.colors.muted.withAlpha(100), height: 1.3)),
+              fontSize: 18,
+              fontWeight: FontWeight.w500,
+              color: context.colors.muted.withAlpha(100),
+              height: 1.3,
+            ),
+          ),
           const SizedBox(height: 4),
-          Text('Ctrl+N \u2014 new note', style: TextStyle(
-            fontSize: 11, fontFamily: context.colors.monoFontFamily,
-            color: context.colors.muted.withAlpha(80), letterSpacing: 0.06,
-          ),),
+          Text(
+            'Ctrl+N \u2014 new note',
+            style: TextStyle(
+              fontSize: 11,
+              fontFamily: context.colors.monoFontFamily,
+              color: context.colors.muted.withAlpha(80),
+              letterSpacing: 0.06,
+            ),
+          ),
         ],
       ),
     );
@@ -1760,20 +2051,37 @@ class _CodeBlockBuilder extends MarkdownElementBuilder {
 MarkdownStyleSheet _buildMarkdownStyle(AppColors c) {
   return MarkdownStyleSheet(
     h1: GoogleFonts.dmSans(
-      fontSize: 24, fontWeight: FontWeight.w700,
-      color: c.fg, letterSpacing: -0.02, height: 1.3),
+      fontSize: 24,
+      fontWeight: FontWeight.w700,
+      color: c.fg,
+      letterSpacing: -0.02,
+      height: 1.3,
+    ),
     h2: GoogleFonts.dmSans(
-      fontSize: 18, fontWeight: FontWeight.w600,
-      color: c.fg, letterSpacing: -0.01, height: 1.3),
+      fontSize: 18,
+      fontWeight: FontWeight.w600,
+      color: c.fg,
+      letterSpacing: -0.01,
+      height: 1.3,
+    ),
     h3: GoogleFonts.dmSans(
-      fontSize: 16, fontWeight: FontWeight.w600,
-      color: c.fg, height: 1.3),
+      fontSize: 16,
+      fontWeight: FontWeight.w600,
+      color: c.fg,
+      height: 1.3,
+    ),
     p: GoogleFonts.dmSans(
-      fontSize: 15, fontWeight: FontWeight.w400,
-      color: c.fg, height: 1.6),
+      fontSize: 15,
+      fontWeight: FontWeight.w400,
+      color: c.fg,
+      height: 1.6,
+    ),
     code: TextStyle(
-      fontSize: 13, fontFamily: c.monoFontFamily,
-      backgroundColor: c.listBg, color: c.fg),
+      fontSize: 13,
+      fontFamily: c.monoFontFamily,
+      backgroundColor: c.listBg,
+      color: c.fg,
+    ),
     codeblockDecoration: BoxDecoration(
       color: c.sidebarBg,
       borderRadius: BorderRadius.circular(8),
@@ -1781,17 +2089,14 @@ MarkdownStyleSheet _buildMarkdownStyle(AppColors c) {
     ),
     codeblockPadding: const EdgeInsets.all(14),
     blockquoteDecoration: BoxDecoration(
-      border: Border(left: BorderSide(color: c.accent, width: 3))),
+      border: Border(left: BorderSide(color: c.accent, width: 3)),
+    ),
     blockquotePadding: const EdgeInsets.fromLTRB(16, 2, 0, 2),
     a: TextStyle(color: c.accent),
     strong: const TextStyle(fontWeight: FontWeight.w600),
-    listBullet: GoogleFonts.dmSans(
-      fontSize: 15, color: c.fg),
-    checkbox: GoogleFonts.dmSans(
-      fontSize: 15, color: c.accent),
-    del: TextStyle(
-      decoration: TextDecoration.lineThrough,
-      color: c.muted),
+    listBullet: GoogleFonts.dmSans(fontSize: 15, color: c.fg),
+    checkbox: GoogleFonts.dmSans(fontSize: 15, color: c.accent),
+    del: TextStyle(decoration: TextDecoration.lineThrough, color: c.muted),
     em: const TextStyle(fontStyle: FontStyle.italic),
   );
 }
@@ -1809,10 +2114,18 @@ class _TypeDropdown extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: isFinance ? context.colors.accentDim : isTodo ? context.colors.accentDim : context.colors.listBg,
+        color: isFinance
+            ? context.colors.accentDim
+            : isTodo
+            ? context.colors.accentDim
+            : context.colors.listBg,
         borderRadius: BorderRadius.circular(6),
         border: Border.all(
-          color: isFinance ? context.colors.accent : isTodo ? context.colors.accent : context.colors.border,
+          color: isFinance
+              ? context.colors.accent
+              : isTodo
+              ? context.colors.accent
+              : context.colors.border,
         ),
       ),
       child: PopupMenuButton<String>(
@@ -1828,15 +2141,24 @@ class _TypeDropdown extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(_label(value),
-                style: TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.w500,
-                  color: isFinance || isTodo ? context.colors.accent : context.colors.muted,
-                )),
+            Text(
+              _label(value),
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: isFinance || isTodo
+                    ? context.colors.accent
+                    : context.colors.muted,
+              ),
+            ),
             const SizedBox(width: 4),
-            Icon(Icons.arrow_drop_down,
-                size: 16,
-                color: isFinance || isTodo ? context.colors.accent : context.colors.muted),
+            Icon(
+              Icons.arrow_drop_down,
+              size: 16,
+              color: isFinance || isTodo
+                  ? context.colors.accent
+                  : context.colors.muted,
+            ),
           ],
         ),
       ),
@@ -1879,18 +2201,20 @@ class _CurrencyDropdown extends StatelessWidget {
         onSelected: onChanged,
         position: PopupMenuPosition.under,
         itemBuilder: (_) => currencies
-            .map((code) => PopupMenuItem(
-                  value: code,
-                  child: Text.rich(
-                    TextSpan(
-                      children: [
-                        currencySpan(code, null),
-                        const TextSpan(text: ' '),
-                        TextSpan(text: code),
-                      ],
-                    ),
+            .map(
+              (code) => PopupMenuItem(
+                value: code,
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      currencySpan(code, null),
+                      const TextSpan(text: ' '),
+                      TextSpan(text: code),
+                    ],
                   ),
-                ))
+                ),
+              ),
+            )
             .toList(),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -1898,7 +2222,8 @@ class _CurrencyDropdown extends StatelessWidget {
             Text.rich(
               TextSpan(
                 style: TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.w500,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
                   color: context.colors.fg,
                 ),
                 children: [
@@ -1909,8 +2234,7 @@ class _CurrencyDropdown extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 4),
-            Icon(Icons.arrow_drop_down,
-                size: 16, color: context.colors.muted),
+            Icon(Icons.arrow_drop_down, size: 16, color: context.colors.muted),
           ],
         ),
       ),

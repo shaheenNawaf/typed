@@ -45,5 +45,11 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Typed uses the camera so you can capture and recognize text from documents and photos.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Typed accesses your photo library so you can select images for text recognition.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Typed saves recognized text output to your photo library.</string>
 </dict>
 </plist>

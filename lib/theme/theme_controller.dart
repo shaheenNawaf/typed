@@ -20,9 +20,9 @@ class ThemeController extends ChangeNotifier {
     required ThemePalette palette,
     required ThemeMode mode,
     required String fontId,
-  })  : _palette = palette,
-        _mode = mode,
-        _fontId = fontId;
+  }) : _palette = palette,
+       _mode = mode,
+       _fontId = fontId;
 
   ThemePalette get palette => _palette;
   ThemeMode get mode => _mode;
@@ -36,13 +36,21 @@ class ThemeController extends ChangeNotifier {
     final fontId = prefs.getString(_fontKey);
     final c = ThemeController._(
       palette: paletteId != null ? paletteById(paletteId) : kPalettes.first,
-      mode: modeStr != null
-          ? ThemeMode.values.byName(modeStr)
-          : ThemeMode.system,
+      mode: _modeFromString(modeStr),
       fontId: fontId ?? 'dm-sans',
     );
     instance = c;
     return c;
+  }
+
+  /// Parses a stored mode string, falling back to [ThemeMode.system] when the
+  /// value is missing or not a valid [ThemeMode].
+  static ThemeMode _modeFromString(String? raw) {
+    if (raw == null) return ThemeMode.system;
+    for (final mode in ThemeMode.values) {
+      if (mode.name == raw) return mode;
+    }
+    return ThemeMode.system;
   }
 
   Future<void> setPalette(String id) async {

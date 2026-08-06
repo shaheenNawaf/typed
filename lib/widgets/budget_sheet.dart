@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/budget.dart';
 import '../theme/app_colors.dart';
 import '../utils/finance_utils.dart';
+import '../utils/id.dart';
 import 'entry_sheet.dart';
 
 class BudgetSheet extends StatefulWidget {
@@ -90,8 +91,7 @@ class _BudgetSheetState extends State<BudgetSheet> {
       return;
     }
     final budget = Budget(
-      id: widget.budget?.id ??
-          'b${DateTime.now().millisecondsSinceEpoch}',
+      id: widget.budget?.id ?? generateId('b'),
       category: category,
       limit: limit,
     );

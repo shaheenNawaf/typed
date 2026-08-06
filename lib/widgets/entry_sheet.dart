@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import '../models/money_entry.dart';
 import '../theme/app_colors.dart';
 import '../utils/finance_utils.dart';
+import '../utils/id.dart';
 
 const List<String> kDefaultCategories = [
   'Food',
@@ -168,10 +169,13 @@ class _EntrySheetState extends State<EntrySheet> {
       _showError('Enter a category');
       return null;
     }
+    if (_isRecurring && _recurInterval == null) {
+      _showError('Choose a repeat interval');
+      return null;
+    }
     final noteText = _noteCtrl.text.trim();
     final entry = MoneyEntry(
-      id: widget.entry?.id ??
-          'm${DateTime.now().millisecondsSinceEpoch}',
+      id: widget.entry?.id ?? generateId('m'),
       amount: amount,
       category: category,
       date: _date,
@@ -182,7 +186,9 @@ class _EntrySheetState extends State<EntrySheet> {
       isRecurring: _isRecurring,
       recurInterval: _isRecurring ? _recurInterval : null,
       recurEnd: _isRecurring ? _recurEnd : null,
-      lastGenerated: _isRecurring ? _date : null,
+      lastGenerated: _isRecurring
+          ? (widget.entry?.lastGenerated ?? _date)
+          : null,
     );
     widget.onSave(entry);
     widget.onCategoryUsed?.call(category);

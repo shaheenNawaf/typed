@@ -37,6 +37,15 @@ class FinanceSummary {
 
   double get net => totalIncome - totalExpense;
   bool get isEmpty => entryCount == 0;
+
+  Map<String, double> get netByCurrency {
+    final currencies = {...incomeByCurrency.keys, ...expenseByCurrency.keys};
+    return {
+      for (final currency in currencies)
+        currency: (incomeByCurrency[currency] ?? 0) -
+            (expenseByCurrency[currency] ?? 0),
+    };
+  }
 }
 
 class FinanceStickyHeader extends StatelessWidget {
@@ -55,7 +64,6 @@ class FinanceStickyHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (summary.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
       child: Column(
@@ -118,45 +126,50 @@ class FinanceDashboardBody extends StatelessWidget {
     );
   }
 
-
   Widget _buildCompactCategories(BuildContext context) {
     if (summary.categories.isEmpty) return const SizedBox.shrink();
 
-    final totalSpending =
-        summary.categories.fold(0.0, (sum, e) => sum + e.value);
+    final totalSpending = summary.categories.fold(
+      0.0,
+      (sum, e) => sum + e.value,
+    );
     return Column(
       children: summary.categories.take(4).map((e) {
-        final fraction =
-            totalSpending > 0 ? e.value / totalSpending : 0.0;
+        final fraction = totalSpending > 0 ? e.value / totalSpending : 0.0;
         final pct = (fraction * 100).round();
         return Padding(
           padding: const EdgeInsets.only(bottom: 6),
           child: Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
               color: context.colors.surface,
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(
               children: [
-                Icon(_categoryIcon(e.key),
-                    size: 14, color: context.colors.accent),
+                Icon(
+                  _categoryIcon(e.key),
+                  size: 14,
+                  color: context.colors.accent,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(e.key,
-                      style:
-                          TextStyle(fontSize: 12, color: context.colors.fg),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
+                  child: Text(
+                    e.key,
+                    style: TextStyle(fontSize: 12, color: context.colors.fg),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-                Text('$pct%',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontFamily: context.colors.monoFontFamily,
-                      color: context.colors.muted,
-                      fontWeight: FontWeight.w500,
-                    )),
+                Text(
+                  '$pct%',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontFamily: context.colors.monoFontFamily,
+                    color: context.colors.muted,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
                 const SizedBox(width: 8),
                 Text.rich(
                   TextSpan(
@@ -167,16 +180,20 @@ class FinanceDashboardBody extends StatelessWidget {
                       color: context.colors.fg,
                     ),
                     children: [
-                      currencySpan(summary.dominantCurrency, TextStyle(
-                        fontSize: 11,
-                        fontFamily: context.colors.monoFontFamily,
-                        fontWeight: FontWeight.w600,
-                        color: context.colors.fg,
-                      )),
+                      currencySpan(
+                        summary.dominantCurrency,
+                        TextStyle(
+                          fontSize: 11,
+                          fontFamily: context.colors.monoFontFamily,
+                          fontWeight: FontWeight.w600,
+                          color: context.colors.fg,
+                        ),
+                      ),
                       TextSpan(
-                        text: formatNumber(e.value,
-                            decimals:
-                                summary.dominantCurrency == 'JPY' ? 0 : 2),
+                        text: formatNumber(
+                          e.value,
+                          decimals: summary.dominantCurrency == 'JPY' ? 0 : 2,
+                        ),
                       ),
                     ],
                   ),
@@ -223,8 +240,11 @@ class FinanceDashboardBody extends StatelessWidget {
             borderRadius: BorderRadius.circular(6),
             child: Padding(
               padding: const EdgeInsets.all(4),
-              child: Icon(Icons.add_circle_outline,
-                  size: 18, color: context.colors.accent),
+              child: Icon(
+                Icons.add_circle_outline,
+                size: 18,
+                color: context.colors.accent,
+              ),
             ),
           ),
         ),
@@ -242,9 +262,7 @@ class FinanceDashboardBody extends StatelessWidget {
             budget: b,
             actual: actual,
             currency: summary.dominantCurrency,
-            onRemove: onRemoveBudget != null
-                ? () => onRemoveBudget!(b)
-                : null,
+            onRemove: onRemoveBudget != null ? () => onRemoveBudget!(b) : null,
           ),
         );
       }).toList(),
@@ -269,9 +287,9 @@ class FinanceDashboardBody extends StatelessWidget {
           child: _RecentTransactionRow(
             entry: e.$1,
             isIncome: (e.$1.type ?? e.$2.type) == 'income',
-            currency: e.$1.currency ??
-                e.$2.currency ??
-                summary.dominantCurrency,
+            currency:
+                e.$1.currency ?? e.$2.currency ?? summary.dominantCurrency,
+            onTap: onSelectNote == null ? null : () => onSelectNote!(e.$2.id),
           ),
         );
       }).toList(),
@@ -355,12 +373,9 @@ class _PeriodSelector extends StatelessWidget {
             onTap: () => onChanged(p),
             borderRadius: BorderRadius.circular(6),
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: selected
-                    ? context.colors.accentDim
-                    : Colors.transparent,
+                color: selected ? context.colors.accentDim : Colors.transparent,
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
@@ -423,7 +438,10 @@ class _ExpandableSummaryCardsState extends State<_ExpandableSummaryCards> {
             Expanded(
               child: _SummaryCard(
                 label: 'INCOME',
-                amount: summary.totalIncome,
+                amount: summary.hasMixedCurrencies ? null : summary.totalIncome,
+                valueText: summary.hasMixedCurrencies
+                    ? _formatCurrencyValues(summary.incomeByCurrency)
+                    : null,
                 color: context.colors.income,
                 currency: summary.dominantCurrency,
               ),
@@ -432,7 +450,12 @@ class _ExpandableSummaryCardsState extends State<_ExpandableSummaryCards> {
             Expanded(
               child: _SummaryCard(
                 label: 'EXPENSES',
-                amount: summary.totalExpense,
+                amount: summary.hasMixedCurrencies
+                    ? null
+                    : summary.totalExpense,
+                valueText: summary.hasMixedCurrencies
+                    ? _formatCurrencyValues(summary.expenseByCurrency)
+                    : null,
                 color: context.colors.destructive,
                 currency: summary.dominantCurrency,
               ),
@@ -455,9 +478,9 @@ class _ExpandableSummaryCardsState extends State<_ExpandableSummaryCards> {
         Expanded(
           child: PopupMenuButton<String>(
             onSelected: (value) => setState(() => _selectedStat = value),
-            itemBuilder: (context) => _options.map((o) =>
-              PopupMenuItem(value: o.$1, child: Text(o.$2)),
-            ).toList(),
+            itemBuilder: (context) => _options
+                .map((o) => PopupMenuItem(value: o.$1, child: Text(o.$2)))
+                .toList(),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
@@ -475,8 +498,11 @@ class _ExpandableSummaryCardsState extends State<_ExpandableSummaryCards> {
                     ),
                   ),
                   const Spacer(),
-                  Icon(Icons.arrow_drop_down,
-                      size: 18, color: context.colors.muted),
+                  Icon(
+                    Icons.arrow_drop_down,
+                    size: 18,
+                    color: context.colors.muted,
+                  ),
                 ],
               ),
             ),
@@ -506,7 +532,10 @@ class _ExpandableSummaryCardsState extends State<_ExpandableSummaryCards> {
             : context.colors.destructive;
         return _SummaryCard(
           label: 'NET',
-          amount: summary.net,
+          amount: summary.hasMixedCurrencies ? null : summary.net,
+          valueText: summary.hasMixedCurrencies
+              ? _formatCurrencyValues(summary.netByCurrency)
+              : null,
           color: netColor,
           currency: summary.dominantCurrency,
         );
@@ -520,13 +549,24 @@ class _ExpandableSummaryCardsState extends State<_ExpandableSummaryCards> {
       case 'avg_spend':
         return _SummaryCard(
           label: 'AVG DAILY SPEND',
-          amount: summary.averageDailySpend,
+          amount: summary.hasMixedCurrencies ? null : summary.averageDailySpend,
+          valueText: summary.hasMixedCurrencies ? 'Mixed currencies' : null,
           color: context.colors.accent,
           currency: summary.dominantCurrency,
         );
       default:
         return const SizedBox.shrink();
     }
+  }
+
+  String _formatCurrencyValues(Map<String, double> values) {
+    if (values.isEmpty) return '0';
+    return values.entries
+        .map(
+          (e) =>
+              '${e.key} ${formatNumber(e.value, decimals: e.key == 'JPY' ? 0 : 2)}',
+        )
+        .join(' | ');
   }
 }
 
@@ -539,6 +579,7 @@ class _SummaryCard extends StatelessWidget {
   final Color color;
   final String? currency;
   final IconData? icon;
+  final String? valueText;
 
   const _SummaryCard({
     required this.label,
@@ -547,6 +588,7 @@ class _SummaryCard extends StatelessWidget {
     required this.color,
     this.currency,
     this.icon,
+    this.valueText,
   });
 
   @override
@@ -599,16 +641,15 @@ class _SummaryCard extends StatelessWidget {
                       children: [
                         currencySpan(currency, valueStyle),
                         TextSpan(
-                          text: formatNumber(amount!,
-                              decimals: currency == 'JPY' ? 0 : 2),
+                          text: formatNumber(
+                            amount!,
+                            decimals: currency == 'JPY' ? 0 : 2,
+                          ),
                         ),
                       ],
                     ),
                   )
-                : Text(
-                    count ?? '',
-                    style: valueStyle,
-                  ),
+                : Text(valueText ?? count ?? '', style: valueStyle),
           ),
         ],
       ),
@@ -691,8 +732,6 @@ IconData _categoryIcon(String category) {
   }
 }
 
-
-
 // -- Budget Card -------------------------------------------------------------
 
 class _BudgetCard extends StatelessWidget {
@@ -710,7 +749,9 @@ class _BudgetCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fraction = budget.limit > 0 ? (actual / budget.limit).clamp(0.0, 1.0) : 0.0;
+    final fraction = budget.limit > 0
+        ? (actual / budget.limit).clamp(0.0, 1.0)
+        : 0.0;
     final overBudget = actual > budget.limit;
     final pct = (fraction * 100).round();
     final remaining = budget.limit - actual;
@@ -735,8 +776,7 @@ class _BudgetCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(_categoryIcon(budget.category),
-                  size: 16, color: barColor),
+              Icon(_categoryIcon(budget.category), size: 16, color: barColor),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -766,8 +806,11 @@ class _BudgetCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(4),
                   child: Padding(
                     padding: const EdgeInsets.all(2),
-                    child: Icon(Icons.close,
-                        size: 14, color: context.colors.muted),
+                    child: Icon(
+                      Icons.close,
+                      size: 14,
+                      color: context.colors.muted,
+                    ),
                   ),
                 ),
               ],
@@ -796,15 +839,20 @@ class _BudgetCard extends StatelessWidget {
                   ),
                   children: [
                     TextSpan(text: 'Spent '),
-                    currencySpan(currency, TextStyle(
-                      fontSize: 11,
-                      fontFamily: context.colors.monoFontFamily,
-                      fontWeight: FontWeight.w500,
-                      color: context.colors.muted,
-                    )),
+                    currencySpan(
+                      currency,
+                      TextStyle(
+                        fontSize: 11,
+                        fontFamily: context.colors.monoFontFamily,
+                        fontWeight: FontWeight.w500,
+                        color: context.colors.muted,
+                      ),
+                    ),
                     TextSpan(
-                      text: formatNumber(actual,
-                          decimals: currency == 'JPY' ? 0 : 2),
+                      text: formatNumber(
+                        actual,
+                        decimals: currency == 'JPY' ? 0 : 2,
+                      ),
                     ),
                   ],
                 ),
@@ -821,15 +869,20 @@ class _BudgetCard extends StatelessWidget {
                     ),
                     children: [
                       const TextSpan(text: 'Overspent '),
-                      currencySpan(currency, TextStyle(
-                        fontSize: 11,
-                        fontFamily: context.colors.monoFontFamily,
-                        fontWeight: FontWeight.w600,
-                        color: context.colors.destructive,
-                      )),
+                      currencySpan(
+                        currency,
+                        TextStyle(
+                          fontSize: 11,
+                          fontFamily: context.colors.monoFontFamily,
+                          fontWeight: FontWeight.w600,
+                          color: context.colors.destructive,
+                        ),
+                      ),
                       TextSpan(
-                        text: formatNumber(remaining.abs(),
-                            decimals: currency == 'JPY' ? 0 : 2),
+                        text: formatNumber(
+                          remaining.abs(),
+                          decimals: currency == 'JPY' ? 0 : 2,
+                        ),
                       ),
                     ],
                   ),
@@ -845,15 +898,20 @@ class _BudgetCard extends StatelessWidget {
                     ),
                     children: [
                       const TextSpan(text: 'Left '),
-                      currencySpan(currency, TextStyle(
-                        fontSize: 11,
-                        fontFamily: context.colors.monoFontFamily,
-                        fontWeight: FontWeight.w500,
-                        color: context.colors.income,
-                      )),
+                      currencySpan(
+                        currency,
+                        TextStyle(
+                          fontSize: 11,
+                          fontFamily: context.colors.monoFontFamily,
+                          fontWeight: FontWeight.w500,
+                          color: context.colors.income,
+                        ),
+                      ),
                       TextSpan(
-                        text: formatNumber(remaining,
-                            decimals: currency == 'JPY' ? 0 : 2),
+                        text: formatNumber(
+                          remaining,
+                          decimals: currency == 'JPY' ? 0 : 2,
+                        ),
                       ),
                     ],
                   ),
@@ -872,23 +930,24 @@ class _RecentTransactionRow extends StatelessWidget {
   final MoneyEntry entry;
   final bool isIncome;
   final String currency;
+  final VoidCallback? onTap;
 
   const _RecentTransactionRow({
     required this.entry,
     required this.isIncome,
     required this.currency,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final date = '${entry.date.month}/${entry.date.day}';
-    final amountColor =
-        isIncome ? context.colors.income : context.colors.fg;
+    final amountColor = isIncome ? context.colors.income : context.colors.fg;
     final description = entry.note != null && entry.note!.isNotEmpty
         ? entry.note!
         : null;
 
-    return Container(
+    final content = Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: context.colors.surface,
@@ -896,8 +955,11 @@ class _RecentTransactionRow extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(_categoryIcon(entry.category),
-              size: 18, color: context.colors.accent),
+          Icon(
+            _categoryIcon(entry.category),
+            size: 18,
+            color: context.colors.accent,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -923,9 +985,13 @@ class _RecentTransactionRow extends StatelessWidget {
                         color: context.colors.muted,
                       ),
                     ),
-                    Text(' · ',
-                        style: TextStyle(
-                            fontSize: 11, color: context.colors.muted)),
+                    Text(
+                      ' · ',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: context.colors.muted,
+                      ),
+                    ),
                     Text(
                       date,
                       style: TextStyle(
@@ -951,15 +1017,20 @@ class _RecentTransactionRow extends StatelessWidget {
                   color: amountColor,
                 ),
                 children: [
-                  currencySpan(currency, TextStyle(
-                    fontSize: 13,
-                    fontFamily: context.colors.monoFontFamily,
-                    fontWeight: FontWeight.w600,
-                    color: amountColor,
-                  )),
+                  currencySpan(
+                    currency,
+                    TextStyle(
+                      fontSize: 13,
+                      fontFamily: context.colors.monoFontFamily,
+                      fontWeight: FontWeight.w600,
+                      color: amountColor,
+                    ),
+                  ),
                   TextSpan(
-                    text: formatNumber(entry.amount,
-                        decimals: currency == 'JPY' ? 0 : 2),
+                    text: formatNumber(
+                      entry.amount,
+                      decimals: currency == 'JPY' ? 0 : 2,
+                    ),
                   ),
                 ],
               ),
@@ -968,5 +1039,12 @@ class _RecentTransactionRow extends StatelessWidget {
         ],
       ),
     );
+    return onTap == null
+        ? content
+        : InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(10),
+            child: content,
+          );
   }
 }

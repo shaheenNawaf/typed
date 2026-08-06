@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'screens/home_screen.dart';
+import 'screens/splash_screen.dart';
 import 'theme/app_colors.dart';
 import 'theme/fonts.dart';
 import 'theme/theme_controller.dart';
@@ -12,11 +12,6 @@ import 'theme/theme_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  FlutterError.onError = (details) {
-    if (details.exceptionAsString().contains(
-        'Cannot hit test a render box with no size')) { return; }
-    FlutterError.dumpErrorToConsole(details);
-  };
   await ThemeController.create();
   runApp(const MainApp());
 }
@@ -38,7 +33,7 @@ class MainApp extends StatelessWidget {
           theme: _buildTheme(palette.light, Brightness.light, font),
           darkTheme: _buildTheme(palette.dark, Brightness.dark, font),
           themeMode: controller.mode,
-          home: const HomeScreen(),
+          home: const SplashScreen(),
         );
       },
     );

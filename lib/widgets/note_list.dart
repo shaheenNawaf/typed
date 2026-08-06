@@ -36,6 +36,8 @@ class NoteList extends StatefulWidget {
   final void Function(Budget)? onAddBudget;
   final void Function(Budget)? onRemoveBudget;
   final VoidCallback? onQuickAddEntry;
+  final void Function(Note note, int lineIndex, bool checked)?
+      onChecklistToggle;
 
   const NoteList({
     super.key,
@@ -67,6 +69,7 @@ class NoteList extends StatefulWidget {
     this.onAddBudget,
     this.onRemoveBudget,
     this.onQuickAddEntry,
+    this.onChecklistToggle,
   });
 
   @override
@@ -99,10 +102,10 @@ class _NoteListState extends State<NoteList> {
   @override
   Widget build(BuildContext context) {
     final isDesktop = MediaQuery.of(context).size.width >= 1024;
-    final showDashboard = widget.activeFilter == 'finance' &&
-        widget.financeSummary != null &&
-        !widget.financeSummary!.isEmpty;
-    final showQuickFab = !isDesktop &&
+    final showDashboard =
+        widget.activeFilter == 'finance' && widget.financeSummary != null;
+    final showQuickFab =
+        !isDesktop &&
         widget.activeFilter == 'finance' &&
         widget.onQuickAddEntry != null;
     return Stack(
@@ -117,43 +120,46 @@ class _NoteListState extends State<NoteList> {
                 FinanceStickyHeader(
                   summary: widget.financeSummary!,
                   period: widget.financePeriod ?? 'all',
-                  onPeriodChanged:
-                      widget.onFinancePeriodChanged ?? (_) {},
-                  currencySymbol: widget.dashboardCurrencySymbol ?? currencySymbol,
+                  onPeriodChanged: widget.onFinancePeriodChanged ?? (_) {},
+                  currencySymbol:
+                      widget.dashboardCurrencySymbol ?? currencySymbol,
                 ),
               Expanded(child: _buildCardList()),
             ],
           ),
         ),
-          if (showQuickFab)
-            Positioned(
-              right: 20,
-              bottom: 20,
-              child: FloatingActionButton(
-                heroTag: 'quickAddFab',
-                onPressed: widget.onQuickAddEntry,
-                backgroundColor: context.colors.accent,
-                foregroundColor: Colors.white,
-                elevation: 4,
-                shape: const CircleBorder(),
-                child: const Icon(Icons.bolt, color: Colors.white, size: 24),
-              ),
+        if (showQuickFab)
+          Positioned(
+            right: 20,
+            bottom: 20,
+            child: FloatingActionButton(
+              heroTag: 'quickAddFab',
+              onPressed: widget.onQuickAddEntry,
+              backgroundColor: context.colors.accent,
+              foregroundColor: Colors.white,
+              elevation: 4,
+              shape: const CircleBorder(),
+              child: const Icon(Icons.bolt, color: Colors.white, size: 24),
             ),
-          if (!isDesktop && widget.activeFilter != 'archive' && widget.activeFilter != 'trash' && widget.activeFilter != 'finance')
-            Positioned(
-              right: 20,
-              bottom: 20,
-              child: FloatingActionButton(
-                heroTag: 'newNoteFab',
-                onPressed: widget.onNewNote,
-                backgroundColor: context.colors.accent,
-                foregroundColor: Colors.white,
-                elevation: 4,
-                shape: const CircleBorder(),
-                child: const Icon(Icons.add, size: 24),
-              ),
+          ),
+        if (!isDesktop &&
+            widget.activeFilter != 'archive' &&
+            widget.activeFilter != 'trash' &&
+            widget.activeFilter != 'finance')
+          Positioned(
+            right: 20,
+            bottom: 20,
+            child: FloatingActionButton(
+              heroTag: 'newNoteFab',
+              onPressed: widget.onNewNote,
+              backgroundColor: context.colors.accent,
+              foregroundColor: Colors.white,
+              elevation: 4,
+              shape: const CircleBorder(),
+              child: const Icon(Icons.add, size: 24),
             ),
-        ],
+          ),
+      ],
     );
   }
 
@@ -162,7 +168,11 @@ class _NoteListState extends State<NoteList> {
     final hasQuery = _searchCtrl.text.isNotEmpty;
     return Padding(
       padding: EdgeInsets.fromLTRB(
-        isMobile ? 12 : 16, isMobile ? 10 : 14, isMobile ? 12 : 16, 10),
+        isMobile ? 12 : 16,
+        isMobile ? 10 : 14,
+        isMobile ? 12 : 16,
+        10,
+      ),
       child: Row(
         children: [
           Expanded(
@@ -172,11 +182,15 @@ class _NoteListState extends State<NoteList> {
               decoration: InputDecoration(
                 hintText: 'Search notes...',
                 hintStyle: TextStyle(
-                  fontSize: isMobile ? 15 : 13.5, color: context.colors.muted),
+                  fontSize: isMobile ? 15 : 13.5,
+                  color: context.colors.muted,
+                ),
                 filled: true,
                 fillColor: context.colors.surface,
                 contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12, vertical: isMobile ? 12 : 8),
+                  horizontal: 12,
+                  vertical: isMobile ? 12 : 8,
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide: BorderSide(color: context.colors.border),
@@ -191,7 +205,9 @@ class _NoteListState extends State<NoteList> {
                 ),
               ),
               style: TextStyle(
-                fontSize: isMobile ? 15 : 13.5, color: context.colors.fg),
+                fontSize: isMobile ? 15 : 13.5,
+                color: context.colors.fg,
+              ),
             ),
           ),
           if (hasQuery)
@@ -207,13 +223,17 @@ class _NoteListState extends State<NoteList> {
                   borderRadius: BorderRadius.circular(6),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 8),
-                    child: Text('Cancel',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: context.colors.accent,
-                          fontWeight: FontWeight.w500,
-                        )),
+                      horizontal: 8,
+                      vertical: 8,
+                    ),
+                    child: Text(
+                      'Cancel',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: context.colors.accent,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -233,11 +253,15 @@ class _NoteListState extends State<NoteList> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(widget.listTitle, style: TextStyle(
-                fontSize: 13, fontWeight: FontWeight.w500,
-                color: context.colors.muted,
-                letterSpacing: 0.06,
-              )),
+              Text(
+                widget.listTitle,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: context.colors.muted,
+                  letterSpacing: 0.06,
+                ),
+              ),
               Row(
                 children: [
                   Semantics(
@@ -246,12 +270,27 @@ class _NoteListState extends State<NoteList> {
                       onTap: widget.onSortToggle,
                       borderRadius: BorderRadius.circular(4),
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 2,
+                        ),
                         child: isMobile
-                            ? Icon(widget.sortDesc ? Icons.arrow_downward : Icons.sort_by_alpha,
-                                size: 16, color: context.colors.muted)
-                            : Text(widget.sortDesc ? 'Recent \u2193' : 'A\u2013Z \u2191',
-                                style: TextStyle(fontSize: 13, color: context.colors.muted)),
+                            ? Icon(
+                                widget.sortDesc
+                                    ? Icons.arrow_downward
+                                    : Icons.sort_by_alpha,
+                                size: 16,
+                                color: context.colors.muted,
+                              )
+                            : Text(
+                                widget.sortDesc
+                                    ? 'Recent \u2193'
+                                    : 'A\u2013Z \u2191',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: context.colors.muted,
+                                ),
+                              ),
                       ),
                     ),
                   ),
@@ -262,14 +301,31 @@ class _NoteListState extends State<NoteList> {
                       onTap: widget.onNewNote,
                       borderRadius: BorderRadius.circular(4),
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
                         child: isMobile
-                            ? Icon(Icons.add, size: 16, color: context.colors.muted)
+                            ? Icon(
+                                Icons.add,
+                                size: 16,
+                                color: context.colors.muted,
+                              )
                             : Row(
                                 children: [
-                                  Icon(Icons.add, size: 16, color: context.colors.muted),
+                                  Icon(
+                                    Icons.add,
+                                    size: 16,
+                                    color: context.colors.muted,
+                                  ),
                                   const SizedBox(width: 2),
-                                  Text('New', style: TextStyle(fontSize: 13, color: context.colors.muted)),
+                                  Text(
+                                    'New',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: context.colors.muted,
+                                    ),
+                                  ),
                                 ],
                               ),
                       ),
@@ -285,12 +341,26 @@ class _NoteListState extends State<NoteList> {
                         onTap: widget.onQuickAddEntry,
                         borderRadius: BorderRadius.circular(4),
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           child: Row(
                             children: [
-                              Icon(Icons.bolt, size: 16, color: context.colors.accent),
+                              Icon(
+                                Icons.bolt,
+                                size: 16,
+                                color: context.colors.accent,
+                              ),
                               const SizedBox(width: 2),
-                              Text('Quick', style: TextStyle(fontSize: 13, color: context.colors.accent, fontWeight: FontWeight.w500)),
+                              Text(
+                                'Quick',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: context.colors.accent,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -305,8 +375,15 @@ class _NoteListState extends State<NoteList> {
                         onTap: widget.onOpenSettings,
                         borderRadius: BorderRadius.circular(4),
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          child: Icon(Icons.settings_outlined, size: 16, color: context.colors.muted),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          child: Icon(
+                            Icons.settings_outlined,
+                            size: 16,
+                            color: context.colors.muted,
+                          ),
                         ),
                       ),
                     ),
@@ -323,7 +400,10 @@ class _NoteListState extends State<NoteList> {
               onTap: widget.onClearActiveTag,
               borderRadius: BorderRadius.circular(12),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: context.colors.tagBg,
                   borderRadius: BorderRadius.circular(12),
@@ -331,11 +411,14 @@ class _NoteListState extends State<NoteList> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('#${widget.activeTag}',
-                        style: TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.w500,
-                          color: context.colors.tagFg,
-                        )),
+                    Text(
+                      '#${widget.activeTag}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: context.colors.tagFg,
+                      ),
+                    ),
                     const SizedBox(width: 4),
                     Icon(Icons.close, size: 12, color: context.colors.tagFg),
                   ],
@@ -356,29 +439,23 @@ class _NoteListState extends State<NoteList> {
       note: note,
       selected: note.id == widget.currentNoteId,
       onTap: () => widget.onSelectNote(note.id),
-      onPrimaryAction: () => isArchiveOrTrash
-          ? widget.onRestore(note)
-          : widget.onArchive(note),
+      onPrimaryAction: () =>
+          isArchiveOrTrash ? widget.onRestore(note) : widget.onArchive(note),
       onSecondaryAction: widget.activeFilter == 'trash'
           ? () => widget.onDeletePermanent(note)
           : widget.activeFilter == 'archive'
-              ? () => widget.onDeletePermanent(note)
-              : () => widget.onDelete(note),
+          ? () => widget.onDeletePermanent(note)
+          : () => widget.onDelete(note),
       longPressActions: _buildLongPressActions(note),
       activeFilter: widget.activeFilter,
       budgets: widget.budgets ?? const [],
+      onChecklistToggle: widget.onChecklistToggle,
     );
   }
 
   Widget _buildCardList() {
-    final isDesktop = MediaQuery.of(context).size.width >= 1024;
-    final showDashboard = widget.activeFilter == 'finance' &&
-        widget.financeSummary != null &&
-        !widget.financeSummary!.isEmpty;
-
-    if (isDesktop && widget.notes.isEmpty && !showDashboard) {
-      return const SizedBox.shrink();
-    }
+    final showDashboard =
+        widget.activeFilter == 'finance' && widget.financeSummary != null;
 
     final Widget child;
 
@@ -412,37 +489,47 @@ class _NoteListState extends State<NoteList> {
     } else if (widget.notes.isEmpty) {
       switch (widget.activeFilter) {
         case 'archive':
-          child = _emptyState(icon: Icons.archive_outlined, title: 'No archived notes', subtitle: 'Notes you archive will appear here.'); break;
+          child = _emptyState(
+            icon: Icons.archive_outlined,
+            title: 'No archived notes',
+            subtitle: 'Notes you archive will appear here.',
+          );
+          break;
         case 'trash':
-          child = Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            _emptyState(icon: Icons.delete_outline, title: 'Trash is empty', subtitle: 'Deleted notes will appear here.'),
-            const SizedBox(height: 20),
-            TextButton.icon(
-              onPressed: widget.onEmptyTrash,
-              icon: Icon(Icons.delete_sweep_outlined, size: 16, color: context.colors.destructive),
-              label: Text('Empty trash', style: TextStyle(fontSize: 13, color: context.colors.destructive)),
-            ),
-          ]); break;
+          child = _emptyState(
+            icon: Icons.delete_outline,
+            title: 'Trash is empty',
+            subtitle: 'Deleted notes will appear here.',
+          );
+          break;
         case 'pinned':
-          child = _emptyState(icon: Icons.push_pin_outlined, title: 'No pinned notes', subtitle: 'Long-press a note to pin it.'); break;
+          child = _emptyState(
+            icon: Icons.push_pin_outlined,
+            title: 'No pinned notes',
+            subtitle: 'Long-press a note to pin it.',
+          );
+          break;
         case 'tasks':
           child = _emptyState(
             icon: Icons.check_circle_outline,
             title: 'No tasks yet',
             subtitle: 'Create your first task.',
-          ); break;
+          );
+          break;
         case 'meeting':
           child = _emptyState(
             icon: Icons.groups_outlined,
             title: 'No meetings recorded',
             subtitle: 'Capture attendees, decisions and action items.',
-          ); break;
+          );
+          break;
         case 'journal':
           child = _emptyState(
             icon: Icons.menu_book_outlined,
             title: 'No journal entries yet',
             subtitle: 'Record your thoughts, wins and lessons.',
-          ); break;
+          );
+          break;
         case 'finance':
           child = _emptyState(
             icon: Icons.account_balance_wallet_outlined,
@@ -453,14 +540,27 @@ class _NoteListState extends State<NoteList> {
                 onPressed: widget.onQuickAddEntry,
                 icon: const Icon(Icons.add, size: 16),
                 label: const Text('Add First Transaction'),
-                style: TextButton.styleFrom(foregroundColor: context.colors.accent),
+                style: TextButton.styleFrom(
+                  foregroundColor: context.colors.accent,
+                ),
               ),
             ],
-          ); break;
+          );
+          break;
         case 'today':
-          child = _emptyState(icon: Icons.calendar_today_outlined, title: 'Nothing today', subtitle: 'Notes you edit today will appear here.'); break;
+          child = _emptyState(
+            icon: Icons.calendar_today_outlined,
+            title: 'Nothing today',
+            subtitle: 'Notes you edit today will appear here.',
+          );
+          break;
         case 'untagged':
-          child = _emptyState(icon: Icons.tag, title: 'All notes are tagged', subtitle: 'Untagged notes will appear here.'); break;
+          child = _emptyState(
+            icon: Icons.tag,
+            title: 'All notes are tagged',
+            subtitle: 'Untagged notes will appear here.',
+          );
+          break;
         default:
           if (widget.searchQuery.isNotEmpty) {
             child = _emptyState(
@@ -478,7 +578,9 @@ class _NoteListState extends State<NoteList> {
                   onPressed: widget.onNewNote,
                   icon: const Icon(Icons.add, size: 16),
                   label: const Text('Create Note'),
-                  style: TextButton.styleFrom(foregroundColor: context.colors.accent),
+                  style: TextButton.styleFrom(
+                    foregroundColor: context.colors.accent,
+                  ),
                 ),
               ],
             );
@@ -531,13 +633,16 @@ class _NoteListState extends State<NoteList> {
   Widget _buildSectionHeader(String label) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(0, 24, 0, 8),
-      child: Text(label,
-          style: TextStyle(
-            fontSize: 11, fontWeight: FontWeight.w600,
-            color: context.colors.muted,
-            letterSpacing: 0.08,
-            height: 1.2,
-          )),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: context.colors.muted,
+          letterSpacing: 0.08,
+          height: 1.2,
+        ),
+      ),
     );
   }
 
@@ -549,9 +654,7 @@ class _NoteListState extends State<NoteList> {
     return [
       if (isMain || isArchive)
         LongPressAction(
-          icon: note.isPinned
-              ? Icons.push_pin
-              : Icons.push_pin_outlined,
+          icon: note.isPinned ? Icons.push_pin : Icons.push_pin_outlined,
           label: note.isPinned ? 'Unpin' : 'Pin',
           onTap: () => widget.onTogglePin(note),
         ),
@@ -603,16 +706,27 @@ class _NoteListState extends State<NoteList> {
             Icon(icon, size: 36, color: context.colors.muted.withAlpha(80)),
             const SizedBox(height: 16),
           ],
-          Text(title, style: GoogleFonts.dmSans(
-            fontSize: 20, fontWeight: FontWeight.w500,
-            color: context.colors.fg, height: 1.3)),
+          Text(
+            title,
+            style: GoogleFonts.dmSans(
+              fontSize: 20,
+              fontWeight: FontWeight.w500,
+              color: context.colors.fg,
+              height: 1.3,
+            ),
+          ),
           const SizedBox(height: 6),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Text(subtitle,
-                style: TextStyle(
-                  fontSize: 13, color: context.colors.muted, height: 1.4),
-                textAlign: TextAlign.center),
+            child: Text(
+              subtitle,
+              style: TextStyle(
+                fontSize: 13,
+                color: context.colors.muted,
+                height: 1.4,
+              ),
+              textAlign: TextAlign.center,
+            ),
           ),
           if (actions != null && actions.isNotEmpty) ...[
             const SizedBox(height: 20),
@@ -633,6 +747,8 @@ class _NoteCard extends StatefulWidget {
   final List<LongPressAction> longPressActions;
   final String activeFilter;
   final List<Budget> budgets;
+  final void Function(Note note, int lineIndex, bool checked)?
+      onChecklistToggle;
 
   const _NoteCard({
     required this.note,
@@ -643,6 +759,7 @@ class _NoteCard extends StatefulWidget {
     required this.longPressActions,
     this.activeFilter = 'notes',
     this.budgets = const [],
+    this.onChecklistToggle,
   });
 
   @override
@@ -689,7 +806,9 @@ class _NoteCardState extends State<_NoteCard> {
         children: [
           if (_dragOffset < 0)
             Positioned(
-              right: 0, top: 0, bottom: 0,
+              right: 0,
+              top: 0,
+              bottom: 0,
               width: _kActionZoneWidth,
               child: Container(
                 decoration: BoxDecoration(
@@ -697,14 +816,19 @@ class _NoteCardState extends State<_NoteCard> {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Center(
-                  child: Icon(Icons.delete_outline,
-                      color: Color(0xFFF0F0F0), size: 26),
+                  child: Icon(
+                    Icons.delete_outline,
+                    color: Color(0xFFF0F0F0),
+                    size: 26,
+                  ),
                 ),
               ),
             ),
           if (_dragOffset > 0)
             Positioned(
-              left: 0, top: 0, bottom: 0,
+              left: 0,
+              top: 0,
+              bottom: 0,
               width: _kActionZoneWidth,
               child: Container(
                 decoration: BoxDecoration(
@@ -712,8 +836,11 @@ class _NoteCardState extends State<_NoteCard> {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Center(
-                  child: Icon(Icons.archive_outlined,
-                      color: Color(0xFFF0F0F0), size: 26),
+                  child: Icon(
+                    Icons.archive_outlined,
+                    color: Color(0xFFF0F0F0),
+                    size: 26,
+                  ),
                 ),
               ),
             ),
@@ -748,8 +875,8 @@ class _NoteCardState extends State<_NoteCard> {
     // ponytail: compact 2-line card for finance notes — title + amount on row 1,
     // time + entry count on row 2. No content preview, no tag chips. Other
     // filters keep the full card layout.
-    final isFinance = widget.activeFilter == 'finance' &&
-        widget.note.type != 'text';
+    final isFinance =
+        widget.activeFilter == 'finance' && widget.note.type != 'text';
 
     return InkWell(
       onTap: widget.onTap,
@@ -769,15 +896,14 @@ class _NoteCardState extends State<_NoteCard> {
           boxShadow: widget.selected
               ? [
                   BoxShadow(
-                      color: context.colors.accentDim,
-                      blurRadius: 0,
-                      spreadRadius: 2)
+                    color: context.colors.accentDim,
+                    blurRadius: 0,
+                    spreadRadius: 2,
+                  ),
                 ]
               : null,
         ),
-        child: isFinance
-            ? _buildFinanceCardBody()
-            : _buildFullCardBody(),
+        child: isFinance ? _buildFinanceCardBody() : _buildFullCardBody(),
       ),
     );
   }
@@ -786,14 +912,18 @@ class _NoteCardState extends State<_NoteCard> {
     final dominant = _dominantCategory(widget.note);
     final budget = dominant != null
         ? widget.budgets.cast<Budget?>().firstWhere(
-              (b) => b!.category == dominant,
-              orElse: () => null,
-            )
+            (b) => b!.category == dominant,
+            orElse: () => null,
+          )
         : null;
     final budgetActual = budget != null && dominant != null
         ? widget.note.amounts
-            .where((e) => e.category == dominant)
-            .fold<double>(0, (s, e) => s + e.amount)
+              .where(
+                (e) =>
+                    e.category == dominant &&
+                    (e.type ?? widget.note.type) == 'expense',
+              )
+              .fold<double>(0, (s, e) => s + e.amount)
         : 0.0;
 
     return Column(
@@ -883,11 +1013,11 @@ class _NoteCardState extends State<_NoteCard> {
     if (note.amounts.isEmpty) return null;
     final totals = <String, double>{};
     for (final e in note.amounts) {
+      if ((e.type ?? note.type) != 'expense') continue;
       totals[e.category] = (totals[e.category] ?? 0) + e.amount;
     }
-    return totals.entries
-        .reduce((a, b) => a.value >= b.value ? a : b)
-        .key;
+    if (totals.isEmpty) return null;
+    return totals.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
   }
 
   bool _isUnread(Note note) {
@@ -905,7 +1035,8 @@ class _NoteCardState extends State<_NoteCard> {
               Padding(
                 padding: const EdgeInsets.only(right: 6),
                 child: Container(
-                  width: 6, height: 6,
+                  width: 6,
+                  height: 6,
                   decoration: BoxDecoration(
                     color: context.colors.accent,
                     shape: BoxShape.circle,
@@ -913,20 +1044,21 @@ class _NoteCardState extends State<_NoteCard> {
                 ),
               ),
             if (widget.note.isPinned) ...[
-              Icon(Icons.push_pin,
-                  size: 12, color: context.colors.accent),
+              Icon(Icons.push_pin, size: 12, color: context.colors.accent),
               const SizedBox(width: 4),
             ],
             Expanded(
-              child: Text(widget.note.title,
-                  style:  TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: context.colors.fg,
-                    letterSpacing: -0.01,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis),
+              child: Text(
+                widget.note.title,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: context.colors.fg,
+                  letterSpacing: -0.01,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),
@@ -934,38 +1066,50 @@ class _NoteCardState extends State<_NoteCard> {
         if (_contentPreview(widget.note.content).isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
-            child: Text(_contentPreview(widget.note.content),
-                style: TextStyle(
-                  fontSize: 12,
-                  color: context.colors.muted,
-                  height: 1.4,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis),
+            child: Text(
+              _contentPreview(widget.note.content),
+              style: TextStyle(
+                fontSize: 12,
+                color: context.colors.muted,
+                height: 1.4,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
+        if (widget.activeFilter == 'tasks' &&
+            widget.onChecklistToggle != null)
+          _buildTaskChecklist(),
         Row(
           children: [
-            ...widget.note.tags.take(3).map((t) => Padding(
-                  padding: const EdgeInsets.only(right: 4),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 5, vertical: 1),
-                    decoration: BoxDecoration(
-                      color: context.colors.tagBg,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text('#$t',
+            ...widget.note.tags
+                .take(3)
+                .map(
+                  (t) => Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 1,
+                      ),
+                      decoration: BoxDecoration(
+                        color: context.colors.tagBg,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        '#$t',
                         style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w500,
                           color: context.colors.tagFg,
-                        )),
+                        ),
+                      ),
+                    ),
                   ),
-                )),
+                ),
           ],
         ),
-        if (widget.note.type != 'text' &&
-            widget.note.amounts.isNotEmpty) ...[
+        if (widget.note.type != 'text' && widget.note.amounts.isNotEmpty) ...[
           const SizedBox(height: 4),
           Row(
             children: [
@@ -996,24 +1140,91 @@ class _NoteCardState extends State<_NoteCard> {
                 const SizedBox(width: 4),
                 Text(
                   '(${widget.note.amounts.length} entries)',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: context.colors.muted,
-                  ),
+                  style: TextStyle(fontSize: 10, color: context.colors.muted),
                 ),
               ],
             ],
           ),
         ],
         const SizedBox(height: 6),
-        Text(_relativeTime(widget.note.updatedAt),
-            style: TextStyle(
-              fontSize: 10.5,
-              fontFamily: context.colors.monoFontFamily,
-              color: context.colors.muted.withValues(alpha: 0.7),
-              letterSpacing: 0.03,
-            )),
+        Text(
+          _relativeTime(widget.note.updatedAt),
+          style: TextStyle(
+            fontSize: 10.5,
+            fontFamily: context.colors.monoFontFamily,
+            color: context.colors.muted.withValues(alpha: 0.7),
+            letterSpacing: 0.03,
+          ),
+        ),
       ],
+    );
+  }
+
+  Widget _buildTaskChecklist() {
+    final items = <(int, bool, String)>[];
+    for (final entry in widget.note.content.split('\n').asMap().entries) {
+      final match = RegExp(r'^\s*-\s+\[([ xX])\]\s+(.*)$')
+          .firstMatch(entry.value);
+      if (match == null) continue;
+      items.add((
+        entry.key,
+        match.group(1)!.toLowerCase() == 'x',
+        match.group(2)?.trim() ?? '',
+      ));
+      if (items.length == 5) break;
+    }
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    final c = context.colors;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 2),
+      child: Column(
+        children: [
+          for (final item in items)
+            Semantics(
+              button: true,
+              checked: item.$2,
+              label: item.$3.isEmpty ? 'Checklist item' : item.$3,
+              child: InkWell(
+                onTap: () => widget.onChecklistToggle!(
+                  widget.note,
+                  item.$1,
+                  !item.$2,
+                ),
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: Row(
+                    children: [
+                      Icon(
+                        item.$2
+                            ? Icons.check_box_outlined
+                            : Icons.check_box_outline_blank,
+                        size: 17,
+                        color: item.$2 ? c.accent : c.muted,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          item.$3.isEmpty ? 'Untitled task' : item.$3,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: item.$2 ? c.muted : c.fg,
+                            decoration: item.$2
+                                ? TextDecoration.lineThrough
+                                : null,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -1052,8 +1263,7 @@ class _NoteCardState extends State<_NoteCard> {
     return [
       currencySpan(note.currency, null),
       TextSpan(
-        text: formatNumber(total,
-            decimals: note.currency == 'JPY' ? 0 : 2),
+        text: formatNumber(total, decimals: note.currency == 'JPY' ? 0 : 2),
       ),
     ];
   }

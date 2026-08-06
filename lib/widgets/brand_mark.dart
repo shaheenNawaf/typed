@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 
-/// The Typed brand mark — a lowercase 't' with a red period beside it.
-/// The crossbar and the period are in the accent color; the rest in fg.
+/// The Typed brand mark: a lowercase "t" followed by a red period.
+/// The letter uses the foreground color; only the period uses the accent.
 class BrandMark extends StatelessWidget {
   final double size;
   final Color? fg;
@@ -53,7 +53,7 @@ class _BrandMarkPainter extends CustomPainter {
     final period = Rect.fromLTWH(
       w * 0.781, h * 0.750, w * 0.125, h * 0.125);
 
-    canvas.drawRect(crossbar, accent);
+    canvas.drawRect(crossbar, paint);
     canvas.drawRect(stem, paint);
     canvas.drawRect(foot, paint);
     canvas.drawRect(period, accent);

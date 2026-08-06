@@ -1,6 +1,15 @@
 [build]
-  command = "git clone --depth 1 -b stable https://github.com/flutter/flutter.git flutter_sdk && flutter_sdk/bin/flutter config --suppress-analytics && flutter_sdk/bin/flutter build web --release"
+  # Keep deployment builds aligned with the verified local Flutter toolchain.
+  command = "git clone --depth 1 -b 3.35.7 https://github.com/flutter/flutter.git flutter_sdk && flutter_sdk/bin/flutter config --suppress-analytics && flutter_sdk/bin/flutter build web --release"
   publish = "build/web"
 
 [build.environment]
   FLUTTER_SUPPRESS_ANALYTICS = "true"
+
+# SPA fallback: serve index.html for routes that do not map to a real file so
+# client-side routing works on refresh/direct navigation.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+  force = false

@@ -8,7 +8,7 @@
 PRODUCT_NAME = typed
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.example.typed
+PRODUCT_BUNDLE_IDENTIFIER = com.z4yed.typed
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 com.example. All rights reserved.

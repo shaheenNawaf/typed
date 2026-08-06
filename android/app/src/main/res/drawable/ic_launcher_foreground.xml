@@ -5,9 +5,9 @@
     android:viewportHeight="108">
     <!-- Mark shifted up 20% so the foot doesn't sit on the bottom edge -->
     <group android:translateX="22" android:translateY="12">
-        <!-- Accent crossbar (slight overshoot on both sides) -->
+        <!-- Foreground crossbar (slight overshoot on both sides) -->
         <path
-            android:fillColor="#CC4D3C"
+            android:fillColor="#1A242E"
             android:pathData="M 21 38 L 61 38 L 61 45 L 21 45 Z" />
         <!-- Main stem -->
         <path

@@ -11,6 +11,7 @@ import '../models/budget.dart';
 import '../theme/app_colors.dart';
 import '../utils/backup.dart';
 import '../utils/finance_utils.dart';
+import '../utils/id.dart';
 import '../utils/note_storage.dart';
 import '../utils/onboarding.dart';
 import '../utils/templates.dart';
@@ -46,9 +47,11 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _showEditor = false;
   bool _previewMode = false;
   bool _isLoading = true;
+  Object? _loadError;
   Timer? _persistTimer;
   List<String> _customCategories = [];
   List<String> _recentCategories = [];
+  Future<void> _categoryWrite = Future.value();
   String _financePeriod = 'all';
   List<Budget> _budgets = [];
 
@@ -61,52 +64,70 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _persistTimer?.cancel();
+    unawaited(_storage.save(notes));
     super.dispose();
   }
 
   Future<void> _loadAndHandleIntent() async {
-    final hasData = await _storage.hasSavedData();
-    if (hasData) {
-      final loaded = await _storage.load();
-      if (mounted) setState(() => notes = loaded);
-    } else {
-      final data = createOnboardingData();
+    try {
+      final hasData = await _storage.hasSavedData();
+      if (hasData) {
+        final result = await _storage.loadResult();
+        if (result.hasError) throw result.error!;
+        if (mounted) setState(() => notes = result.items);
+
+        final budgetResult = await _storage.loadBudgetsResult();
+        if (budgetResult.hasError) throw budgetResult.error!;
+        if (mounted) setState(() => _budgets = budgetResult.items);
+      } else {
+        final data = createOnboardingData();
+        if (mounted) {
+          setState(() {
+            notes = data.notes;
+            _budgets = data.budgets;
+            _currentNoteId = data.notes.first.id;
+            _showEditor = true;
+            _previewMode = true;
+          });
+        }
+        await Future.wait([
+          _storage.save(data.notes),
+          _storage.saveBudgets(data.budgets),
+        ]);
+      }
+
+      _generateRecurringEntries();
+      final prefs = await SharedPreferences.getInstance();
+      final cats = prefs.getStringList('custom_categories') ?? [];
+      final recent = prefs.getStringList('recent_categories') ?? [];
       if (mounted) {
         setState(() {
-          notes = data.notes;
-          _budgets = data.budgets;
-          _currentNoteId = data.notes.first.id;
-          _showEditor = true;
-          _previewMode = true;
+          _customCategories = cats;
+          _recentCategories = recent;
         });
       }
-      _storage.save(data.notes);
-      _storage.saveBudgets(data.budgets);
-    }
-    _generateRecurringEntries();
-    final prefs = await SharedPreferences.getInstance();
-    final cats = prefs.getStringList('custom_categories') ?? [];
-    final recent = prefs.getStringList('recent_categories') ?? [];
-    final loadedBudgets = await _storage.loadBudgets();
-    if (mounted) {
+
+      const channel = MethodChannel('com.z4yed.typed/widget');
+      String? intentAction;
+      try {
+        intentAction = await channel.invokeMethod<String>('getIntent');
+      } on PlatformException {
+        // Widget intents are optional on non-Android platforms.
+      }
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      if (intentAction == 'new') {
+        _openTemplatePicker();
+      } else if (intentAction != null && intentAction.startsWith('open:')) {
+        final id = intentAction.substring(5);
+        if (notes.any((n) => n.id == id)) _selectNote(id);
+      }
+    } catch (error) {
+      if (!mounted) return;
       setState(() {
-        _customCategories = cats;
-        _recentCategories = recent;
-        _budgets = loadedBudgets;
+        _loadError = error;
+        _isLoading = false;
       });
-    }
-    const channel = MethodChannel('com.z4yed.typed/widget');
-    String? intentAction;
-    try {
-      intentAction = await channel.invokeMethod<String>('getIntent');
-    } catch (_) {}
-    if (!mounted) return;
-    setState(() => _isLoading = false);
-    if (intentAction == 'new') {
-      _openTemplatePicker();
-    } else if (intentAction != null && intentAction.startsWith('open:')) {
-      final id = intentAction.substring(5);
-      if (notes.any((n) => n.id == id)) _selectNote(id);
     }
   }
 
@@ -119,10 +140,13 @@ class _HomeScreenState extends State<HomeScreen> {
         !kDefaultCategories.contains(category)) {
       _customCategories = [..._customCategories, category];
     }
-    SharedPreferences.getInstance().then((prefs) {
-      prefs.setStringList('recent_categories', _recentCategories);
-      prefs.setStringList('custom_categories', _customCategories);
-    });
+    _categoryWrite = _categoryWrite
+        .then((_) async {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setStringList('recent_categories', _recentCategories);
+          await prefs.setStringList('custom_categories', _customCategories);
+        })
+        .catchError((_) {});
   }
 
   void _generateRecurringEntries() {
@@ -137,18 +161,24 @@ class _HomeScreenState extends State<HomeScreen> {
         entry.lastGenerated ??= entry.date;
 
         var next = _nextDate(entry.lastGenerated!, entry.recurInterval!);
-        while (!next.isAfter(todayDate)) {
-          if (entry.recurEnd != null && next.isAfter(entry.recurEnd!)) break;
+        while (!_dateOnly(next).isAfter(todayDate)) {
+          if (entry.recurEnd != null &&
+              _dateOnly(next).isAfter(_dateOnly(entry.recurEnd!))) {
+            break;
+          }
 
-          note.amounts.add(MoneyEntry(
-            id: 'm${DateTime.now().millisecondsSinceEpoch}',
-            amount: entry.amount,
-            category: entry.category,
-            date: next,
-            note: entry.note,
-            paymentMethod: entry.paymentMethod,
-            currency: entry.currency,
-          ));
+          note.amounts.add(
+            MoneyEntry(
+              id: generateId('m'),
+              amount: entry.amount,
+              category: entry.category,
+              date: next,
+              note: entry.note,
+              paymentMethod: entry.paymentMethod,
+              currency: entry.currency,
+              type: entry.type,
+            ),
+          );
           entry.lastGenerated = next;
           changed = true;
           next = _nextDate(next, entry.recurInterval!);
@@ -165,13 +195,36 @@ class _HomeScreenState extends State<HomeScreen> {
       case 'weekly':
         return from.add(const Duration(days: 7));
       case 'monthly':
-        return DateTime(from.year, from.month + 1, from.day);
+        final target = DateTime(from.year, from.month + 2, 0);
+        return DateTime(
+          target.year,
+          target.month,
+          from.day.clamp(1, target.day),
+          from.hour,
+          from.minute,
+          from.second,
+          from.millisecond,
+          from.microsecond,
+        );
       case 'yearly':
-        return DateTime(from.year + 1, from.month, from.day);
+        final target = DateTime(from.year + 2, from.month + 1, 0);
+        return DateTime(
+          target.year,
+          from.month,
+          from.day.clamp(1, target.day),
+          from.hour,
+          from.minute,
+          from.second,
+          from.millisecond,
+          from.microsecond,
+        );
       default:
         return from.add(const Duration(days: 1));
     }
   }
+
+  DateTime _dateOnly(DateTime value) =>
+      DateTime(value.year, value.month, value.day);
 
   void _addBudget(Budget budget) {
     setState(() => _budgets = [..._budgets, budget]);
@@ -179,7 +232,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _removeBudget(Budget budget) {
-    setState(() => _budgets = _budgets.where((b) => b.id != budget.id).toList());
+    setState(
+      () => _budgets = _budgets.where((b) => b.id != budget.id).toList(),
+    );
     _storage.saveBudgets(_budgets);
   }
 
@@ -198,11 +253,15 @@ class _HomeScreenState extends State<HomeScreen> {
       if (n.isArchived || n.isDeleted) continue;
       if (n.type != type) continue;
       if (n.title != label) continue;
-      final nDate = DateTime(n.updatedAt.year, n.updatedAt.month, n.updatedAt.day);
+      final nDate = DateTime(
+        n.updatedAt.year,
+        n.updatedAt.month,
+        n.updatedAt.day,
+      );
       if (nDate == todayDate) return n;
     }
     // Otherwise create one
-    final id = 'n${DateTime.now().millisecondsSinceEpoch}';
+    final id = generateId('n');
     final note = Note(
       id: id,
       title: label,
@@ -217,8 +276,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _quickDateLabel(DateTime d) {
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${months[d.month - 1]} ${d.day}';
   }
@@ -270,8 +339,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<String> get _allTags {
     final tags = <String>{};
-    for (final n in notes) {
-      tags.addAll(n.tags);
+    for (final n in notes.where((n) => !n.isArchived && !n.isDeleted)) {
+      for (final tag in n.tags) {
+        final normalized = _normalizeTag(tag);
+        if (normalized.isNotEmpty) tags.add(normalized);
+      }
     }
     final list = tags.toList()..sort();
     return list;
@@ -281,49 +353,64 @@ class _HomeScreenState extends State<HomeScreen> {
     final counts = <String, int>{};
     for (final n in notes.where((n) => !n.isArchived && !n.isDeleted)) {
       for (final tag in n.tags) {
-        counts[tag] = (counts[tag] ?? 0) + 1;
+        final normalized = _normalizeTag(tag);
+        if (normalized.isNotEmpty) {
+          counts[normalized] = (counts[normalized] ?? 0) + 1;
+        }
       }
     }
     return counts;
   }
 
-  List<Note> get _pinnedNotes => notes
-      .where((n) => n.isPinned && !n.isArchived && !n.isDeleted)
-      .toList();
+  String _normalizeTag(String tag) =>
+      tag.trim().replaceFirst(RegExp(r'^#+'), '').trim();
+
+  List<Note> get _pinnedNotes =>
+      notes.where((n) => n.isPinned && !n.isArchived && !n.isDeleted).toList();
 
   Map<String, int> get _counts => {
-        'pinned': notes
-            .where((n) => n.isPinned && !n.isArchived && !n.isDeleted)
-            .length,
-        'notes': notes.where((n) => !n.isArchived && !n.isDeleted).length,
-        'untagged': notes
-            .where((n) => n.tags.isEmpty && !n.isArchived && !n.isDeleted)
-            .length,
-        'tasks': notes
-            .where((n) =>
-                !n.isArchived &&
-                !n.isDeleted &&
-                (n.type == 'todo' ||
-                    n.title.toLowerCase().contains('todo') ||
-                    n.content.contains('[ ]')))
-            .length,
-        'today': notes.where((n) =>
-            !n.isArchived && !n.isDeleted &&
-            _isToday(n.updatedAt)).length,
-        'meeting': notes.where((n) =>
-            !n.isArchived && !n.isDeleted &&
-            n.title.toLowerCase().contains('meeting')).length,
-        'journal': notes.where((n) =>
-            !n.isArchived && !n.isDeleted &&
-            n.title.toLowerCase().contains('journal')).length,
-        'finance': notes
-            .where((n) =>
-                n.type != 'text' && !n.isArchived && !n.isDeleted)
-            .length,
-        'archive':
-            notes.where((n) => n.isArchived && !n.isDeleted).length,
-        'trash': notes.where((n) => n.isDeleted).length,
-      };
+    'pinned': notes
+        .where((n) => n.isPinned && !n.isArchived && !n.isDeleted)
+        .length,
+    'notes': notes.where((n) => !n.isArchived && !n.isDeleted).length,
+    'untagged': notes
+        .where((n) => n.tags.isEmpty && !n.isArchived && !n.isDeleted)
+        .length,
+    'tasks': notes
+        .where(
+          (n) =>
+              !n.isArchived &&
+              !n.isDeleted &&
+              (n.type == 'todo' ||
+                  n.title.toLowerCase().contains('todo') ||
+                  n.content.contains('[ ]')),
+        )
+        .length,
+    'today': notes
+        .where((n) => !n.isArchived && !n.isDeleted && _isToday(n.updatedAt))
+        .length,
+    'meeting': notes
+        .where(
+          (n) =>
+              !n.isArchived &&
+              !n.isDeleted &&
+              n.title.toLowerCase().contains('meeting'),
+        )
+        .length,
+    'journal': notes
+        .where(
+          (n) =>
+              !n.isArchived &&
+              !n.isDeleted &&
+              n.title.toLowerCase().contains('journal'),
+        )
+        .length,
+    'finance': notes
+        .where((n) => n.type != 'text' && !n.isArchived && !n.isDeleted)
+        .length,
+    'archive': notes.where((n) => n.isArchived && !n.isDeleted).length,
+    'trash': notes.where((n) => n.isDeleted).length,
+  };
 
   bool _isToday(DateTime d) {
     final now = DateTime.now();
@@ -336,13 +423,16 @@ class _HomeScreenState extends State<HomeScreen> {
       case 'week':
         final monday = now.subtract(Duration(days: now.weekday - 1));
         final startOfWeek = DateTime(monday.year, monday.month, monday.day);
-        return !d.isBefore(startOfWeek);
+        return !d.isBefore(startOfWeek) &&
+            d.isBefore(startOfWeek.add(const Duration(days: 7)));
       case 'month':
         final startOfMonth = DateTime(now.year, now.month, 1);
-        return !d.isBefore(startOfMonth);
+        return !d.isBefore(startOfMonth) &&
+            d.isBefore(DateTime(now.year, now.month + 1, 1));
       case 'year':
         final startOfYear = DateTime(now.year, 1, 1);
-        return !d.isBefore(startOfYear);
+        return !d.isBefore(startOfYear) &&
+            d.isBefore(DateTime(now.year + 1, 1, 1));
       default:
         return true;
     }
@@ -377,26 +467,30 @@ class _HomeScreenState extends State<HomeScreen> {
       case 'month':
         final start = DateTime(now.year, now.month, 1);
         final nextMonth = DateTime(now.year, now.month + 1, 1);
-        return nextMonth.difference(start).inDays.toDouble();
-      case 'year': {
-        final start = DateTime(now.year, 1, 1);
-        final end = DateTime(now.year, 12, 31);
-        return end.difference(start).inDays.toDouble() + 1;
-      }
+        return DateTime(
+          nextMonth.year,
+          nextMonth.month,
+          1,
+        ).difference(DateTime(start.year, start.month, 1)).inDays.toDouble();
+      case 'year':
+        {
+          final start = DateTime(now.year, 1, 1);
+          final end = DateTime(now.year, 12, 31);
+          return end.difference(start).inDays.toDouble() + 1;
+        }
       default:
         return 0;
     }
   }
 
   FinanceSummary get _financeSummary {
-    final financeNotes =
-        notes.where((n) => n.type != 'text' && !n.isArchived && !n.isDeleted);
+    final financeNotes = notes.where(
+      (n) => n.type != 'text' && !n.isArchived && !n.isDeleted,
+    );
 
-    double totalIncome = 0;
-    double totalExpense = 0;
     double prevIncome = 0;
     double prevExpense = 0;
-    final byCategory = <String, double>{};
+    final categoryByCurrency = <String, Map<String, double>>{};
     final allEntries = <(MoneyEntry, Note)>[];
     final currencyCounts = <String, int>{};
     final incomeByCurrency = <String, double>{};
@@ -411,18 +505,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
         final cur = e.currency ?? n.currency ?? 'PHP';
         final effectiveType = e.type ?? n.type;
+        if (effectiveType != 'income' && effectiveType != 'expense') continue;
 
         if (inPeriod) {
           allEntries.add((e, n));
           currenciesUsed.add(cur);
           if (effectiveType == 'income') {
-            totalIncome += e.amount;
             incomeByCurrency[cur] = (incomeByCurrency[cur] ?? 0) + e.amount;
           } else {
-            totalExpense += e.amount;
             expenseByCurrency[cur] = (expenseByCurrency[cur] ?? 0) + e.amount;
+            final byCategory = categoryByCurrency.putIfAbsent(cur, () => {});
+            byCategory[e.category] = (byCategory[e.category] ?? 0) + e.amount;
           }
-          byCategory[e.category] = (byCategory[e.category] ?? 0) + e.amount;
           currencyCounts[cur] = (currencyCounts[cur] ?? 0) + 1;
         }
 
@@ -437,10 +531,15 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     allEntries.sort((a, b) => b.$1.date.compareTo(a.$1.date));
-    final sortedCategories = byCategory.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    final dominant = currencyCounts.entries
-        .fold<String>('PHP', (acc, e) => e.value > (currencyCounts[acc] ?? 0) ? e.key : acc);
+    final dominant = currencyCounts.entries.fold<String>(
+      'PHP',
+      (acc, e) => e.value > (currencyCounts[acc] ?? 0) ? e.key : acc,
+    );
+    final totalIncome = incomeByCurrency[dominant] ?? 0;
+    final totalExpense = expenseByCurrency[dominant] ?? 0;
+    final sortedCategories =
+        (categoryByCurrency[dominant] ?? {}).entries.toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
 
     final avgDaily = _daysInCurrentPeriod > 0
         ? totalExpense / _daysInCurrentPeriod
@@ -483,52 +582,69 @@ class _HomeScreenState extends State<HomeScreen> {
             .toList();
       case 'tasks':
         filtered = filtered
-            .where((n) =>
-                !n.isArchived &&
-                !n.isDeleted &&
-                (n.type == 'todo' ||
-                    n.title.toLowerCase().contains('todo') ||
-                    n.content.contains('[ ]')))
+            .where(
+              (n) =>
+                  !n.isArchived &&
+                  !n.isDeleted &&
+                  (n.type == 'todo' ||
+                      n.title.toLowerCase().contains('todo') ||
+                      n.content.contains('[ ]')),
+            )
             .toList();
       case 'today':
         filtered = filtered
-            .where((n) =>
-                !n.isArchived && !n.isDeleted && _isToday(n.updatedAt))
+            .where(
+              (n) => !n.isArchived && !n.isDeleted && _isToday(n.updatedAt),
+            )
             .toList();
       case 'finance':
         filtered = filtered
-            .where((n) =>
-                n.type != 'text' && !n.isArchived && !n.isDeleted)
+            .where((n) => n.type != 'text' && !n.isArchived && !n.isDeleted)
             .toList();
       case 'meeting':
-        filtered = filtered.where((n) =>
-            !n.isArchived && !n.isDeleted &&
-            n.title.toLowerCase().contains('meeting')).toList();
+        filtered = filtered
+            .where(
+              (n) =>
+                  !n.isArchived &&
+                  !n.isDeleted &&
+                  n.title.toLowerCase().contains('meeting'),
+            )
+            .toList();
       case 'journal':
-        filtered = filtered.where((n) =>
-            !n.isArchived && !n.isDeleted &&
-            n.title.toLowerCase().contains('journal')).toList();
+        filtered = filtered
+            .where(
+              (n) =>
+                  !n.isArchived &&
+                  !n.isDeleted &&
+                  n.title.toLowerCase().contains('journal'),
+            )
+            .toList();
       case 'archive':
-        filtered =
-            filtered.where((n) => n.isArchived && !n.isDeleted).toList();
+        filtered = filtered.where((n) => n.isArchived && !n.isDeleted).toList();
       case 'trash':
         filtered = filtered.where((n) => n.isDeleted).toList();
       default:
-        filtered =
-            filtered.where((n) => !n.isArchived && !n.isDeleted).toList();
+        filtered = filtered
+            .where((n) => !n.isArchived && !n.isDeleted)
+            .toList();
     }
 
     if (_activeTag != null) {
-      filtered = filtered.where((n) => n.tags.contains(_activeTag)).toList();
+      final activeTag = _normalizeTag(_activeTag!);
+      filtered = filtered
+          .where((n) => n.tags.any((tag) => _normalizeTag(tag) == activeTag))
+          .toList();
     }
 
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
       filtered = filtered
-          .where((n) =>
-              n.title.toLowerCase().contains(q) ||
-              n.content.toLowerCase().contains(q) ||
-              n.tags.any((t) => t.toLowerCase().contains(q)))
+          .where(
+            (n) =>
+                n.title.toLowerCase().contains(q) ||
+                n.content.toLowerCase().contains(q) ||
+                n.tags.any((t) => t.toLowerCase().contains(q)),
+          )
           .toList();
     }
 
@@ -635,7 +751,9 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: TextButton.styleFrom(foregroundColor: context.colors.destructive),
+            style: TextButton.styleFrom(
+              foregroundColor: context.colors.destructive,
+            ),
             child: const Text('Delete'),
           ),
         ],
@@ -653,14 +771,17 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     _persistNow();
     setState(() {});
-    _showSnackBar('Deleted permanently', onUndo: () {
-      setState(() {
-        notes.insert(index, note);
-        note.isArchived = wasArchived;
-        note.isDeleted = wasDeleted;
-      });
-      _persistNow();
-    });
+    _showSnackBar(
+      'Deleted permanently',
+      onUndo: () {
+        setState(() {
+          notes.insert(index, note);
+          note.isArchived = wasArchived;
+          note.isDeleted = wasDeleted;
+        });
+        _persistNow();
+      },
+    );
   }
 
   Future<void> _emptyTrash() async {
@@ -670,7 +791,9 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Empty trash?'),
-        content: Text('${trashed.length} note${trashed.length == 1 ? '' : 's'} will be deleted permanently.'),
+        content: Text(
+          '${trashed.length} note${trashed.length == 1 ? '' : 's'} will be deleted permanently.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -678,7 +801,9 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: TextButton.styleFrom(foregroundColor: context.colors.destructive),
+            style: TextButton.styleFrom(
+              foregroundColor: context.colors.destructive,
+            ),
             child: const Text('Delete all'),
           ),
         ],
@@ -711,11 +836,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _exportNotes() async {
     try {
-      final path = await Backup.exportToFile(notes);
-      await Share.shareXFiles(
-        [XFile(path)],
-        text: 'Typed notes backup',
-      );
+      final file = await Backup.exportToFile(notes);
+      await Share.shareXFiles([file], text: 'Typed notes backup');
     } catch (e) {
       _showSnackBar('Export failed: $e');
     }
@@ -723,11 +845,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _exportFinance() async {
     try {
-      final path = await Backup.exportFinanceCsv(notes);
-      await Share.shareXFiles(
-        [XFile(path)],
-        text: 'Typed finance export',
-      );
+      final file = await Backup.exportFinanceCsv(notes);
+      await Share.shareXFiles([file], text: 'Typed finance export');
     } catch (e) {
       _showSnackBar('Export failed: $e');
     }
@@ -738,12 +857,16 @@ class _HomeScreenState extends State<HomeScreen> {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['json'],
+        withData: true,
       );
       if (result == null || result.files.isEmpty) return;
+      final bytes = result.files.first.bytes;
       final path = result.files.first.path;
-      if (path == null) return;
+      if (bytes == null && path == null) return;
 
-      final imported = await Backup.importFromFile(path);
+      final imported = bytes != null
+          ? await Backup.importFromBytes(bytes)
+          : await Backup.importFromFile(path!);
       if (!mounted) return;
 
       final confirmed = await showDialog<bool>(
@@ -762,7 +885,9 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             TextButton(
               onPressed: () => Navigator.pop(ctx, true),
-              style: TextButton.styleFrom(foregroundColor: context.colors.destructive),
+              style: TextButton.styleFrom(
+                foregroundColor: context.colors.destructive,
+              ),
               child: const Text('Replace'),
             ),
           ],
@@ -815,6 +940,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final note = _noteById(id);
     if (note == null) return;
     note.viewedAt = DateTime.now();
+    _persist();
     setState(() {
       _currentNoteId = id;
       _showEditor = true;
@@ -827,7 +953,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _createNote([String? title]) {
-    final id = 'n${DateTime.now().millisecondsSinceEpoch}';
+    final id = generateId('n');
     final note = Note(
       id: id,
       title: title ?? 'Untitled',
@@ -846,14 +972,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _openTemplatePicker() {
-    TemplatePickerSheet.show(
-      context,
-      onPick: _createNoteFromTemplate,
-    );
+    TemplatePickerSheet.show(context, onPick: _createNoteFromTemplate);
   }
 
   void _createNoteFromTemplate(NoteTemplate template) {
-    final id = 'n${DateTime.now().millisecondsSinceEpoch}';
+    final id = generateId('n');
     final note = Note(
       id: id,
       title: template.title,
@@ -893,6 +1016,21 @@ class _HomeScreenState extends State<HomeScreen> {
     note.content = content;
     note.updatedAt = DateTime.now();
     _persist();
+  }
+
+  void _toggleChecklistItem(Note note, int lineIndex, bool checked) {
+    final lines = note.content.split('\n');
+    if (lineIndex < 0 || lineIndex >= lines.length) return;
+    final marker = RegExp(r'\[[ xX]\]');
+    if (!marker.hasMatch(lines[lineIndex])) return;
+    lines[lineIndex] = lines[lineIndex].replaceFirst(
+      marker,
+      checked ? '[x]' : '[ ]',
+    );
+    note.content = lines.join('\n');
+    note.updatedAt = DateTime.now();
+    _persistNow();
+    setState(() {});
   }
 
   void _onImageAdded(String path) {
@@ -939,20 +1077,28 @@ class _HomeScreenState extends State<HomeScreen> {
   void _updateTags(List<String> tags) {
     final note = _noteById(_currentNoteId);
     if (note == null) return;
+    final normalized = <String>[];
+    for (final tag in tags) {
+      final value = _normalizeTag(tag);
+      if (value.isNotEmpty && !normalized.contains(value)) normalized.add(value);
+    }
     note.tags
       ..clear()
-      ..addAll(tags);
+      ..addAll(normalized);
     note.updatedAt = DateTime.now();
     _persistNow();
     setState(() {});
   }
 
   void _onTagFilter(String tag) {
+    final normalizedTag = _normalizeTag(tag);
     setState(() {
       _activeFilter = 'notes';
-      _activeTag = tag;
+      _activeTag = normalizedTag;
       _searchQuery = '';
       _currentNoteId = null;
+      _currentTab = 'notes';
+      _showEditor = false;
     });
   }
 
@@ -966,10 +1112,16 @@ class _HomeScreenState extends State<HomeScreen> {
       _currentNoteId = null;
       _searchQuery = '';
       _activeTag = null;
-      if (filter == 'home') { _currentTab = 'home'; }
-      else if (filter == 'finance') { _currentTab = 'finance'; }
-      else if (filter == 'tasks') { _currentTab = 'tasks'; }
-      else { _currentTab = 'notes'; }
+      _showEditor = false;
+      if (filter == 'home') {
+        _currentTab = 'home';
+      } else if (filter == 'finance') {
+        _currentTab = 'finance';
+      } else if (filter == 'tasks') {
+        _currentTab = 'tasks';
+      } else {
+        _currentTab = 'notes';
+      }
     });
   }
 
@@ -979,9 +1131,13 @@ class _HomeScreenState extends State<HomeScreen> {
       _showEditor = false;
       _searchQuery = '';
       _activeTag = null;
-      if (tab == 'notes') { _activeFilter = 'notes'; }
-      else if (tab == 'finance') { _activeFilter = 'finance'; }
-      else if (tab == 'tasks') { _activeFilter = 'tasks'; }
+      if (tab == 'notes') {
+        _activeFilter = 'notes';
+      } else if (tab == 'finance') {
+        _activeFilter = 'finance';
+      } else if (tab == 'tasks') {
+        _activeFilter = 'tasks';
+      }
     });
   }
 
@@ -991,16 +1147,18 @@ class _HomeScreenState extends State<HomeScreen> {
         _onTabChanged('finance');
       case 'tasks':
         _onTabChanged('tasks');
-      case 'meeting': {
-        final templates = getNoteTemplates();
-        final tmpl = templates.firstWhere((t) => t.name == 'Meeting notes');
-        _createNoteFromTemplate(tmpl);
-      }
-      case 'journal': {
-        final templates = getNoteTemplates();
-        final tmpl = templates.firstWhere((t) => t.name == 'Daily journal');
-        _createNoteFromTemplate(tmpl);
-      }
+      case 'meeting':
+        {
+          final templates = getNoteTemplates();
+          final tmpl = templates.firstWhere((t) => t.name == 'Meeting notes');
+          _createNoteFromTemplate(tmpl);
+        }
+      case 'journal':
+        {
+          final templates = getNoteTemplates();
+          final tmpl = templates.firstWhere((t) => t.name == 'Daily journal');
+          _createNoteFromTemplate(tmpl);
+        }
       case 'blank':
         _createNote();
     }
@@ -1039,20 +1197,63 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               BrandMark(size: 56),
               const SizedBox(height: 20),
-              Text('Typed',
-                  style: GoogleFonts.dmSans(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w600,
-                    color: context.colors.fg,
-                    letterSpacing: -0.5,
-                  )),
+              Text(
+                'Typed',
+                style: GoogleFonts.dmSans(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w600,
+                  color: context.colors.fg,
+                  letterSpacing: -0.5,
+                ),
+              ),
               const SizedBox(height: 12),
-              Text('Loading your notes\u2026',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: context.colors.muted,
-                  )),
+              Text(
+                'Loading your notes\u2026',
+                style: TextStyle(fontSize: 13, color: context.colors.muted),
+              ),
             ],
+          ),
+        ),
+      );
+    }
+    if (_loadError != null) {
+      return Scaffold(
+        backgroundColor: context.colors.bg,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.error_outline,
+                  size: 40,
+                  color: context.colors.destructive,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Could not load your notes',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Your saved data was not changed. Try again or restore from a backup.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: context.colors.muted),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () {
+                    setState(() {
+                      _isLoading = true;
+                      _loadError = null;
+                    });
+                    _loadAndHandleIntent();
+                  },
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
           ),
         ),
       );
@@ -1122,15 +1323,19 @@ class _HomeScreenState extends State<HomeScreen> {
                       onClearActiveTag: _clearActiveTag,
                       onOpenSettings: _openSettings,
                       onEmptyTrash: _emptyTrash,
-                      financeSummary: _activeFilter == 'finance' ? _financeSummary : null,
+                      financeSummary: _activeFilter == 'finance'
+                          ? _financeSummary
+                          : null,
                       financePeriod: _financePeriod,
-                      onFinancePeriodChanged: (p) => setState(() => _financePeriod = p),
+                      onFinancePeriodChanged: (p) =>
+                          setState(() => _financePeriod = p),
                       dashboardCurrencySymbol: _dashboardCurrencySymbol,
                       dashboardFormatAmount: _dashboardFormatAmount,
                       budgets: _budgets,
                       onAddBudget: _addBudget,
                       onRemoveBudget: _removeBudget,
-                      onQuickAddEntry: _quickAddEntry,
+                       onQuickAddEntry: _quickAddEntry,
+                       onChecklistToggle: _toggleChecklistItem,
                     ),
             ),
             Expanded(
@@ -1171,7 +1376,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                     ),
-              ),
+            ),
           ],
         ),
       ),
@@ -1221,18 +1426,21 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
-        body: MediaQuery(
-          data: MediaQuery.of(context).copyWith(
-            textScaler: TextScaler.linear(1.15),
-          ),
-          child: _showEditor ? _buildEditorFullScreen() : _buildMobileContent(),
-        ),
+        body: _showEditor
+            ? _buildEditorFullScreen()
+            : SafeArea(
+                top: true,
+                bottom: false,
+                child: Column(
+                  children: [
+                    _buildMobileMenuBar(),
+                    Expanded(child: _buildMobileContent()),
+                  ],
+                ),
+              ),
         bottomNavigationBar: _showEditor
             ? null
-            : MobileNav(
-                currentTab: _currentTab,
-                onTabChanged: _onTabChanged,
-              ),
+            : MobileNav(currentTab: _currentTab, onTabChanged: _onTabChanged),
       ),
     );
   }
@@ -1242,7 +1450,7 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         children: [
           Container(
-            decoration:  BoxDecoration(
+            decoration: BoxDecoration(
               color: context.colors.surface,
               border: Border(bottom: BorderSide(color: context.colors.border)),
             ),
@@ -1252,16 +1460,25 @@ class _HomeScreenState extends State<HomeScreen> {
                   onTap: _closeEditor,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 12),
+                      horizontal: 8,
+                      vertical: 12,
+                    ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.chevron_left,
-                            size: 20, color: context.colors.accent),
+                        Icon(
+                          Icons.chevron_left,
+                          size: 20,
+                          color: context.colors.accent,
+                        ),
                         const SizedBox(width: 2),
-                        Text('Notes',
-                            style: TextStyle(
-                                fontSize: 14, color: context.colors.accent)),
+                        Text(
+                          'Notes',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: context.colors.accent,
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -1289,11 +1506,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     borderRadius: BorderRadius.circular(6),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 6),
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
-                        color: _previewMode
-                            ? context.colors.accentDim
-                            : null,
+                        color: _previewMode ? context.colors.accentDim : null,
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
@@ -1375,7 +1592,8 @@ class _HomeScreenState extends State<HomeScreen> {
         budgets: _budgets,
         onAddBudget: _addBudget,
         onRemoveBudget: _removeBudget,
-        onQuickAddEntry: _quickAddEntry,
+         onQuickAddEntry: _quickAddEntry,
+         onChecklistToggle: _toggleChecklistItem,
       ),
     );
   }
@@ -1395,9 +1613,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildHomeScreen() {
     final isDesktop = MediaQuery.of(context).size.width >= 1024;
-    final recentNotes = notes
-        .where((n) => !n.isArchived && !n.isDeleted)
-        .toList()
+    final recentNotes =
+        notes.where((n) => !n.isArchived && !n.isDeleted).toList()
           ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
     final body = SingleChildScrollView(
@@ -1429,6 +1646,22 @@ class _HomeScreenState extends State<HomeScreen> {
     return Container(
       color: context.colors.listBg,
       child: isDesktop ? body : SafeArea(child: body),
+    );
+  }
+
+  Widget _buildMobileMenuBar() {
+    return Material(
+      color: context.colors.surface,
+      child: Row(
+        children: [
+          IconButton(
+            onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+            tooltip: 'Open navigation',
+            icon: const Icon(Icons.menu),
+          ),
+          Text(_listTitle, style: Theme.of(context).textTheme.titleMedium),
+        ],
+      ),
     );
   }
 
@@ -1483,9 +1716,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildContinueWorking() {
-    final workingNotes = notes
-        .where((n) => !n.isArchived && !n.isDeleted)
-        .toList()
+    final workingNotes =
+        notes.where((n) => !n.isArchived && !n.isDeleted).toList()
           ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
     final items = <Widget>[];
@@ -1494,7 +1726,9 @@ class _HomeScreenState extends State<HomeScreen> {
       orElse: () => null,
     );
     if (financeNote != null) {
-      items.add(_buildContinueCard(financeNote, Icons.account_balance_wallet_outlined));
+      items.add(
+        _buildContinueCard(financeNote, Icons.account_balance_wallet_outlined),
+      );
     }
     final todoNote = workingNotes.cast<Note?>().firstWhere(
       (n) => n!.type == 'todo' || n.title.toLowerCase().contains('todo'),
@@ -1513,7 +1747,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (items.isEmpty) {
       items.addAll([
-        _buildPlaceholderCard('Finance Note', Icons.account_balance_wallet_outlined),
+        _buildPlaceholderCard(
+          'Finance Note',
+          Icons.account_balance_wallet_outlined,
+        ),
         _buildPlaceholderCard('To-do List', Icons.check_circle_outline),
         _buildPlaceholderCard('Journal', Icons.menu_book_outlined),
       ]);
@@ -1592,7 +1829,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildQuickActions() {
     final isDesktop = MediaQuery.of(context).size.width >= 1024;
-    final availableWidth = isDesktop ? 300.0 : MediaQuery.of(context).size.width - 32;
+    final availableWidth = isDesktop
+        ? 300.0
+        : MediaQuery.of(context).size.width - 32;
     final cardWidth = (availableWidth - 10) / 2;
 
     final actions = [
@@ -1640,8 +1879,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildTodaysOverview() {
-    final todayCount = notes.where((n) =>
-        !n.isArchived && !n.isDeleted && _isToday(n.updatedAt)).length;
+    final todayCount = notes
+        .where((n) => !n.isArchived && !n.isDeleted && _isToday(n.updatedAt))
+        .length;
 
     return Container(
       width: double.infinity,
@@ -1659,8 +1899,11 @@ class _HomeScreenState extends State<HomeScreen> {
               color: context.colors.accentDim,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(Icons.calendar_today_outlined,
-                size: 18, color: context.colors.accent),
+            child: Icon(
+              Icons.calendar_today_outlined,
+              size: 18,
+              color: context.colors.accent,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1680,21 +1923,21 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 2),
                 Text(
                   'Tap to view today\'s activity',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: context.colors.muted,
-                  ),
+                  style: TextStyle(fontSize: 11, color: context.colors.muted),
                 ),
               ],
             ),
           ),
           InkWell(
-            onTap: () => Future.microtask(() => _onTabChanged('notes')),
+            onTap: () => Future.microtask(() => _setFilter('today')),
             borderRadius: BorderRadius.circular(6),
             child: Padding(
               padding: const EdgeInsets.all(4),
-              child: Icon(Icons.chevron_right,
-                  size: 18, color: context.colors.muted),
+              child: Icon(
+                Icons.chevron_right,
+                size: 18,
+                color: context.colors.muted,
+              ),
             ),
           ),
         ],
@@ -1735,8 +1978,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     note.type == 'todo'
                         ? Icons.check_circle_outline
                         : note.type != 'text'
-                            ? Icons.account_balance_wallet_outlined
-                            : Icons.article_outlined,
+                        ? Icons.account_balance_wallet_outlined
+                        : Icons.article_outlined,
                     size: 16,
                     color: context.colors.accent,
                   ),
@@ -1780,5 +2023,3 @@ class _HomeScreenState extends State<HomeScreen> {
     return '${d.month}/${d.day}';
   }
 }
-
-
