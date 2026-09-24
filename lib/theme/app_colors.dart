@@ -42,6 +42,18 @@ class AppColors extends ThemeExtension<AppColors> {
     required this.monoFontFamily,
   });
 
+  /// Readable foreground for text/icons painted on [background]. Light-accent
+  /// palettes (nord, monochrome-dark) made a hardcoded white invisible;
+  /// this keeps every CTA on-theme instead of per-call-site guesses.
+  static Color readableOn(Color background) =>
+      background.computeLuminance() > 0.30
+      ? const Color(0xDE000000)
+      : Colors.white;
+
+  Color get onAccent => readableOn(accent);
+  Color get onIncome => readableOn(income);
+  Color get onDestructive => readableOn(destructive);
+
   @override
   AppColors copyWith({
     Color? bg,

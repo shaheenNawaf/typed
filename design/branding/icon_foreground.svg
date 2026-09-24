@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">
+  <title>Typed app icon foreground</title>
+  <!-- Source for the Android adaptive icon foreground (light variant).
+       Canonical t. mark (JetBrains Mono 700, mark_gen.py), ink 48x44.6 units,
+       centered in the 108 viewport via translate(30.01, 19.69) so it sits in
+       the 72dp safe zone. Mirrors
+       android/app/src/main/res/drawable/ic_launcher_foreground.xml.
+       Night variant: t cream #F8F9FA, period #E0634F. -->
+  <g transform="translate(30.01, 19.69)">
+    <path d="M19.77 56.00Q14.86 56.00 12.08 53.26Q9.31 50.53 9.31 45.67V28.73H0.00V21.67H9.31V12.00H17.12V21.67H30.30V28.73H17.12V45.67Q17.12 48.95 20.31 48.95H29.68V56.00Z" fill="#1A242E"/>
+    <path d="M42.14 56.62Q39.47 56.62 37.89 55.05Q36.30 53.48 36.30 50.84Q36.30 48.11 37.89 46.53Q39.47 44.95 42.14 44.95Q44.84 44.95 46.41 46.53Q47.97 48.11 47.97 50.84Q47.97 53.48 46.41 55.05Q44.84 56.62 42.14 56.62Z" fill="#CC4D3C"/>
+  </g>
+</svg>

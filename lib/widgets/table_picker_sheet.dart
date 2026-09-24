@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_metrics.dart';
 
 enum TableAlign { left, center, right }
 
@@ -18,6 +19,7 @@ class TablePickerSheet extends StatefulWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
+      constraints: const BoxConstraints(maxWidth: 560),
       builder: (_) => TablePickerSheet(onInsert: onInsert),
     );
   }
@@ -57,6 +59,7 @@ class _TablePickerSheetState extends State<TablePickerSheet> {
   @override
   Widget build(BuildContext context) {
     return SafeArea(
+      child: SingleChildScrollView(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
         child: Column(
@@ -73,7 +76,7 @@ class _TablePickerSheetState extends State<TablePickerSheet> {
             ),
             Text('Insert table',
                 style: TextStyle(
-                  fontSize: 15, fontWeight: FontWeight.w600,
+                  fontSize: AppType.t15, fontWeight: FontWeight.w600,
                   color: context.colors.fg, letterSpacing: 0.01,
                 )),
             const SizedBox(height: 16),
@@ -97,7 +100,7 @@ class _TablePickerSheetState extends State<TablePickerSheet> {
             const SizedBox(height: 16),
             Text('Alignment',
                 style: TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.w500,
+                  fontSize: AppType.t12, fontWeight: FontWeight.w500,
                   color: context.colors.muted, letterSpacing: 0.04,
                 )),
             const SizedBox(height: 6),
@@ -110,13 +113,13 @@ class _TablePickerSheetState extends State<TablePickerSheet> {
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: context.colors.listBg,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(AppRadius.card),
                 border: Border.all(color: context.colors.border),
               ),
               child: Text(
                 _buildPreview(),
                 style:  TextStyle(
-                  fontSize: 12, fontFamily: context.colors.monoFontFamily,
+                  fontSize: AppType.t12, fontFamily: context.colors.monoFontFamily,
                   color: context.colors.fg, height: 1.5,
                 ),
               ),
@@ -132,7 +135,7 @@ class _TablePickerSheetState extends State<TablePickerSheet> {
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
                     child: Text('Cancel',
-                        style: TextStyle(color: context.colors.fg, fontSize: 14)),
+                        style: TextStyle(color: context.colors.fg, fontSize: AppType.t13_5)),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -146,14 +149,16 @@ class _TablePickerSheetState extends State<TablePickerSheet> {
                       backgroundColor: context.colors.accent,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
-                    child: const Text('Insert',
-                        style: TextStyle(color: Colors.white, fontSize: 14)),
+                    child: Text('Insert',
+                        style: TextStyle(
+                            color: context.colors.onAccent, fontSize: AppType.t13_5)),
                   ),
                 ),
               ],
             ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -181,14 +186,14 @@ class _Stepper extends StatelessWidget {
       children: [
         Text(label,
             style:  TextStyle(
-              fontSize: 12, fontWeight: FontWeight.w500,
+              fontSize: AppType.t12, fontWeight: FontWeight.w500,
               color: context.colors.muted, letterSpacing: 0.04,
             )),
         const SizedBox(height: 6),
         Container(
           decoration: BoxDecoration(
             color: context.colors.listBg,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(AppRadius.card),
             border: Border.all(color: context.colors.border),
           ),
           child: Row(
@@ -201,7 +206,7 @@ class _Stepper extends StatelessWidget {
                 child: Center(
                   child: Text('$value',
                       style:  TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w600,
+                        fontSize: AppType.t13_5, fontWeight: FontWeight.w600,
                         color: context.colors.fg,
                       )),
                 ),
@@ -247,10 +252,10 @@ class _AlignToggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(3),
+      padding: const EdgeInsets.all(AppSpacing.s4),
       decoration: BoxDecoration(
         color: context.colors.listBg,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppRadius.card),
         border: Border.all(color: context.colors.border),
       ),
       child: Row(
@@ -263,12 +268,12 @@ class _AlignToggle extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 decoration: BoxDecoration(
                   color: selected ? context.colors.surface : null,
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(AppRadius.chip),
                 ),
                 child: Center(
                   child: Text(_label(a),
                       style: TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w500,
+                        fontSize: AppType.t13_5, fontWeight: FontWeight.w500,
                         color: selected ? context.colors.fg : context.colors.muted,
                       )),
                 ),

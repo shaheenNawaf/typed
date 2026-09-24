@@ -1,0 +1,15 @@
+<svg viewBox="0 0 200 200" width="200" height="200" xmlns="http://www.w3.org/2000/svg">
+  <!-- B5 — marketing hero: paper grid backdrop, full-color mark (JetBrains Mono 700 t.) -->
+  <defs>
+    <pattern id="grid" width="14" height="14" patternUnits="userSpaceOnUse">
+      <path d="M 14 0 L 0 0 0 14" fill="none" stroke="#18181B" stroke-opacity="0.06" stroke-width="0.6"/>
+    </pattern>
+  </defs>
+  <rect width="200" height="200" rx="20" fill="#F3F1EC"/>
+  <rect width="200" height="200" rx="20" fill="url(#grid)"/>
+  <rect x="1" y="1" width="198" height="198" rx="19" fill="none" stroke="#D8D4CD" stroke-width="1.5"/>
+  <g transform="translate(62.52 46.39) scale(1.5625)">
+    <path d="M19.77 56.00Q14.86 56.00 12.08 53.26Q9.31 50.53 9.31 45.67V28.73H0.00V21.67H9.31V12.00H17.12V21.67H30.30V28.73H17.12V45.67Q17.12 48.95 20.31 48.95H29.68V56.00Z" fill="#1A242E"/>
+    <path d="M42.14 56.62Q39.47 56.62 37.89 55.05Q36.30 53.48 36.30 50.84Q36.30 48.11 37.89 46.53Q39.47 44.95 42.14 44.95Q44.84 44.95 46.41 46.53Q47.97 48.11 47.97 50.84Q47.97 53.48 46.41 55.05Q44.84 56.62 42.14 56.62Z" fill="#CC4D3C"/>
+  </g>
+</svg>

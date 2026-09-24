@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Typed — Motion & Layout Proposal</title>
+<style>
+  :root{
+    --bg:#15171A; --surface:#1C1F22; --surface2:#232629;
+    --fg:#E8EAEC; --muted:#8A929A; --border:#2A2D30;
+    --accent:#E0634F; --accent-dim:rgba(224,99,79,.14);
+    --income:#3CA06B;
+    --fast:120ms; --base:200ms; --slow:320ms; --page:450ms;
+    --emph:cubic-bezier(.2,0,0,1);
+    --decel:cubic-bezier(.05,.7,.1,1);
+    --accel:cubic-bezier(.3,0,.8,.15);
+    --mono:ui-monospace,'Cascadia Mono','JetBrains Mono',Consolas,monospace;
+    --sans:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--fg);font-family:var(--sans);line-height:1.55;padding:0 0 120px}
+  .wrap{max-width:920px;margin:0 auto;padding:0 32px}
+  header{padding:64px 0 8px;border-bottom:1px solid var(--border);margin-bottom:8px}
+  .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--accent);text-transform:uppercase}
+  h1{font-size:34px;font-weight:700;letter-spacing:-.02em;margin:10px 0 6px}
+  .sub{color:var(--muted);font-size:15px;max-width:640px;padding-bottom:32px}
+  h2{font-size:21px;font-weight:650;letter-spacing:-.01em;margin:56px 0 4px;display:flex;align-items:center;gap:10px}
+  h2 .n{font-family:var(--mono);font-size:11px;color:var(--accent);background:var(--accent-dim);border-radius:6px;padding:3px 8px;letter-spacing:.08em}
+  .lede{color:var(--muted);font-size:14px;margin:6px 0 20px;max-width:680px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px;margin:14px 0}
+  .demo{background:var(--surface2);border:1px solid var(--border);border-radius:10px;position:relative;overflow:hidden}
+  .tag{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  .row{display:flex;gap:16px;flex-wrap:wrap}
+  .row>*{flex:1;min-width:240px}
+  .btn{font:inherit;font-size:13px;font-weight:600;color:var(--bg);background:var(--accent);border:0;border-radius:8px;padding:8px 14px;cursor:pointer}
+  .btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}
+  .btn:hover{filter:brightness(1.08)}
+  code{font-family:var(--mono);font-size:12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:1px 7px;color:#d8b4ac}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)}
+  td{padding:9px 10px;border-bottom:1px solid rgba(255,255,255,.04)}
+  td.mono{font-family:var(--mono);font-size:12px;color:var(--accent)}
+  .check{list-style:none}
+  .check li{padding:7px 0 7px 30px;position:relative;font-size:14px;border-bottom:1px solid rgba(255,255,255,.04)}
+  .check li:before{content:'✓';position:absolute;left:2px;color:var(--income);font-weight:700}
+  .check li b{font-weight:600}
+  .check li span{color:var(--muted)}
+
+  /* ---------- B: palette entrance ---------- */
+  #paletteDemo{height:230px;display:flex;align-items:center;justify-content:center}
+  .scrim{position:absolute;inset:0;background:rgba(0,0,0,.4);opacity:0;transition:opacity var(--base) var(--emph)}
+  #paletteDemo.on .scrim{opacity:1}
+  .palette{position:relative;width:420px;background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:0 24px 60px rgba(0,0,0,.5);padding:6px;opacity:0;transform:translateY(10px) scale(.97)}
+  #paletteDemo.on .palette{opacity:1;transform:none;transition:opacity var(--base) var(--emph),transform var(--slow) var(--decel)}
+  .pal-row{display:flex;gap:10px;align-items:center;padding:9px 10px;border-radius:8px}
+  .pal-row.sel{background:var(--accent-dim)}
+  .pal-ic{width:26px;height:26px;border-radius:7px;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:13px}
+  .pal-row.sel .pal-ic{background:var(--accent);color:var(--bg)}
+  .pal-t{font-size:13px;font-weight:550}
+  .pal-d{font-size:11px;color:var(--muted)}
+  .pal-k{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--muted)}
+
+  /* ---------- C: view switch ---------- */
+  #viewDemo{display:flex;flex-direction:column;height:250px}
+  #viewDemo .bar{display:flex;gap:4px;padding:12px 14px;border-bottom:1px solid var(--border)}
+  .tab{font:inherit;font-size:12.5px;font-weight:600;color:var(--muted);background:transparent;border:1px solid transparent;border-radius:8px;padding:6px 14px;cursor:pointer}
+  .tab.on{color:var(--accent);background:var(--accent-dim);border-color:rgba(224,99,79,.3)}
+  #viewBody{flex:1;position:relative;overflow:hidden}
+  .pane{position:absolute;inset:0;padding:18px 20px}
+  .pane.enter{animation:paneIn var(--slow) var(--decel) both}
+  .pane.exit{animation:paneOut var(--fast) var(--accel) both}
+  @keyframes paneIn{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}
+  @keyframes paneOut{from{opacity:1}to{opacity:0;transform:translateX(-8px)}}
+  .p-row{display:flex;justify-content:space-between;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.05);font-size:13px}
+  .p-row .m{font-family:var(--mono);font-size:11px;color:var(--muted)}
+
+  /* ---------- D: card hover ---------- */
+  .cards{display:flex;flex-direction:column;gap:8px;padding:16px}
+  .ncard{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;cursor:pointer;transition:transform var(--fast) var(--emph),border-color var(--fast) var(--emph),background var(--fast) var(--emph)}
+  .ncard:hover{transform:translateY(-2px);border-color:rgba(224,99,79,.45);background:var(--surface)}
+  .ncard:active{transform:scale(.985)}
+  .ncard .t{font-size:13.5px;font-weight:600}
+  .ncard .s{font-size:12px;color:var(--muted);margin-top:2px}
+
+  /* ---------- E: stagger ---------- */
+  #staggerDemo{padding:20px}
+  .st-item{opacity:0;transform:translateY(16px)}
+  #staggerDemo.on .st-item{animation:rise var(--slow) var(--decel) forwards}
+  #staggerDemo.on .st-item:nth-child(1){animation-delay:0ms}
+  #staggerDemo.on .st-item:nth-child(2){animation-delay:45ms}
+  #staggerDemo.on .st-item:nth-child(3){animation-delay:90ms}
+  #staggerDemo.on .st-item:nth-child(4){animation-delay:135ms}
+  #staggerDemo.on .st-item:nth-child(5){animation-delay:180ms}
+  @keyframes rise{to{opacity:1;transform:none}}
+  .st-item{padding:11px 12px;border-bottom:1px solid rgba(255,255,255,.05);display:flex;gap:12px;align-items:center;font-size:13.5px}
+  .st-item .ic{width:28px;height:28px;border-radius:8px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:13px}
+
+  /* ---------- H: curves ---------- */
+  .curves{display:flex;gap:18px;padding:18px;flex-wrap:wrap}
+  .curve{flex:1;min-width:200px}
+  .track{position:relative;height:56px;background:var(--bg);border-radius:8px;border:1px solid var(--border);overflow:hidden}
+  .dot{position:absolute;top:50%;left:12px;width:18px;height:18px;margin-top:-9px;border-radius:50%;background:var(--accent)}
+  .track.go .dot{animation:slide 900ms forwards}
+  .track.linear.go .dot{animation-timing-function:linear}
+  .track.emph.go .dot{animation-timing-function:cubic-bezier(.2,0,0,1)}
+  .track.spring.go .dot{animation-timing-function:cubic-bezier(.34,1.45,.5,1)}
+  @keyframes slide{to{left:calc(100% - 30px)}}
+
+  /* ---------- J: skeleton ---------- */
+  .skel{padding:16px}
+  .sk-row{display:flex;gap:12px;align-items:center;padding:10px 0}
+  .sk-b{background:linear-gradient(100deg,var(--surface2) 40%,#2c3034 50%,var(--surface2) 60%);background-size:200% 100%;animation:shimmer 1.2s linear infinite;border-radius:6px}
+  @keyframes shimmer{to{background-position:-200% 0}}
+  .sk-ic{width:30px;height:30px;flex:none}
+  .sk-l1{height:11px;width:55%}
+  .sk-l2{height:9px;width:80%;margin-top:6px}
+
+  footer{margin-top:64px;padding-top:20px;border-top:1px solid var(--border);color:var(--muted);font-size:12.5px}
+  .accept{background:var(--surface);border:1px solid rgba(224,99,79,.35);border-radius:14px;padding:20px 22px;margin-top:16px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="kicker">Typed · Design Proposal · Read-only</div>
+    <h1>Motion &amp; Layout Standards</h1>
+    <p class="sub">A modern motion and layout system for Typed, grounded in what the app already does. Everything below is a proposal — nothing in the product changes until you accept items.</p>
+  </header>
+
+  <h2><span class="n">01</span>Motion tokens — one system instead of 9 one-offs</h2>
+  <p class="lede">Today the app hand-picks <code>200ms</code>, <code>150ms</code>, <code>180ms</code>, <code>260ms</code>… with default curves. Proposal: four durations and three easings in one <code>AppMotion</code> class, used everywhere.</p>
+  <div class="card">
+    <table>
+      <tr><th>Token</th><th>Value</th><th>Easing</th><th>Used for</th></tr>
+      <tr><td><span class="mono">fast</span></td><td class="mono">120 ms</td><td class="mono">accelerate</td><td>exits, hover states, pressed</td></tr>
+      <tr><td><span class="mono">base</span></td><td class="mono">200 ms</td><td class="mono">emphasized</td><td>selection, hover lift, toggles</td></tr>
+      <tr><td><span class="mono">slow</span></td><td class="mono">320 ms</td><td class="mono">decelerate</td><td>panel reveal, view switch, sheets</td></tr>
+      <tr><td><span class="mono">page</span></td><td class="mono">450 ms</td><td class="mono">emphasized</td><td>mobile editor open/close, onboarding</td></tr>
+    </table>
+    <p style="color:var(--muted);font-size:12.5px;margin-top:10px">Every animation also collapses to zero when the OS "reduce motion" setting is on — currently ignored by the app.</p>
+  </div>
+
+  <h2><span class="n">02</span>Command palette — fade + rise instead of a hard pop</h2>
+  <p class="lede">The palette (Ctrl+K) appears instantly today. Proposed: 200ms fade with a 10px rise and a subtle 0.97→1 scale; scrim fades independently. Click replay:</p>
+  <div class="card">
+    <div class="demo" id="paletteDemo">
+      <div class="scrim"></div>
+      <div class="palette">
+        <div style="padding:8px 10px;color:var(--muted);font-size:13px;border-bottom:1px solid var(--border);margin-bottom:4px">Search actions and pages…</div>
+        <div class="pal-row sel"><div class="pal-ic">＋</div><div><div class="pal-t">New blank note</div><div class="pal-d">Start writing from an empty page</div></div><div class="pal-k">Ctrl N</div></div>
+        <div class="pal-row"><div class="pal-ic">⌂</div><div><div class="pal-t">Home</div><div class="pal-d">Open Home</div></div></div>
+        <div class="pal-row"><div class="pal-ic">▦</div><div><div class="pal-t">Finance</div><div class="pal-d">Open Finance</div></div></div>
+      </div>
+    </div>
+    <div style="margin-top:12px"><button class="btn" onclick="paletteReplay()">▶ Replay entrance</button></div>
+  </div>
+
+  <h2><span class="n">03</span>View switches — slide &amp; fade between sections</h2>
+  <p class="lede">Switching Notes → Finance → Tasks currently hard-cuts. Proposed: outgoing pane fades out 120ms, incoming slides in 320ms decelerate. Same treatment for the mobile list ↔ editor swap. Click the tabs:</p>
+  <div class="card">
+    <div class="demo" id="viewDemo">
+      <div class="bar">
+        <button class="tab on" onclick="viewTo(this,'A')">Notes</button>
+        <button class="tab" onclick="viewTo(this,'B')">Finance</button>
+        <button class="tab" onclick="viewTo(this,'C')">Tasks</button>
+      </div>
+      <div id="viewBody"></div>
+    </div>
+  </div>
+
+  <h2><span class="n">04</span>Cards — hover lift &amp; press feedback (desktop)</h2>
+  <p class="lede">Note cards today respond with only a ripple. Proposed: 2px lift + accent border on hover (120ms), gentle press scale. Hover these:</p>
+  <div class="card">
+    <div class="demo cards">
+      <div class="ncard"><div class="t">👋 Welcome to Typed</div><div class="s">Typed is a private, local-first workspace… · 2m</div></div>
+      <div class="ncard"><div class="t">Quick expenses — Sep 19</div><div class="s">Net ₱14,820.00 · 2 entries</div></div>
+      <div class="ncard"><div class="t">Managing Tasks</div><div class="s">3 of 5 done</div></div>
+    </div>
+  </div>
+
+  <h2><span class="n">05</span>Home — staggered section entrance</h2>
+  <p class="lede">Home currently paints all sections at once. Proposed: 45ms stagger per section, 320ms rise-and-fade, once per app start. Subtle, not showy:</p>
+  <div class="card">
+    <div class="demo" id="staggerDemo">
+      <div class="st-item"><div class="ic">📌</div> PINNED — Welcome to Typed</div>
+      <div class="st-item"><div class="ic">↻</div> CONTINUE — Quick expenses · ₱15,180.00</div>
+      <div class="st-item"><div class="ic">◔</div> TODAY — 6 notes · 4 open tasks · 1 transaction</div>
+      <div class="st-item"><div class="ic">⚡</div> QUICK ACTIONS — Note · Expense · Income · Task</div>
+      <div class="st-item"><div class="ic">≡</div> RECENT — 5 pages</div>
+    </div>
+    <div style="margin-top:12px"><button class="btn" onclick="staggerReplay()">▶ Replay stagger</button></div>
+  </div>
+
+  <h2><span class="n">06</span>Curves — why “emphasized”</h2>
+  <p class="lede">Linear motion feels mechanical; overshoot feels toy-like. Material’s <i>emphasized</i> curve (fast start, gentle landing) is the modern default for UI pushes — proposed for the sidebar and all panel reveals:</p>
+  <div class="card">
+    <div class="demo curves">
+      <div class="curve"><div class="tag">linear (avoid)</div><div class="track linear" id="c1"><div class="dot"></div></div></div>
+      <div class="curve"><div class="tag">emphasized (proposed)</div><div class="track emph" id="c2"><div class="dot"></div></div></div>
+      <div class="curve"><div class="tag">overshoot (avoid)</div><div class="track spring" id="c3"><div class="dot"></div></div></div>
+    </div>
+    <div style="margin-top:12px"><button class="btn" onclick="curvesReplay()">▶ Replay curves</button></div>
+  </div>
+
+  <h2><span class="n">07</span>Loading — skeleton instead of a static splash</h2>
+  <p class="lede">The launch screen is a static mark + “Loading your notes…”. Proposed: keep the mark briefly, then shimmer placeholder rows that map to the real layout, so the first paint feels instant:</p>
+  <div class="card">
+    <div class="demo skel">
+      <div class="sk-row"><div class="sk-b sk-ic"></div><div style="flex:1"><div class="sk-b sk-l1"></div><div class="sk-b sk-l2"></div></div></div>
+      <div class="sk-row"><div class="sk-b sk-ic"></div><div style="flex:1"><div class="sk-b sk-l1" style="width:70%"></div><div class="sk-b sk-l2"></div></div></div>
+      <div class="sk-row"><div class="sk-b sk-ic"></div><div style="flex:1"><div class="sk-b sk-l1" style="width:45%"></div><div class="sk-b sk-l2" style="width:90%"></div></div></div>
+    </div>
+  </div>
+
+  <h2><span class="n">08</span>Layout tokens — grid, radii, type</h2>
+  <p class="lede">BRANDING.md promises an 8px grid; the code uses 2/3/7/9/11/13/26px ad-hoc values, radii range over 8 values, and font sizes include 9.5/10.5/11.5/12.5. Proposal: three token sets, applied without changing any screen’s structure.</p>
+  <div class="card">
+    <table>
+      <tr><th>Set</th><th>Tokens</th><th>Replaces</th></tr>
+      <tr><td>Spacing</td><td class="mono">4 · 8 · 12 · 16 · 24 · 32</td><td>all odd gaps (3, 7, 9, 11, 13, 20, 26…)</td></tr>
+      <tr><td>Radius</td><td class="mono">6 (chips) · 10 (cards) · 14 (sheets/panels)</td><td>4, 6, 7, 8, 10, 12, 18, 24</td></tr>
+      <tr><td>Type</td><td class="mono">10 · 11 · 12 · 13.5 · 15 · 22 · 28</td><td>9.5, 10.5, 11.5, 12.5, 13, 14.5, 17…</td></tr>
+    </table>
+  </div>
+
+  <div class="accept">
+    <div class="tag" style="color:var(--accent)">Acceptance checklist — pick any subset</div>
+    <ul class="check" style="margin-top:10px">
+      <li><b>01 Motion tokens</b> — <span>foundation; required by everything else</span></li>
+      <li><b>02 Command palette entrance</b> — <span>fade + rise + scale</span></li>
+      <li><b>03 View switches</b> — <span>slide &amp; fade between sections; mobile list ↔ editor</span></li>
+      <li><b>04 Card hover lift</b> — <span>desktop hover lift + press scale</span></li>
+      <li><b>05 Home stagger</b> — <span>once-per-start section entrance</span></li>
+      <li><b>06 Emphasized curves</b> — <span>sidebar + panels use the standard curve</span></li>
+      <li><b>07 Skeleton loading</b> — <span>shimmer rows replace the static splash</span></li>
+      <li><b>08 Layout tokens</b> — <span>spacing / radius / type consolidation</span></li>
+      <li><b>Accessibility</b> — <span>all motion respects the OS reduce-motion setting</span></li>
+    </ul>
+  </div>
+
+  <footer>Visual proposal only — no product code was changed. Demos are CSS stand-ins for the Flutter implementation (same durations/curves). Everything ships behind the reduce-motion check.</footer>
+</div>
+
+<script>
+  function paletteReplay(){
+    const d=document.getElementById('paletteDemo');
+    d.classList.remove('on');void d.offsetWidth;setTimeout(()=>d.classList.add('on'),30);
+  }
+  const panes={
+    A:['👋 Welcome to Typed','📓 Using Notes','📓 Managing Tasks','📓 Tracking Finance'],
+    B:['↓ Morning coffee — ₱180.00','↑ Freelance payment — ₱15,000.00','📥 Food & Drink budget — 2%'],
+    C:['☐ Ship the proposal','☐ Review sidebar behavior','☑ Reply to feedback']
+  };
+  let cur='A';
+  function viewTo(btn,key){
+    if(key===cur)return;
+    document.querySelectorAll('#viewDemo .tab').forEach(t=>t.classList.remove('on'));
+    btn.classList.add('on');
+    const body=document.getElementById('viewBody');
+    const old=body.querySelector('.pane');
+    if(old){old.classList.remove('enter');old.classList.add('exit');setTimeout(()=>old.remove(),130);}
+    const p=document.createElement('div');
+    p.className='pane enter';
+    p.innerHTML=panes[key].map(t=>{
+      const m=t.slice(0,2),txt=t.slice(3);
+      return `<div class="p-row"><span>${txt}</span><span class="m">${m==='↓'?'EXP':m==='↑'?'INC':m==='☑'?'DONE':'PAGE'}</span></div>`;
+    }).join('');
+    body.appendChild(p);cur=key;
+  }
+  function staggerReplay(){
+    const d=document.getElementById('staggerDemo');
+    d.classList.remove('on');void d.offsetWidth;setTimeout(()=>d.classList.add('on'),30);
+  }
+  function curvesReplay(){
+    ['c1','c2','c3'].forEach(id=>{const t=document.getElementById(id);t.classList.remove('go');void t.offsetWidth;t.classList.add('go');});
+  }
+  // auto-run demos on load
+  setTimeout(paletteReplay,300);
+  setTimeout(()=>{viewTo(document.querySelectorAll('#viewDemo .tab')[1],'B');
+    setTimeout(()=>viewTo(document.querySelectorAll('#viewDemo .tab')[0],'A'),1400);},700);
+  setTimeout(()=>document.getElementById('staggerDemo').classList.add('on'),900);
+  setTimeout(curvesReplay,1100);
+</script>
+</body>
+</html>

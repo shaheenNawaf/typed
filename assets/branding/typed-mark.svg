@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 64 64" width="64" height="64" xmlns="http://www.w3.org/2000/svg">
+  <title>Typed mark (t.)</title>
+  <!-- The t. from JetBrains Mono 700 as pure paths — the brand mono IS
+       the logo. Regenerate with design/branding/tools/mark_gen.py.
+       Dark surfaces: t in cream #F8F9FA, period #E0634F (see painter /
+       drawable-night variants). -->
+  <path d="M27.78 56.00Q22.87 56.00 20.10 53.26Q17.32 50.53 17.32 45.67V28.73H8.01V21.67H17.32V12.00H25.13V21.67H38.31V28.73H25.13V45.67Q25.13 48.95 28.33 48.95H37.69V56.00Z" fill="#1A242E"/>
+  <path d="M50.15 56.62Q47.49 56.62 45.90 55.05Q44.31 53.48 44.31 50.84Q44.31 48.11 45.90 46.53Q47.49 44.95 50.15 44.95Q52.85 44.95 54.42 46.53Q55.99 48.11 55.99 50.84Q55.99 53.48 54.42 55.05Q52.85 56.62 50.15 56.62Z" fill="#CC4D3C"/>
+</svg>

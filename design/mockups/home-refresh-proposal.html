@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Typed — Home Screen Refresh Proposal</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --accent: #CC4D3C;
+    --fg: #1A242E;
+    --bg: #F8F9FA;
+    --surface: #FFFFFF;
+    --muted: #6E7A85;
+    --border: #E5E8EB;
+    --list: #F2F3F5;
+    --income: #2D8659;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Outfit', sans-serif; background: #EDEFF1; color: var(--fg); padding: 48px 24px 96px; }
+  .page { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 8px 0 40px; font-size: 15px; }
+  h2 { font-size: 20px; font-weight: 600; margin: 56px 0 6px; padding-top: 24px; border-top: 1px solid #D8DCE0; }
+  h2 .num { color: var(--accent); font-family: 'JetBrains Mono', monospace; font-size: 14px; margin-right: 8px; }
+  .desc { color: var(--muted); font-size: 14px; margin-bottom: 24px; max-width: 660px; line-height: 1.5; }
+
+  .row { display: flex; gap: 32px; flex-wrap: wrap; align-items: flex-start; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 24px; flex: 1; min-width: 380px; }
+  .panel-label { font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 16px; color: var(--muted); }
+  .panel-label.bad { color: #B3261E; } .panel-label.good { color: #2D8659; }
+
+  /* phone frame */
+  .phone {
+    width: 390px; height: 760px; border-radius: 28px; overflow: hidden;
+    border: 1px solid #D0D5DA; display: flex; flex-direction: column;
+    margin: 0 auto; background: var(--list);
+  }
+  .phone.dark { background: #15171A; border-color: #2A2D30; }
+  .pstatus { height: 34px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; font-size: 11px; font-weight: 600; flex-shrink: 0; }
+  .pbody { flex: 1; overflow: hidden; padding: 0 16px; }
+  .pnav { height: 58px; border-top: 1px solid var(--border); display: flex; flex-shrink: 0; }
+  .dark .pnav { border-top-color: #2A2D30; }
+  .pnav-item { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 10.5px; color: var(--muted); }
+  .pnav-item.on { color: var(--accent); font-weight: 600; }
+  .dark .pnav-item { color: #8A929A; } .dark .pnav-item.on { color: #E0634F; }
+
+  .mono { font-family: 'JetBrains Mono', monospace; }
+
+  /* --- current screen --- */
+  .hdr { display: flex; align-items: center; justify-content: space-between; padding: 10px 0 4px; }
+  .hdr-menu { font-size: 17px; color: var(--fg); }
+  .hdr-title { font-size: 17px; font-weight: 600; }
+  .hdr-search { width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 9px; display: flex; align-items: center; justify-content: center; color: var(--muted); background: var(--surface); }
+  .dark .hdr-search { background: #1C1F22; border-color: #2A2D30; }
+  .intro { display: flex; align-items: flex-end; justify-content: space-between; padding: 10px 0 12px; }
+  .intro-h { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+  .intro-d { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+  .cta { background: var(--accent); color: #fff; font-size: 13px; font-weight: 600; border-radius: 20px; padding: 9px 14px; }
+  .dark .cta { background: #E0634F; }
+  .search { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px; font-size: 13.5px; color: var(--muted); margin-bottom: 18px; }
+  .dark .search { background: #1C1F22; border-color: #2A2D30; }
+  .sec { font-size: 11px; font-weight: 500; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 8px; }
+  .hcard-row { display: flex; gap: 10px; margin-bottom: 20px; }
+  .hcard { width: 140px; height: 80px; background: var(--surface); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; justify-content: space-between; }
+  .dark .hcard { background: #1C1F22; }
+  .hcard .ic { color: var(--accent); font-size: 13px; }
+  .dark .hcard .ic { color: #E0634F; }
+  .hcard .t { font-size: 11.5px; font-weight: 600; line-height: 1.25; }
+  .dark .t { color: #E8EAEC; }
+  .qgrid { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+  .qcard { width: calc(50% - 5px); min-height: 76px; background: var(--surface); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; justify-content: space-between; }
+  .dark .qcard { background: #1C1F22; }
+  .qcard .ic { color: var(--accent); font-size: 15px; }
+  .dark .qcard .ic { color: #E0634F; }
+  .qcard .t { font-size: 12.5px; font-weight: 500; }
+  .dark .qcard .t { color: #E8EAEC; }
+  .today { background: var(--surface); border-radius: 12px; padding: 14px; margin-bottom: 20px; }
+  .dark .today { background: #1C1F22; }
+  .today-chip { width: 38px; height: 38px; border-radius: 10px; background: #F7E3DF; color: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 15px; }
+  .dark .today-chip { background: #3A2622; color: #E0634F; }
+  .metric { background: var(--list); border-radius: 7px; padding: 7px 10px; font-size: 11px; color: var(--muted); }
+  .metric b { color: var(--fg); font-size: 12.5px; margin-right: 3px; }
+  .dark .metric { background: #23272B; } .dark .metric b { color: #E8EAEC; }
+  .rrow { background: var(--surface); border-radius: 10px; padding: 12px 14px; margin-bottom: 6px; display: flex; align-items: center; gap: 10px; }
+  .dark .rrow { background: #1C1F22; }
+  .rrow .ic { color: var(--accent); font-size: 12px; }
+  .dark .rrow .ic { color: #E0634F; }
+
+  /* --- proposed screen --- */
+  . greet {}
+  .greet-h { font-size: 23px; font-weight: 700; letter-spacing: -0.4px; }
+  .greet-d { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+  .search-ghost { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; font-size: 13.5px; color: var(--muted); margin: 14px 0 20px; display: flex; align-items: center; justify-content: space-between; }
+  .dark .search-ghost { background: #1C1F22; border-color: #2A2D30; }
+  .kbd { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; }
+  .dark .kbd { border-color: #2A2D30; }
+  .prow { display: flex; align-items: center; gap: 12px; padding: 11px 2px; border-bottom: 1px solid var(--border); }
+  .dark .prow { border-bottom-color: #23272B; }
+  .prow:last-child { border-bottom: none; }
+  .prow .ic { color: var(--muted); font-size: 13px; width: 16px; text-align: center; flex-shrink: 0; }
+  .prow .t { font-size: 13px; font-weight: 500; }
+  .dark .prow .t { color: #E8EAEC; }
+  .prow .m { font-size: 11px; color: var(--muted); margin-top: 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .prow .time { margin-left: auto; font-size: 10.5px; color: var(--muted); flex-shrink: 0; }
+  .chiprow { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+  .chip { display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 7px 12px; font-size: 12px; font-weight: 500; }
+  .dark .chip { background: #1C1F22; border-color: #2A2D30; color: #E8EAEC; }
+  .chip .pin-ic { color: var(--accent); font-size: 10px; }
+  .dark .chip .pin-ic { color: #E0634F; }
+  .pills { display: flex; gap: 8px; margin-bottom: 20px; overflow: hidden; }
+  .pill { display: flex; align-items: center; gap: 7px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 9px 12px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+  .dark .pill { background: #1C1F22; border-color: #2A2D30; color: #E8EAEC; }
+  .pill .ic { color: var(--muted); font-size: 12px; }
+  .pill.accent { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .dark .pill.accent { background: #E0634F; border-color: #E0634F; }
+  .today-strip { display: flex; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 11px 14px; margin-bottom: 20px; font-size: 12px; color: var(--muted); }
+  .dark .today-strip { background: #1C1F22; border-color: #2A2D30; }
+  .today-strip b { color: var(--fg); font-weight: 500; margin: 0 2px; }
+  .dark .today-strip b { color: #E8EAEC; }
+  .today-strip .dot-sep { margin: 0 8px; color: var(--border); }
+  .dark .today-strip .dot-sep { color: #2A2D30; }
+  .fin { display: flex; gap: 10px; margin-bottom: 20px; }
+  .fin-card { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .dark .fin-card { background: #1C1F22; border-color: #2A2D30; }
+  .fin-card .lbl { font-size: 10px; letter-spacing: 0.06em; color: var(--muted); text-transform: uppercase; }
+  .fin-card .val { font-size: 16px; font-weight: 600; margin-top: 4px; letter-spacing: -0.01em; }
+  .fin-card .out { color: var(--accent); } .dark .fin-card .out { color: #E0634F; }
+  .fin-card .inc { color: var(--income); } .dark .fin-card .inc { color: #3CA06B; }
+
+  .plist { border-radius: 12px; padding: 18px 22px; margin-bottom: 20px; }
+  .plist.red { background: #FFF8F7; border: 1px solid #F2D7D3; } .plist.red li { color: #5A3F3B; }
+  .plist.green { background: #F4F7F5; border: 1px solid #CFE3D8; } .plist.green li { color: #2F4A3E; }
+  .plist li { font-size: 13.5px; line-height: 1.75; margin-left: 18px; }
+  .plist li b { font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Typed — Home Screen Refresh</h1>
+  <p class="sub">Mockups only, nothing implemented. The home screen today fights the product's own direction ("quiet list rows instead of noisy card grids") — this proposal brings it back in line.</p>
+
+  <h2><span class="num">01</span>Current vs proposed</h2>
+  <p class="desc">Both screens contain the same data. The proposed version trades six oversized action cards and duplicated stat chips for quiet rows and a single accent CTA. Typography is inherited from the app's existing system — Outfit everywhere, no font additions.</p>
+
+  <div class="row">
+    <div class="panel">
+      <div class="panel-label bad">Current</div>
+      <div class="phone">
+        <div class="pstatus"><span>5:11</span><span>▮▮▮</span></div>
+        <div class="pbody">
+          <div class="hdr">
+            <span class="hdr-menu">≡</span><span class="hdr-title">Home</span><span class="hdr-search">⌕</span>
+          </div>
+          <div class="intro">
+            <div><div class="intro-h">Home</div><div class="intro-d">September 2, 2026</div></div>
+            <div class="cta">+ Create note</div>
+          </div>
+          <div class="search">⌕ &nbsp;Search notes...</div>
+          <div class="sec">CONTINUE WORKING</div>
+          <div class="hcard-row">
+            <div class="hcard"><span class="ic">▦</span><span class="t">Quick expenses — Sep 2</span></div>
+            <div class="hcard"><span class="ic">✓</span><span class="t">Managing Tasks</span></div>
+          </div>
+          <div class="sec">PINNED</div>
+          <div class="hcard-row">
+            <div class="hcard"><span class="ic">📌</span><span class="t">Welcome to Typed</span></div>
+          </div>
+          <div class="sec">QUICK ACTIONS</div>
+          <div class="qgrid">
+            <div class="qcard"><span class="ic">↓</span><span class="t">Add expense</span></div>
+            <div class="qcard"><span class="ic">↑</span><span class="t">Add income</span></div>
+            <div class="qcard"><span class="ic">✓</span><span class="t">New task</span></div>
+            <div class="qcard"><span class="ic">☁</span><span class="t">New meeting</span></div>
+          </div>
+          <div class="sec">TODAY'S OVERVIEW</div>
+          <div class="today">
+            <div style="display:flex; gap:10px; align-items:center;">
+              <div class="today-chip">▤</div>
+              <div><div style="font-size:12.5px; font-weight:500;">6 notes edited today</div><div style="font-size:10px; color:var(--muted); margin-top:2px;">Your activity at a glance</div></div>
+            </div>
+            <div style="display:flex; gap:8px; margin-top:12px;">
+              <span class="metric"><b>6</b>notes edited</span><span class="metric"><b>3</b>open tasks</span><span class="metric"><b>2</b>transactions</span>
+            </div>
+          </div>
+        </div>
+        <div class="pnav">
+          <div class="pnav-item on"><span>⌂</span>Home</div>
+          <div class="pnav-item"><span>▤</span>Notes</div>
+          <div class="pnav-item"><span>▦</span>Finance</div>
+          <div class="pnav-item"><span>✓</span>Tasks</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-label good">Proposed</div>
+      <div class="phone">
+        <div class="pstatus"><span>5:11</span><span>▮▮▮</span></div>
+        <div class="pbody">
+          <div class="hdr">
+            <span class="hdr-menu">≡</span><span class="hdr-title" style="opacity:0.01;">.</span><span class="hdr-search">⌕</span>
+          </div>
+          <div class="intro" style="padding-top:2px;">
+            <div><div class="greet-h">Good afternoon</div><div class="greet-d">TUE, SEP 2 2026</div></div>
+            <div class="cta">+ New note</div>
+          </div>
+          <div class="search-ghost"><span>⌕ &nbsp;Search notes...</span></div>
+
+          <div class="sec">PINNED</div>
+          <div class="chiprow">
+            <span class="chip"><span class="pin-ic">📌</span>Welcome to Typed</span>
+            <span class="chip"><span class="pin-ic">📌</span>Quarterly planning</span>
+          </div>
+
+          <div class="sec">CONTINUE</div>
+          <div class="prow"><span class="ic">▦</span><div style="min-width:0;"><div class="t">Quick expenses — Sep 2</div><div class="m">$24.50 · 3 entries</div></div><span class="time">2h</span></div>
+          <div class="prow"><span class="ic">✓</span><div style="min-width:0;"><div class="t">Managing Tasks</div><div class="m">3 of 8 done</div></div><span class="time">5h</span></div>
+          <div style="height:20px;"></div>
+
+          <div class="sec">TODAY</div>
+          <div class="today-strip">✎ <b>6</b> notes<span class="dot-sep">·</span>○ <b>3</b> open tasks<span class="dot-sep">·</span>⇄ <b>2</b> transactions</div>
+
+          <div class="sec">THIS MONTH</div>
+          <div class="fin">
+            <div class="fin-card"><div class="lbl">Spent</div><div class="val out">$1,284</div></div>
+            <div class="fin-card"><div class="lbl">Income</div><div class="val inc">$3,900</div></div>
+          </div>
+
+          <div class="sec">QUICK ACTIONS</div>
+          <div class="pills">
+            <span class="pill accent">＋ Note</span>
+            <span class="pill"><span class="ic">↓</span> Expense</span>
+            <span class="pill"><span class="ic">↑</span> Income</span>
+            <span class="pill"><span class="ic">✓</span> Task</span>
+            <span class="pill"><span class="ic">☁</span> Meeting</span>
+          </div>
+
+          <div class="sec">RECENT</div>
+          <div class="prow"><span class="ic">▤</span><div style="min-width:0;"><div class="t">Groceries</div><div class="m">Oat milk, sourdough…</div></div><span class="time">3d</span></div>
+          <div class="prow"><span class="ic">▤</span><div style="min-width:0;"><div class="t">Reading list</div><div class="m">The Design of Everyday…</div></div><span class="time">1w</span></div>
+        </div>
+        <div class="pnav">
+          <div class="pnav-item on"><span>⌂</span>Home</div>
+          <div class="pnav-item"><span>▤</span>Notes</div>
+          <div class="pnav-item"><span>▦</span>Finance</div>
+          <div class="pnav-item"><span>✓</span>Tasks</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2><span class="num">02</span>Proposed — dark mode</h2>
+  <div class="row">
+    <div class="panel">
+      <div class="panel-label">Dark (cream palette night)</div>
+      <div class="phone dark">
+        <div class="pstatus" style="color:#E8EAEC;"><span>5:11</span><span>▮▮▮</span></div>
+        <div class="pbody" style="color:#E8EAEC;">
+          <div class="hdr">
+            <span class="hdr-menu">≡</span><span style="opacity:0.01;">.</span><span class="hdr-search" style="color:#8A929A;">⌕</span>
+          </div>
+          <div class="intro" style="padding-top:2px;">
+            <div><div class="greet-h" style="color:#E8EAEC;">Good afternoon</div><div class="greet-d" style="color:#8A929A;">TUE, SEP 2 2026</div></div>
+            <div class="cta">+ New note</div>
+          </div>
+          <div class="search-ghost" style="color:#8A929A;"><span>⌕ &nbsp;Search notes...</span></div>
+
+          <div class="sec" style="color:#8A929A;">PINNED</div>
+          <div class="chiprow">
+            <span class="chip">📌 Welcome to Typed</span>
+            <span class="chip">📌 Quarterly planning</span>
+          </div>
+
+          <div class="sec" style="color:#8A929A;">CONTINUE</div>
+          <div class="prow"><span class="ic" style="color:#8A929A;">▦</span><div style="min-width:0;"><div class="t">Quick expenses — Sep 2</div><div class="m" style="color:#8A929A;">$24.50 · 3 entries</div></div><span class="time" style="color:#8A929A;">2h</span></div>
+          <div class="prow"><span class="ic" style="color:#8A929A;">✓</span><div style="min-width:0;"><div class="t">Managing Tasks</div><div class="m" style="color:#8A929A;">3 of 8 done</div></div><span class="time" style="color:#8A929A;">5h</span></div>
+          <div style="height:20px;"></div>
+
+          <div class="sec" style="color:#8A929A;">TODAY</div>
+          <div class="today-strip" style="color:#8A929A;">✎ <b>6</b> notes<span class="dot-sep">·</span>○ <b>3</b> open tasks<span class="dot-sep">·</span>⇄ <b>2</b> transactions</div>
+
+          <div class="sec" style="color:#8A929A;">THIS MONTH</div>
+          <div class="fin">
+            <div class="fin-card"><div class="lbl" style="color:#8A929A;">Spent</div><div class="val out">$1,284</div></div>
+            <div class="fin-card"><div class="lbl" style="color:#8A929A;">Income</div><div class="val inc">$3,900</div></div>
+          </div>
+
+          <div class="sec" style="color:#8A929A;">QUICK ACTIONS</div>
+          <div class="pills">
+            <span class="pill accent">＋ Note</span>
+            <span class="pill"><span class="ic" style="color:#8A929A;">↓</span> Expense</span>
+            <span class="pill"><span class="ic" style="color:#8A929A;">↑</span> Income</span>
+            <span class="pill"><span class="ic" style="color:#8A929A;">✓</span> Task</span>
+            <span class="pill"><span class="ic" style="color:#8A929A;">☁</span> Meeting</span>
+          </div>
+
+          <div class="sec" style="color:#8A929A;">RECENT</div>
+          <div class="prow"><span class="ic" style="color:#8A929A;">▤</span><div style="min-width:0;"><div class="t">Groceries</div><div class="m" style="color:#8A929A;">Oat milk, sourdough…</div></div><span class="time" style="color:#8A929A;">3d</span></div>
+          <div class="prow"><span class="ic" style="color:#8A929A;">▤</span><div style="min-width:0;"><div class="t">Reading list</div><div class="m" style="color:#8A929A;">The Design of Everyday…</div></div><span class="time" style="color:#8A929A;">1w</span></div>
+        </div>
+        <div class="pnav" style="border-top-color:#2A2D30;">
+          <div class="pnav-item on"><span>⌂</span>Home</div>
+          <div class="pnav-item"><span>▤</span>Notes</div>
+          <div class="pnav-item"><span>▦</span>Finance</div>
+          <div class="pnav-item"><span>✓</span>Tasks</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="flex: 1.4;">
+      <div class="panel-label green">What changed and why</div>
+      <ul class="plist green">
+        <li><b>Greeting replaces "Home"</b> — time-aware ("Good morning / afternoon / evening") with a mono date stamp. Warmer, and stops the page title competing with the app bar's "Home".</li>
+        <li><b>Pinned → quiet chips</b> — pinned items are jump-offs, not content; cards were overweight.</li>
+        <li><b>Continue → informative rows</b> — each row gains a real status line ("$24.50 · 3 entries", "3 of 8 done") and a mono relative time, so you know why you'd go back.</li>
+        <li><b>Today's overview → one mono strip</b> — kills the duplicated "6 notes edited" header + metric chip; one tappable line instead of a card with 40px icon chip.</li>
+        <li><b>NEW: "This month" finance snapshot</b> — finance is a core pillar but home never showed money. Spent / Income in mono, palette-aware colors.</li>
+        <li><b>Quick actions → compact pill row</b> — 6 giant cards (~340px of vertical space) become one horizontally-scrollable pill row (~44px). "New note" is the accent pill; everything else neutral. Scrollable, so all 6 actions stay available.</li>
+        <li><b>Accent discipline</b> — accent uses drop from ~10 on screen to 2 (CTA + Note pill), matching the brand rule.</li>
+        <li><b>Rows over cards</b> — hairline-separated rows for Continue/Recent, per the README product direction.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2><span class="num">03</span>Implementation notes</h2>
+  <p class="desc">All changes are contained to <code style="font-family:'JetBrains Mono',monospace; font-size:12px;">lib/screens/home_screen.dart</code> builders: <code style="font-family:'JetBrains Mono',monospace; font-size:12px;">_buildHomeIntro</code>, <code style="font-family:'JetBrains Mono',monospace; font-size:12px;">_buildPinnedHome</code>, <code style="font-family:'JetBrains Mono',monospace; font-size:12px;">_buildContinueCard</code>, <code style="font-family:'JetBrains Mono',monospace; font-size:12px;">_buildQuickActions</code>, <code style="font-family:'JetBrains Mono',monospace; font-size:12px;">_buildTodaysOverview</code> (+ a new finance snapshot builder that can reuse the existing period filtering already in the file). No model or storage changes.</p>
+  <div class="plist" style="background:#FBF7F0; border:1px solid #E8DCC8;">
+    <ul style="color:#5A4A33;">
+      <li>If you want, "This month" can be tappable → jumps to Finance; and the greeting can include the day's open-task count ("Good afternoon · 3 tasks open").</li>
+      <li>Quick-action pill order is yours to pick; my default: Note, Expense, Income, Task, Meeting, Journal (scrollable).</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>

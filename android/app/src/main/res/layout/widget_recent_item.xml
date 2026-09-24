@@ -17,8 +17,7 @@
         android:ellipsize="end"
         android:fontFamily="sans-serif-medium"
         android:maxLines="1"
-        android:text="Untitled"
-        android:textColor="#1A242E"
+         android:textColor="@color/widget_fg"
         android:textSize="13sp" />
 
     <TextView
@@ -30,6 +29,6 @@
         android:fontFamily="sans-serif"
         android:maxLines="1"
         android:text=""
-        android:textColor="#6E7A85"
+         android:textColor="@color/widget_muted"
         android:textSize="11sp" />
 </LinearLayout>

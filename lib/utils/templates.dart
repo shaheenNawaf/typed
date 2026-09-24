@@ -43,6 +43,7 @@ List<NoteTemplate> getNoteTemplates() {
           '## Lessons\n\n\n\n'
           '## Tomorrow\n\n',
       preview: 'Track wins, lessons, and tomorrow\'s focus.',
+      tags: ['journal'],
     ),
     NoteTemplate(
       name: 'Meeting notes',
@@ -55,6 +56,7 @@ List<NoteTemplate> getNoteTemplates() {
           '## Action items\n'
           '- [ ] \n',
       preview: 'Capture attendees, agenda, and action items.',
+      tags: ['meeting'],
     ),
     NoteTemplate(
       name: 'Daily expenses',
@@ -63,6 +65,7 @@ List<NoteTemplate> getNoteTemplates() {
       content: '# Expenses — $today\n\n'
           '_Track your daily spend._\n',
       preview: 'Log your daily spend with auto-totals.',
+      tags: ['finance'],
       type: 'expense',
       currency: 'PHP',
     ),
@@ -72,6 +75,7 @@ List<NoteTemplate> getNoteTemplates() {
       title: 'Todo — $today',
       content: '- [ ] \n',
       preview: 'Build a checklist and track progress.',
+      tags: ['todo'],
       type: 'todo',
     ),
   ];

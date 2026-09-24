@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Typed — Bottom Navigation Proposals</title>
+<style>
+  :root{
+    --bg:#15171A; --surface:#1C1F22; --surface2:#232629;
+    --fg:#E8EAEC; --muted:#8A929A; --border:#2A2D30;
+    --accent:#E0634F; --accent-dim:rgba(224,99,79,.14);
+    --income:#3CA06B;
+    --emph:cubic-bezier(.2,0,0,1);
+    --decel:cubic-bezier(.05,.7,.1,1);
+    --mono:ui-monospace,'Cascadia Mono',Consolas,monospace;
+    --sans:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--fg);font-family:var(--sans);padding:0 0 120px}
+  .wrap{max-width:980px;margin:0 auto;padding:0 32px}
+  header{padding:56px 0 10px;border-bottom:1px solid var(--border)}
+  .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--accent);text-transform:uppercase}
+  h1{font-size:32px;font-weight:700;letter-spacing:-.02em;margin:10px 0 6px}
+  .sub{color:var(--muted);font-size:15px;max-width:660px;padding-bottom:28px}
+  h2{font-size:20px;font-weight:650;margin:52px 0 4px;display:flex;align-items:center;gap:10px}
+  h2 .n{font-family:var(--mono);font-size:11px;color:var(--accent);background:var(--accent-dim);border-radius:6px;padding:3px 8px;letter-spacing:.08em}
+  .lede{color:var(--muted);font-size:14px;margin:6px 0 22px;max-width:700px}
+
+  .audit{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .f{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;font-size:13.5px}
+  .f b{display:flex;gap:8px;align-items:center;font-weight:600}
+  .sev{font-family:var(--mono);font-size:9px;letter-spacing:.08em;border-radius:5px;padding:2px 7px}
+  .hi{background:rgba(224,99,79,.18);color:var(--accent)}
+  .md{background:rgba(255,255,255,.07);color:var(--muted)}
+  .f p{color:var(--muted);font-size:12.5px;margin-top:4px}
+  .f code{font-family:var(--mono);font-size:11px;background:var(--surface2);border-radius:5px;padding:1px 6px}
+
+  .variants{display:flex;gap:28px;flex-wrap:wrap;justify-content:center}
+  .variant{width:300px}
+  .vname{font-size:15px;font-weight:650;margin:0 0 2px}
+  .vtag{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--accent);margin-bottom:10px}
+  .vdesc{color:var(--muted);font-size:12.5px;margin-top:12px;min-height:66px}
+
+  .phone{width:280px;height:560px;background:#101215;border:1px solid #33373c;border-radius:30px;padding:10px;position:relative;overflow:hidden;box-shadow:0 20px 50px rgba(0,0,0,.45)}
+  .screen{width:100%;height:100%;background:var(--bg);border-radius:22px;overflow:hidden;position:relative;display:flex;flex-direction:column}
+  .statusbar{height:26px;display:flex;justify-content:space-between;align-items:center;padding:0 16px;font-family:var(--mono);font-size:9px;color:var(--muted);flex:none}
+  .appbar{height:44px;display:flex;align-items:center;padding:0 14px;font-size:14px;font-weight:600;gap:8px;flex:none;color:var(--fg)}
+  .appbar .hamb{color:var(--muted);font-size:15px}
+  .content{flex:1;padding:8px 14px;overflow:hidden}
+  .row{display:flex;justify-content:space-between;align-items:center;padding:11px 4px;border-bottom:1px solid rgba(255,255,255,.05);font-size:12.5px}
+  .row .m{font-family:var(--mono);font-size:10px;color:var(--muted)}
+  .row .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);margin-right:8px;display:inline-block}
+
+  /* ---- nav shared ---- */
+  .nav{flex:none;background:var(--surface);border-top:1px solid var(--border);padding:6px 6px 14px;display:flex;position:relative}
+  .nitem{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 0 3px;cursor:pointer;color:var(--muted);font-size:10px;position:relative;border-radius:10px;transition:color 200ms var(--emph)}
+  .nitem .ic{font-size:19px;line-height:1;position:relative;z-index:1;transition:color 200ms var(--emph),transform 200ms var(--emph)}
+  .nitem.on{color:var(--accent)}
+  .pill{position:absolute;top:4px;width:52px;height:30px;background:var(--accent-dim);border-radius:15px;transition:left 320ms var(--emph),width 320ms var(--emph)}
+
+  /* ---- B: capture dock ---- */
+  .nav.cap{padding-top:2px}
+  .capbtn{width:46px;height:46px;border-radius:50%;background:var(--accent);color:#15171A;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:300;margin:-16px auto 0;box-shadow:0 6px 16px rgba(224,99,79,.35);cursor:pointer;transition:transform 200ms var(--emph);position:relative;z-index:2}
+  .capbtn:active{transform:scale(.92)}
+  .caplabel{text-align:center;font-size:9px;color:var(--muted);margin-top:3px}
+  .slot{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 0 3px;cursor:pointer;color:var(--muted);font-size:10px;border-radius:10px}
+  .slot.on{color:var(--accent)}
+  .slot .ic{font-size:19px;line-height:1;position:relative;z-index:1}
+
+  /* ---- B sheet ---- */
+  .sheetwrap{position:absolute;inset:0;background:rgba(0,0,0,.45);opacity:0;pointer-events:none;transition:opacity 200ms var(--emph);z-index:5}
+  .sheetwrap.open{opacity:1;pointer-events:auto}
+  .sheet{position:absolute;left:0;right:0;bottom:0;background:var(--surface);border-radius:16px 16px 0 0;padding:10px 14px 20px;transform:translateY(105%);transition:transform 320ms var(--decel)}
+  .sheetwrap.open .sheet{transform:none}
+  .sheet .grab{width:34px;height:4px;border-radius:2px;background:var(--border);margin:0 auto 10px}
+  .sheet .st{font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:var(--muted);text-transform:uppercase;margin-bottom:6px}
+  .srow{display:flex;align-items:center;gap:12px;padding:11px 8px;border-radius:10px;font-size:13px;cursor:pointer}
+  .srow:hover{background:var(--surface2)}
+  .srow .si{width:28px;height:28px;border-radius:8px;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:13px}
+  .srow .sm{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--muted)}
+
+  /* ---- C: floating dock ---- */
+  .dock{position:absolute;left:14px;right:14px;bottom:16px;height:60px;background:rgba(28,31,34,.92);border:1px solid var(--border);border-radius:30px;display:flex;align-items:center;padding:0 10px;box-shadow:0 12px 30px rgba(0,0,0,.5);backdrop-filter:blur(8px)}
+  .ditem{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;color:var(--muted);height:46px;justify-content:center;border-radius:14px;transition:color 200ms var(--emph)}
+  .ditem .ic{font-size:19px}
+  .ditem.on{color:var(--accent)}
+  .ditem.on .ic{transform:translateY(-1px)}
+  .ditem .dl{font-size:9px;display:none}
+  .ditem.on .dl{display:block}
+
+  .reach{margin-top:14px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px;font-size:12.5px;color:var(--muted)}
+  .reach b{color:var(--fg);font-weight:600}
+
+  footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--border);color:var(--muted);font-size:12.5px}
+
+  .chip2{flex:none;font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:5px 11px;cursor:pointer;white-space:nowrap;transition:all 200ms var(--emph)}
+  .chip2.on{color:var(--accent);background:var(--accent-dim);border-color:rgba(224,99,79,.35)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="kicker">Typed · Mobile · Read-only proposal</div>
+    <h1>Bottom Navigation — Redesign</h1>
+    <p class="sub">Principle: everything a one-handed user needs lives inside the thumb's arc — capture, the four core destinations, and the sections currently stranded behind a top-left hamburger.</p>
+  </header>
+
+  <h2><span class="n">00</span>Audit of the current bar</h2>
+  <div class="audit">
+    <div class="f"><b><span class="sev hi">HIGH</span>Secondary sections unreachable one-handed</b><p>Archive, Trash, Meetings, Journal, Pinned and Today exist only in the drawer, which opens from a hamburger in the <b>top-left corner</b> — the worst reach on a tall phone.</p></div>
+    <div class="f"><b><span class="sev hi">HIGH</span>No capture affordance</b><p>Typed is capture-first, but the bar has no create action. Capture lives a step away (Home → New note, or the Notes FAB), not in the thumb's resting zone.</p></div>
+    <div class="f"><b><span class="sev md">MEDIUM</span>Active state is a color swap</b><p>Icon + label change color instantly — no sliding indicator, no motion. Screen readers also get no <code>selected</code> state.</p></div>
+    <div class="f"><b><span class="sev md">MEDIUM</span>No haptics, no badge surface</b><p>Tab switches are silent (no selection haptic) and the bar can't surface counts like open tasks.</p></div>
+  </div>
+
+  <h2 id="va"><span class="n">A</span>Refined classic — same 4 tabs, modern affordances</h2>
+  <p class="lede">Lowest-risk option: keep today's structure, add the sliding pill indicator, selection haptics, and proper selected-state semantics. Tap the tabs:</p>
+  <div class="variants">
+    <div class="variant">
+      <div class="phone"><div class="screen">
+        <div class="statusbar"><span>9:41</span><span>t.</span></div>
+        <div class="appbar"><span class="hamb">☰</span> Notes</div>
+        <div class="content">
+          <div class="row"><span><span class="dot"></span>Welcome to Typed</span><span class="m">2m</span></div>
+          <div class="row"><span>Using Notes</span><span class="m">2m</span></div>
+          <div class="row"><span>Managing Tasks</span><span class="m">2m</span></div>
+          <div class="row"><span>Tracking Finance</span><span class="m">2m</span></div>
+          <div class="row"><span>Navigating Typed</span><span class="m">2m</span></div>
+        </div>
+        <div class="nav" id="navA">
+          <div class="pill" id="pillA"></div>
+          <div class="nitem on" onclick="setA(0)"><span class="ic">⌂</span>Home</div>
+          <div class="nitem" onclick="setA(1)"><span class="ic">▤</span>Notes</div>
+          <div class="nitem" onclick="setA(2)"><span class="ic">▣</span>Finance</div>
+          <div class="nitem" onclick="setA(3)"><span class="ic">✓</span>Tasks</div>
+        </div>
+      </div></div>
+      <div class="reach"><b>One-handed:</b> unchanged reach; zero learning cost. Sliding pill + haptics + selected semantics.</div>
+    </div>
+
+    <div class="variant" id="vb">
+      <div class="vname" style="margin-top:0">B — Capture dock</div>
+      <div class="vtag">RECOMMENDED</div>
+      <div class="phone"><div class="screen">
+        <div class="statusbar"><span>9:41</span><span>t.</span></div>
+        <div class="appbar"><span class="hamb">☰</span> Notes</div>
+        <div class="content">
+          <div class="row"><span><span class="dot"></span>Welcome to Typed</span><span class="m">2m</span></div>
+          <div class="row"><span>Using Notes</span><span class="m">2m</span></div>
+          <div class="row"><span>Managing Tasks</span><span class="m">2m</span></div>
+          <div class="row"><span>Tracking Finance</span><span class="m">2m</span></div>
+        </div>
+        <div class="nav cap" id="navB">
+          <div class="pill" id="pillB"></div>
+          <div class="slot on" onclick="setB(0)"><span class="ic">⌂</span>Home</div>
+          <div class="slot" onclick="setB(1)"><span class="ic">▤</span>Notes</div>
+          <div class="capbtn" onclick="pulse(this)">＋</div>
+          <div class="caplabel">Create</div>
+          <div class="slot" onclick="setB(2)"><span class="ic">▣</span>Finance</div>
+          <div class="slot" onclick="setB(3);openSheet()"><span class="ic">⋯</span>More</div>
+        </div>
+        <div class="sheetwrap" id="sheet">
+          <div class="sheet">
+            <div class="grab"></div>
+            <div class="st">Library</div>
+            <div class="srow"><div class="si">档案馆</div>Pinned pages<span class="sm">1</span></div>
+            <div class="srow"><div class="si">▣</div>Meetings<span class="sm">0</span></div>
+            <div class="srow"><div class="si">📖</div>Journal<span class="sm">0</span></div>
+            <div class="srow"><div class="si">🗄</div>Archive<span class="sm">0</span></div>
+            <div class="srow"><div class="si">🗑</div>Trash<span class="sm">0</span></div>
+          </div>
+        </div>
+      </div></div>
+      <div class="reach"><b>One-handed:</b> create sits in the thumb's resting arc — the app's #1 action. “More” replaces the top-left stretch for everything secondary. Tap <b>More</b> to see the sheet.</div>
+    </div>
+
+    <div class="variant" id="vc">
+      <div class="vname" style="margin-top:0">C — Floating dock</div>
+      <div class="vtag">MOST MODERN · HIGHEST RISK</div>
+      <div class="phone"><div class="screen">
+        <div class="statusbar"><span>9:41</span><span>t.</span></div>
+        <div class="appbar"><span class="hamb">☰</span> Notes</div>
+        <div class="content">
+          <div class="row"><span><span class="dot"></span>Welcome to Typed</span><span class="m">2m</span></div>
+          <div class="row"><span>Using Notes</span><span class="m">2m</span></div>
+          <div class="row"><span>Managing Tasks</span><span class="m">2m</span></div>
+          <div class="row"><span>Tracking Finance</span><span class="m">2m</span></div>
+          <div class="row"><span>Navigating Typed</span><span class="m">2m</span></div>
+          <div class="row"><span>Quick expenses — Sep 19</span><span class="m">2m</span></div>
+        </div>
+        <div class="dock" id="navC">
+          <div class="ditem on" onclick="setC(0)"><span class="ic">⌂</span><span class="dl">Home</span></div>
+          <div class="ditem" onclick="setC(1)"><span class="ic">▤</span><span class="dl">Notes</span></div>
+          <div class="capbtn" style="margin:0" onclick="pulse(this)">＋</div>
+          <div class="ditem" onclick="setC(2)"><span class="ic">▣</span><span class="dl">Finance</span></div>
+          <div class="ditem" onclick="setC(3)"><span class="ic">✓</span><span class="dl">Tasks</span></div>
+        </div>
+      </div></div>
+      <div class="reach"><b>One-handed:</b> dock sits higher = shorter thumb travel; content scrolls behind it. Trade-offs: inactive tabs are icon-only, needs content padding, and a floating bar is louder than Typed's quiet brand.</div>
+    </div>
+    <div class="variant" id="vd">
+      <div class="vname" style="margin-top:0">D — Two-tier hub</div>
+      <div class="vtag">EVERYTHING ONE TAP · TALLEST</div>
+      <div class="phone"><div class="screen">
+        <div class="statusbar"><span>9:41</span><span>t.</span></div>
+        <div class="appbar"><span class="hamb">☰</span> Notes</div>
+        <div class="content">
+          <div class="row"><span><span class="dot"></span>Welcome to Typed</span><span class="m">2m</span></div>
+          <div class="row"><span>Using Notes</span><span class="m">2m</span></div>
+          <div class="row"><span>Managing Tasks</span><span class="m">2m</span></div>
+          <div class="row"><span>Tracking Finance</span><span class="m">2m</span></div>
+        </div>
+        <div style="flex:none;padding:6px 8px;display:flex;gap:6px;overflow-x:auto;border-top:1px solid var(--border);background:var(--surface)">
+          <div class="chip2 on">◉ Today</div>
+          <div class="chip2">📌 Pinned 1</div>
+          <div class="chip2">👥 Meetings</div>
+          <div class="chip2">📖 Journal</div>
+          <div class="chip2">🗄 Archive</div>
+          <div class="chip2">🗑 Trash</div>
+        </div>
+        <div class="nav cap" id="navD">
+          <div class="slot on"><span class="ic">⌂</span>Home</div>
+          <div class="slot"><span class="ic">▤</span>Notes</div>
+          <div>
+            <div class="capbtn">＋</div>
+            <div class="caplabel">Create</div>
+          </div>
+          <div class="slot"><span class="ic">▣</span>Finance</div>
+          <div class="slot"><span class="ic">✓</span>Tasks</div>
+        </div>
+      </div></div>
+      <div class="reach"><b>One-handed:</b> every destination is one tap in the bottom zone — no sheet, no drawer, no top-left stretch. Cost: ~40px taller, busier; the hamburger becomes settings-only.</div>
+    </div>
+  </div>
+
+  <h2><span class="n">＋</span>Shared fixes (any variant)</h2>
+  <p class="lede">Regardless of direction: selection haptics (<code>HapticFeedback.selectionClick</code>), <code>Semantics(selected:…)</code> per tab, motion from the accepted token system (pill slides 320ms emphasized), and the reduce-motion switch collapses all of it.</p>
+
+  <footer>Read-only proposal — the product nav is unchanged until you pick a direction. Demos are CSS stand-ins for the Flutter build.</footer>
+</div>
+
+<script>
+  function setA(i){
+    const items=document.querySelectorAll('#navA .nitem');
+    items.forEach((n,j)=>n.classList.toggle('on',j===i));
+    const pill=document.getElementById('pillA');
+    pill.style.left=`calc(${i} * 25% + 12.5% - 26px)`;
+  }
+  setA(0); // wait: pill math — 4 slots
+  function setB(i){
+    const items=document.querySelectorAll('#navB .slot');
+    const idx=[0,1,3,4]; // slot order around the cap button
+    items.forEach((n,j)=>n.classList.toggle('on',idx[j]===i));
+    const pill=document.getElementById('pillB');
+    const col=i<=1?i:i+1; // skip the center slot
+    pill.style.left=`calc(${col} * 20% + 10% - 26px)`;
+  }
+  function openSheet(){document.getElementById('sheet').classList.add('open');setTimeout(()=>document.getElementById('sheet').classList.remove('open'),2200);}
+  function setC(i){
+    const items=document.querySelectorAll('#navC .ditem');
+    const idx=[0,1,3,4];
+    items.forEach((n,j)=>n.classList.toggle('on',idx[j]===i));
+  }
+  function pulse(el){el.style.transform='scale(.88)';setTimeout(()=>el.style.transform='',160);}
+  // init pill positions after layout
+  window.addEventListener('load',()=>{setA(0);setB(0);});
+</script>
+<script>
+(function(){
+  const id = location.hash.slice(1);
+  if (!id) return;
+  const order = ['va','vb','vc','vd'];
+  if (order.indexOf(id) < 0) return;
+  const w = document.querySelector('.wrap');
+  let passed = false;
+  for (const el of w.children) {
+    if (el.classList && el.classList.contains('variants')) {
+      for (const v of el.children) {
+        if (v.id === id) { passed = true; break; }
+        v.style.display = 'none';
+      }
+      continue;
+    }
+    if (el.id === id) { passed = true; continue; }
+    if (!passed) el.style.display = 'none';
+  }
+})();
+</script>
+</body>
+</html>

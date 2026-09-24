@@ -14,11 +14,11 @@
         android:orientation="horizontal"
         android:paddingStart="4dp"
         android:paddingEnd="4dp"
-        android:paddingBottom="8dp">
+        android:paddingBottom="4dp">
 
         <ImageView
-            android:layout_width="18dp"
-            android:layout_height="18dp"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
             android:src="@drawable/ic_typed"
             android:contentDescription="Typed" />
 
@@ -28,17 +28,26 @@
             android:layout_marginStart="8dp"
             android:layout_weight="1"
             android:fontFamily="sans-serif-medium"
-            android:text="To-do"
-            android:textColor="#1A242E"
-            android:textSize="14sp" />
+             android:text="@string/widget_todo_title"
+             android:textColor="@color/widget_fg"
+            android:textSize="13sp"
+            android:letterSpacing="0.02" />
     </LinearLayout>
 
-    <LinearLayout
-        android:id="@+id/widget_todo_list"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:orientation="vertical" />
+    <!-- Progress ("x/y done") is rendered by the collection itself as its
+         first row: static-view pushes for collection widgets are deferred by
+         Android 16's AppWidgetServiceImpl and may never be applied by the
+         host, while collection re-binds deliver live. -->
+
+    <ListView
+         android:id="@+id/widget_todo_list"
+         android:layout_width="match_parent"
+         android:layout_height="0dp"
+         android:layout_weight="1"
+         android:divider="@android:color/transparent"
+         android:dividerHeight="6dp"
+         android:overScrollMode="ifContentScrolls"
+         android:scrollbars="none" />
 
     <TextView
         android:id="@+id/widget_todo_empty"
@@ -47,8 +56,8 @@
         android:layout_weight="1"
         android:gravity="center"
         android:fontFamily="sans-serif"
-        android:text="Tap to start writing"
-        android:textColor="#6E7A85"
+         android:text="@string/widget_empty"
+         android:textColor="@color/widget_muted"
         android:textSize="13sp"
         android:visibility="gone" />
 </LinearLayout>

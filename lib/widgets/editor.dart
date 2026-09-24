@@ -13,20 +13,24 @@ import 'package:path_provider/path_provider.dart';
 import '../models/money_entry.dart';
 import '../models/note.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_metrics.dart';
+import '../theme/fonts.dart';
+import '../theme/theme_controller.dart';
+import '../utils/date_format.dart';
 import '../utils/finance_utils.dart';
 import '../utils/id.dart';
+import '../utils/image_paths.dart';
+import '../utils/markdown_display.dart';
+import '../utils/slash_commands.dart';
 import 'editor_toolbar.dart';
 import 'entry_sheet.dart';
 import 'image_picker_sheet.dart';
 import 'table_picker_sheet.dart';
 
-typedef CreateNoteCallback = void Function([String? title]);
-
 class Editor extends StatefulWidget {
   final Note? note;
   final ValueChanged<String> onTitleChange;
   final ValueChanged<String> onContentChange;
-  final CreateNoteCallback onCreateNote;
   final ValueChanged<String> onImageAdded;
   final bool previewMode;
   final VoidCallback onTogglePreview;
@@ -39,18 +43,22 @@ class Editor extends StatefulWidget {
   final void Function(Note)? onArchive;
   final void Function(Note)? onDelete;
   final void Function(Note)? onTogglePin;
-  final VoidCallback? onNewNote;
   final List<String> customCategories;
   final List<String> recentCategories;
   final void Function(String)? onCategoryUsed;
   final VoidCallback? onSaveNow;
+  final VoidCallback? onToggleContext;
+  final bool contextPanelOpen;
+
+  /// 'idle' | 'saving' | 'saved' — surfaces the otherwise-invisible
+  /// debounced autosave.
+  final String saveState;
 
   const Editor({
     super.key,
     required this.note,
     required this.onTitleChange,
     required this.onContentChange,
-    required this.onCreateNote,
     required this.onImageAdded,
     required this.previewMode,
     required this.onTogglePreview,
@@ -63,11 +71,13 @@ class Editor extends StatefulWidget {
     this.onArchive,
     this.onDelete,
     this.onTogglePin,
-    this.onNewNote,
     this.customCategories = const [],
     this.recentCategories = const [],
     this.onCategoryUsed,
     this.onSaveNow,
+    this.onToggleContext,
+    this.contextPanelOpen = false,
+    this.saveState = 'idle',
   });
 
   @override
@@ -78,10 +88,15 @@ class _EditorState extends State<Editor> {
   late TextEditingController _titleCtrl;
   late TextEditingController _contentCtrl;
   late TextEditingController _newTagCtrl;
+  final FocusNode _titleFocus = FocusNode();
   final FocusNode _newTagFocus = FocusNode();
+  final FocusNode _contentFocus = FocusNode();
   bool _addingTag = false;
   final ImagePicker _picker = ImagePicker();
   List<Note> _linkSuggestions = [];
+  List<SlashCommandDefinition> _slashSuggestions = [];
+  int _slashSelectedIndex = 0;
+  SlashToken? _slashToken;
   final TextRecognizer? _textRecognizer = kIsWeb
       ? null
       : TextRecognizer(script: TextRecognitionScript.latin);
@@ -89,10 +104,46 @@ class _EditorState extends State<Editor> {
   final TextEditingController _checklistAddCtrl = TextEditingController();
   final TextEditingController _checklistEditCtrl = TextEditingController();
   final FocusNode _checklistEditFocus = FocusNode();
-  bool _suppressOnChanged = false;
+  int? _dismissedSlashStart;
+  String? _dismissedSlashText;
 
   double get _horizontalPad {
     return MediaQuery.of(context).size.width >= 1024 ? 32.0 : 20.0;
+  }
+
+  /// The Settings font choice must reach the writing surface; this replaces
+  /// the DM Sans this file previously hardcoded into every style.
+  FontOption get _fontOption =>
+      ThemeController.instance?.font ?? kFontOptions.first;
+
+  TextStyle _editorFont({
+    bool display = false,
+    double? fontSize,
+    FontWeight? fontWeight,
+    Color? color,
+    double? height,
+    double? letterSpacing,
+  }) {
+    final font = _fontOption;
+    if (!font.usesGoogleFonts) {
+      return TextStyle(
+        fontSize: fontSize,
+        fontWeight: fontWeight,
+        color: color,
+        height: height,
+        letterSpacing: letterSpacing,
+      );
+    }
+    return GoogleFonts.getFont(
+      display
+          ? (font.displayFontFamily ?? font.uiFontFamily)
+          : font.uiFontFamily,
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      color: color,
+      height: height,
+      letterSpacing: letterSpacing,
+    );
   }
 
   @override
@@ -107,7 +158,9 @@ class _EditorState extends State<Editor> {
   @override
   void dispose() {
     _contentCtrl.removeListener(_onContentChange);
+    _titleFocus.dispose();
     _newTagFocus.dispose();
+    _contentFocus.dispose();
     _titleCtrl.dispose();
     _contentCtrl.dispose();
     _newTagCtrl.dispose();
@@ -124,10 +177,35 @@ class _EditorState extends State<Editor> {
   void didUpdateWidget(Editor oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.note?.id != oldWidget.note?.id) {
-      _suppressOnChanged = true;
       _titleCtrl.text = widget.note?.title ?? '';
       _contentCtrl.text = widget.note?.content ?? '';
-      _suppressOnChanged = false;
+      // Per-note transient UI must not bleed into the next note.
+      _addingTag = false;
+      _newTagCtrl.clear();
+      _checklistEditIdx = null;
+      _linkSuggestions = [];
+      _slashSuggestions = [];
+      _slashToken = null;
+      _dismissedSlashStart = null;
+      return;
+    }
+    // Same note, but its content changed outside this editor (e.g. a
+    // checklist item toggled from the note list while the note is open on
+    // desktop). Resync so the next local edit does not overwrite the
+    // external change with stale controller text. A focused field wins —
+    // the user's in-flight typing is authoritative over a background change.
+    final note = widget.note;
+    if (note == null) return;
+    if (!_titleFocus.hasFocus && _titleCtrl.text != note.title) {
+      _titleCtrl.value = TextEditingValue(text: note.title);
+    }
+    if (!_contentFocus.hasFocus && _contentCtrl.text != note.content) {
+      final offset =
+          _contentCtrl.selection.baseOffset.clamp(0, note.content.length);
+      _contentCtrl.value = TextEditingValue(
+        text: note.content,
+        selection: TextSelection.collapsed(offset: offset),
+      );
     }
   }
 
@@ -138,6 +216,11 @@ class _EditorState extends State<Editor> {
 
   void _onContentChange() {
     if (!mounted) return;
+    _updateSlashSuggestions();
+    _updateLinkSuggestions();
+  }
+
+  void _updateLinkSuggestions() {
     final text = _contentCtrl.text;
     final sel = _contentCtrl.selection;
     if (!sel.isValid || !sel.isCollapsed) {
@@ -183,6 +266,118 @@ class _EditorState extends State<Editor> {
         .take(5)
         .toList();
     setState(() => _linkSuggestions = matches);
+  }
+
+  void _updateSlashSuggestions() {
+    final selection = _contentCtrl.selection;
+    final note = widget.note;
+    if (widget.previewMode ||
+        note == null ||
+        note.type == 'expense' ||
+        note.type == 'income' ||
+        !selection.isValid ||
+        !selection.isCollapsed) {
+      if (_slashSuggestions.isNotEmpty || _slashToken != null) {
+        setState(() {
+          _slashSuggestions = [];
+          _slashToken = null;
+        });
+      }
+      return;
+    }
+
+    final token = activeSlashToken(_contentCtrl.text, selection.baseOffset);
+    if (token == null) {
+      if (_slashSuggestions.isNotEmpty || _slashToken != null) {
+        setState(() {
+          _slashSuggestions = [];
+          _slashToken = null;
+        });
+      }
+      return;
+    }
+    // Sticky dismissal: while the exact token that was escaped is still on
+    // screen, keep the menu hidden instead of popping it back up on the
+    // next keystroke.
+    if (token.start == _dismissedSlashStart &&
+        _dismissedSlashText != null &&
+        '/${token.query}'.startsWith(_dismissedSlashText!)) {
+      if (_slashSuggestions.isNotEmpty) {
+        setState(() => _slashSuggestions = []);
+      }
+      _slashToken = token;
+      return;
+    }
+    _dismissedSlashStart = null;
+    _dismissedSlashText = null;
+
+    final matches = filterSlashCommands(token.query);
+    setState(() {
+      _slashToken = token;
+      _slashSuggestions = matches;
+      _slashSelectedIndex = 0;
+    });
+  }
+
+  KeyEventResult _handleEditorKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent || _slashSuggestions.isEmpty) {
+      return KeyEventResult.ignored;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      setState(() {
+        _slashSelectedIndex =
+            (_slashSelectedIndex + 1) % _slashSuggestions.length;
+      });
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      setState(() {
+        _slashSelectedIndex =
+            (_slashSelectedIndex - 1 + _slashSuggestions.length) %
+                _slashSuggestions.length;
+      });
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.tab) {
+      _insertSlashCommand(_slashSuggestions[_slashSelectedIndex]);
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      setState(() {
+        _dismissedSlashStart = _slashToken?.start;
+        _dismissedSlashText = _slashToken == null
+            ? null
+            : '/${_slashToken!.query}';
+        _slashSuggestions = [];
+        _slashToken = null;
+      });
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
+  void _insertSlashCommand(SlashCommandDefinition command) {
+    final token = _slashToken;
+    if (token == null) return;
+    final replacement = command.insertion;
+    final newText = replaceSlashToken(_contentCtrl.text, token, replacement);
+    _contentCtrl.text = newText;
+    final offset = token.start + replacement.length;
+    _contentCtrl.selection = TextSelection.collapsed(offset: offset);
+    _syncContent();
+    setState(() {
+      _slashSuggestions = [];
+      _slashToken = null;
+    });
+    if (command.id == 'table') {
+      TablePickerSheet.show(
+        context,
+        onInsert: (rows, cols, align) => _insertTable(rows, cols, align),
+      );
+    } else {
+      _contentFocus.requestFocus();
+    }
   }
 
   void _insertLink(Note note) {
@@ -255,17 +450,17 @@ class _EditorState extends State<Editor> {
       rows.write('| Date | Category | Amount |\n| --- | --- | --- |\n');
     }
 
-    final totals = <String?, double>{};
+    final totals = <String?, int>{};
     for (final e in sorted) {
       final cur = e.currency ?? note.currency;
-      final sym = _currencySymbol(cur);
+      final sym = currencySymbol(cur);
       if (mixed) {
         rows.writeln(
-          '| ${_formatDateShort(e.date)} | ${e.category} | $cur | $sym${_formatNumber(e.amount, cur)} |',
+          '| ${shortDate(e.date)} | ${e.category} | $cur | $sym${formatMinor(e.amount, cur)} |',
         );
       } else {
         rows.writeln(
-          '| ${_formatDateShort(e.date)} | ${e.category} | $sym${_formatNumber(e.amount, cur)} |',
+          '| ${shortDate(e.date)} | ${e.category} | $sym${formatMinor(e.amount, cur)} |',
         );
       }
       totals[cur] = (totals[cur] ?? 0) + e.amount;
@@ -274,48 +469,18 @@ class _EditorState extends State<Editor> {
     if (mixed) {
       for (final t in totals.entries) {
         rows.writeln(
-          '| **Total (${t.key})** | | | **${_currencySymbol(t.key)}${_formatNumber(t.value, t.key)}** |',
+          '| **Total (${t.key})** | | | **${currencySymbol(t.key)}${formatMinor(t.value, t.key)}** |',
         );
       }
     } else {
-      final total = totals.values.fold<double>(0, (a, b) => a + b);
+      final total = totals.values.fold<int>(0, (a, b) => a + b);
       final cur = note.currency;
       rows.write(
-        '| **Total** | | **${_currencySymbol(cur)}${_formatNumber(total, cur)}** |',
+        '| **Total** | | **${currencySymbol(cur)}${formatMinor(total, cur)}** |',
       );
     }
 
     return '$header\n\n$rows';
-  }
-
-  String _currencySymbol(String? code) {
-    switch (code) {
-      case 'PHP':
-        return '₱';
-      case 'USD':
-        return r'$';
-      case 'EUR':
-        return '€';
-      case 'GBP':
-        return '£';
-      case 'JPY':
-        return '¥';
-      case 'INR':
-        return '₹';
-      case null:
-        return '₱';
-      default:
-        return code;
-    }
-  }
-
-  String _formatNumber(double value, String? currency) {
-    final decimals = currency == 'JPY' ? 0 : 2;
-    return formatNumber(value, decimals: decimals);
-  }
-
-  String _formatDateShort(DateTime d) {
-    return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   }
 
   void _setType(String type) {
@@ -349,12 +514,21 @@ class _EditorState extends State<Editor> {
     widget.onAmountsChange(list);
   }
 
+  /// A fresh controller reports an invalid selection (offset -1); inserting
+  /// via the toolbar before ever focusing the body would crash substring.
+  TextSelection get _bodySelection {
+    final sel = _contentCtrl.selection;
+    return sel.isValid && sel.start >= 0 && sel.end >= 0
+        ? sel
+        : TextSelection.collapsed(offset: _contentCtrl.text.length);
+  }
+
   void _insertMD(String pattern) {
     final parts = pattern.split('|');
     final before = parts[0];
     final after = parts.length > 1 ? parts[1] : '';
-    final selStart = _contentCtrl.selection.start;
-    final selEnd = _contentCtrl.selection.end;
+    final selStart = _bodySelection.start;
+    final selEnd = _bodySelection.end;
     final sel = _contentCtrl.text.substring(selStart, selEnd);
 
     final newText =
@@ -371,7 +545,7 @@ class _EditorState extends State<Editor> {
   }
 
   void _insertLine(String prefix) {
-    final selStart = _contentCtrl.selection.start;
+    final selStart = _bodySelection.start;
     final lastNewline = _contentCtrl.text.lastIndexOf('\n', selStart - 1);
     final lineStart = lastNewline + 1;
 
@@ -430,7 +604,7 @@ class _EditorState extends State<Editor> {
     final needsLeadingNewline = cur.isNotEmpty && !cur.endsWith('\n');
     final insertion = needsLeadingNewline ? '\n$table' : table;
 
-    final selStart = _contentCtrl.selection.start;
+    final selStart = _bodySelection.start;
     final newText =
         cur.substring(0, selStart) + insertion + cur.substring(selStart);
     _contentCtrl.text = newText;
@@ -441,13 +615,25 @@ class _EditorState extends State<Editor> {
   }
 
   void _syncContent() {
+    // Rebuild so the word count and live preview refresh after programmatic
+    // edits (toolbar, slash commands), which fire the controller listener
+    // but not a widget rebuild.
+    if (mounted) setState(() {});
     widget.onTitleChange(_titleCtrl.text);
     widget.onContentChange(_contentCtrl.text);
   }
 
   Future<void> _pickFromGallery() async {
     try {
-      final picked = await _picker.pickImage(source: ImageSource.gallery);
+      final picked = await _picker.pickImage(
+        source: ImageSource.gallery,
+        // Downscale in the picker on web: the result is embedded into the
+        // note as a data URI (localStorage has a hard quota), so oversized
+        // photos must never reach storage.
+        maxWidth: kIsWeb ? 1600 : null,
+        maxHeight: kIsWeb ? 1600 : null,
+        imageQuality: kIsWeb ? 75 : null,
+      );
       if (picked == null) return;
       await _saveAndInsert(picked);
     } catch (e) {
@@ -457,7 +643,12 @@ class _EditorState extends State<Editor> {
 
   Future<void> _pickFromCamera() async {
     try {
-      final picked = await _picker.pickImage(source: ImageSource.camera);
+      final picked = await _picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: kIsWeb ? 1600 : null,
+        maxHeight: kIsWeb ? 1600 : null,
+        imageQuality: kIsWeb ? 75 : null,
+      );
       if (picked == null) return;
       await _saveAndInsert(picked);
     } catch (e) {
@@ -471,6 +662,17 @@ class _EditorState extends State<Editor> {
 
     if (kIsWeb) {
       final bytes = await picked.readAsBytes();
+      // Web persistence is localStorage-backed (~5 MB shared across all
+      // keys); one large base64 blob can push every future save over quota.
+      // 1 MB raw is ~1.4 MB as base64 — a deliberate safety ceiling.
+      const webMaxImageBytes = 1 << 20;
+      if (bytes.length > webMaxImageBytes) {
+        _showError(
+          'Image is too large for browser storage (${(bytes.length / 1024 / 1024).toStringAsFixed(1)} MB). '
+          'Choose one under 1 MB.',
+        );
+        return;
+      }
       final ext = picked.name.contains('.')
           ? picked.name.split('.').last.toLowerCase()
           : 'jpeg';
@@ -485,7 +687,8 @@ class _EditorState extends State<Editor> {
         offset: _contentCtrl.text.length,
       );
       _syncContent();
-      widget.onImageAdded(dataUri);
+      // Do NOT add the data URI to imagePaths: the markdown above already
+      // carries the full base64, and duplicating it doubles storage cost.
       return;
     }
 
@@ -521,42 +724,53 @@ class _EditorState extends State<Editor> {
 
   Future<void> _runOcr(String imagePath) async {
     if (!mounted || kIsWeb || _textRecognizer == null) return;
+    final sourceNoteId = widget.note?.id;
     try {
       final inputImage = InputImage.fromFilePath(imagePath);
       final result = await _textRecognizer.processImage(inputImage);
       if (!mounted) return;
       final text = result.text.trim();
       if (text.isNotEmpty) {
-        final lines = text.split('\n').where((l) => l.trim().length > 2).length;
-        if (mounted) {
+        // Count exactly what Append will insert (same filter), so the
+        // snackbar number matches reality.
+        final appendable = text
+            .split('\n')
+            .map((l) => l.trim())
+            .where((l) => l.length > 2)
+            .toList();
+        if (appendable.isNotEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Extracted $lines lines from image'),
+              content: Text('Extracted ${appendable.length} lines from image'),
               duration: const Duration(seconds: 6),
               action: SnackBarAction(
                 label: 'Append',
                 onPressed: () {
-                  final quoted = text
-                      .split('\n')
-                      .map((l) => '> ${l.trim()}')
-                      .where((l) => l.length > 2)
-                      .join('\n');
-                  if (quoted.isNotEmpty) {
-                    final addition = '\n$quoted\n';
-                    _contentCtrl.text = _contentCtrl.text + addition;
-                    _contentCtrl.selection = TextSelection.collapsed(
-                      offset: _contentCtrl.text.length,
-                    );
-                    _syncContent();
-                  }
+                  // Do not splice the scanned text into a different note if
+                  // the user switched while the snackbar was up.
+                  if (!mounted || widget.note?.id != sourceNoteId) return;
+                  final quoted =
+                      appendable.map((l) => '> $l').join('\n');
+                  final addition = '\n$quoted\n';
+                  _contentCtrl.text = _contentCtrl.text + addition;
+                  _contentCtrl.selection = TextSelection.collapsed(
+                    offset: _contentCtrl.text.length,
+                  );
+                  _syncContent();
                 },
               ),
             ),
           );
         }
       }
-    } catch (_) {
-      // OCR is best-effort; silently skip on failure
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not read text from the image: $e'),
+          duration: const Duration(seconds: 4),
+        ),
+      );
     }
   }
 
@@ -583,11 +797,17 @@ class _EditorState extends State<Editor> {
       bindings: {
         SingleActivator(LogicalKeyboardKey.keyB, control: true): () =>
             _insertMD('**|**'),
+        SingleActivator(LogicalKeyboardKey.keyB, meta: true): () =>
+            _insertMD('**|**'),
         SingleActivator(LogicalKeyboardKey.keyI, control: true): () =>
             _insertMD('*|*'),
-        SingleActivator(LogicalKeyboardKey.keyK, control: true): () =>
-            _insertMD('[|](url)'),
+        SingleActivator(LogicalKeyboardKey.keyI, meta: true): () =>
+            _insertMD('*|*'),
         SingleActivator(LogicalKeyboardKey.keyS, control: true): () {
+          _syncContent();
+          widget.onSaveNow?.call();
+        },
+        SingleActivator(LogicalKeyboardKey.keyS, meta: true): () {
           _syncContent();
           widget.onSaveNow?.call();
         },
@@ -639,14 +859,11 @@ class _EditorState extends State<Editor> {
           Expanded(
             child: TextField(
               controller: _titleCtrl,
-              onChanged: (v) {
-                if (widget.note == null && v.trim().isNotEmpty) {
-                  widget.onCreateNote(v);
-                }
-                _syncContent();
-              },
-              style: GoogleFonts.dmSans(
-                fontSize: 22,
+              focusNode: _titleFocus,
+              onChanged: (_) => _syncContent(),
+              style: _editorFont(
+                display: true,
+                fontSize: AppType.t22,
                 fontWeight: FontWeight.w600,
                 color: context.colors.fg,
                 height: 1.2,
@@ -660,6 +877,14 @@ class _EditorState extends State<Editor> {
             ),
           ),
           if (note != null) ...[
+            if (widget.saveState != 'idle')
+              Padding(
+                padding: const EdgeInsets.only(top: 6, right: 6),
+                child: Text(
+                  widget.saveState == 'saving' ? 'Saving…' : 'Saved',
+                  style: TextStyle(fontSize: AppType.t11, color: context.colors.muted),
+                ),
+              ),
             if (!isMobile) ...[
               const SizedBox(width: 8),
               _TypeDropdown(value: note.type, onChanged: _setType),
@@ -771,10 +996,10 @@ class _EditorState extends State<Editor> {
                       value: 'type:todo',
                       child: Row(
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.checklist_outlined,
                             size: 18,
-                            color: Color(0xFFCC4D3C),
+                            color: context.colors.accent,
                           ),
                           const SizedBox(width: 8),
                           Row(
@@ -795,10 +1020,10 @@ class _EditorState extends State<Editor> {
                       value: 'type:expense',
                       child: Row(
                         children: [
-                          const Icon(
-                            Icons.arrow_upward,
+                          Icon(
+                            Icons.arrow_downward,
                             size: 18,
-                            color: Color(0xFFCC4D3C),
+                            color: context.colors.destructive,
                           ),
                           const SizedBox(width: 8),
                           Row(
@@ -819,10 +1044,10 @@ class _EditorState extends State<Editor> {
                       value: 'type:income',
                       child: Row(
                         children: [
-                          const Icon(
-                            Icons.arrow_downward,
+                          Icon(
+                            Icons.arrow_upward,
                             size: 18,
-                            color: Color(0xFF2D8659),
+                            color: context.colors.income,
                           ),
                           const SizedBox(width: 8),
                           Row(
@@ -889,6 +1114,23 @@ class _EditorState extends State<Editor> {
                 return items;
               },
             ),
+          if (widget.onToggleContext != null)
+            IconButton(
+              onPressed: widget.onToggleContext,
+              tooltip: widget.contextPanelOpen
+                  ? 'Hide page details'
+                  : 'Show page details',
+              icon: Icon(
+                widget.contextPanelOpen
+                    ? Icons.view_sidebar
+                    : Icons.view_sidebar_outlined,
+                size: 19,
+                color: widget.contextPanelOpen
+                    ? context.colors.accent
+                    : context.colors.muted,
+              ),
+              visualDensity: VisualDensity.compact,
+            ),
         ],
       ),
     );
@@ -908,6 +1150,18 @@ class _EditorState extends State<Editor> {
       (current, entry) =>
           entry.value > (currencyCounts[current] ?? 0) ? entry.key : current,
     );
+    // Entries excluded from the cards above because their currency differs
+    // from the note's dominant currency — surfaced so totals stay honest.
+    final excludedSpent = <String, int>{};
+    final excludedCounts = <String, int>{};
+    for (final entry in note.amounts) {
+      final cur = entry.currency ?? note.currency ?? 'PHP';
+      if (cur == currency) continue;
+      excludedCounts[cur] = (excludedCounts[cur] ?? 0) + 1;
+      if ((entry.type ?? note.type) == 'expense') {
+        excludedSpent[cur] = (excludedSpent[cur] ?? 0) + entry.amount;
+      }
+    }
     final expenses = note.amounts
         .where((e) =>
             (e.type ?? note.type) == 'expense' &&
@@ -918,21 +1172,23 @@ class _EditorState extends State<Editor> {
             (e.type ?? note.type) == 'income' &&
             (e.currency ?? note.currency ?? 'PHP') == currency)
         .toList();
-    final totalExpenses = expenses.fold<double>(0, (s, e) => s + e.amount);
-    final totalIncome = incomes.fold<double>(0, (s, e) => s + e.amount);
+    final totalExpenses = expenses.fold<int>(0, (s, e) => s + e.amount);
+    final totalIncome = incomes.fold<int>(0, (s, e) => s + e.amount);
     final netAmount = totalIncome - totalExpenses;
     return Flexible(
       child: Container(
         margin: EdgeInsets.fromLTRB(_horizontalPad, 12, _horizontalPad, 0),
         decoration: BoxDecoration(
           color: context.colors.listBg,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           border: Border.all(color: context.colors.border),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _buildSummaryCards(totalExpenses, totalIncome, netAmount, currency),
+            if (excludedCounts.isNotEmpty)
+              _buildExcludedCurrenciesRow(excludedSpent, excludedCounts),
             if (note.amounts.isNotEmpty) ...[
               const SizedBox(height: 4),
               Divider(height: 1, color: context.colors.border.withAlpha(100)),
@@ -954,7 +1210,7 @@ class _EditorState extends State<Editor> {
                 child: Center(
                   child: Text(
                     'No entries yet. Tap "+ Entry" to add one.',
-                    style: TextStyle(fontSize: 12, color: context.colors.muted),
+                    style: TextStyle(fontSize: AppType.t12, color: context.colors.muted),
                   ),
                 ),
               ),
@@ -967,14 +1223,59 @@ class _EditorState extends State<Editor> {
     );
   }
 
+  Widget _buildExcludedCurrenciesRow(
+    Map<String, int> excludedSpent,
+    Map<String, int> excludedCounts,
+  ) {
+    final muted = context.colors.muted;
+    final style = TextStyle(fontSize: AppType.t11, color: muted);
+    final codes = excludedCounts.keys.toList()..sort();
+    final spans = <InlineSpan>[];
+    for (var i = 0; i < codes.length; i++) {
+      final code = codes[i];
+      final n = excludedCounts[code] ?? 0;
+      if (i > 0) spans.add(TextSpan(text: ' · ', style: style));
+      spans.add(currencySpan(code, style));
+      spans.add(
+        TextSpan(
+          text:
+              '${formatMinor(excludedSpent[code] ?? 0, code)} spent in $n $code ${n == 1 ? 'entry' : 'entries'}',
+          style: style,
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline, size: 12, color: muted),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                style: style,
+                children: [
+                  TextSpan(text: 'Excludes ', style: style),
+                  ...spans,
+                ],
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSummaryCards(
-    double totalExpenses,
-    double totalIncome,
-    double netAmount,
+    int totalExpenses,
+    int totalIncome,
+    int netAmount,
     String currency,
   ) {
-    final expenseColor = const Color(0xFFCC4D3C);
-    final incomeColor = const Color(0xFF2D8659);
+    final expenseColor = context.colors.destructive;
+    final incomeColor = context.colors.income;
     final netColor = netAmount >= 0 ? incomeColor : expenseColor;
 
     return Padding(
@@ -1018,7 +1319,7 @@ class _EditorState extends State<Editor> {
 
   Widget _summaryCard(
     String label,
-    double value,
+    int value,
     Color color,
     String currency,
   ) {
@@ -1027,7 +1328,7 @@ class _EditorState extends State<Editor> {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: color.withAlpha(20),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppRadius.card),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1036,7 +1337,7 @@ class _EditorState extends State<Editor> {
           Text(
             label,
             style: TextStyle(
-              fontSize: 11,
+              fontSize: AppType.t11,
               fontWeight: FontWeight.w500,
               color: color,
               letterSpacing: 0.5,
@@ -1045,17 +1346,14 @@ class _EditorState extends State<Editor> {
           Text.rich(
             TextSpan(
               style: TextStyle(
-                fontSize: 22,
+                fontSize: AppType.t22,
                 fontWeight: FontWeight.bold,
                 color: color,
               ),
               children: [
                 currencySpan(currency, null),
                 TextSpan(
-                  text: formatNumber(
-                    value,
-                    decimals: currency == 'JPY' ? 0 : 2,
-                  ),
+                  text: formatMinor(value, currency),
                 ),
               ],
             ),
@@ -1090,7 +1388,7 @@ class _EditorState extends State<Editor> {
                 children: [
                   Text(
                     e.category,
-                    style: TextStyle(fontSize: 13, color: context.colors.fg),
+                    style: TextStyle(fontSize: AppType.t13_5, color: context.colors.fg),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1098,7 +1396,7 @@ class _EditorState extends State<Editor> {
                     Text(
                       e.note!,
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: AppType.t11,
                         color: context.colors.muted,
                       ),
                       maxLines: 1,
@@ -1115,7 +1413,7 @@ class _EditorState extends State<Editor> {
                 Text.rich(
                   TextSpan(
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: AppType.t13_5,
                       fontWeight: FontWeight.w500,
                       color: effectiveType == 'income'
                           ? context.colors.income
@@ -1124,10 +1422,7 @@ class _EditorState extends State<Editor> {
                     children: [
                       currencySpan(effectiveCurrencySym, null),
                       TextSpan(
-                        text: formatNumber(
-                          e.amount,
-                          decimals: effectiveCurrencySym == 'JPY' ? 0 : 2,
-                        ),
+                        text: formatMinor(e.amount, effectiveCurrency),
                       ),
                     ],
                   ),
@@ -1135,7 +1430,7 @@ class _EditorState extends State<Editor> {
                 Text(
                   '${e.date.hour.toString().padLeft(2, '0')}:${e.date.minute.toString().padLeft(2, '0')}',
                   style: TextStyle(
-                    fontSize: 10,
+                    fontSize: AppType.t10,
                     fontFamily: context.colors.monoFontFamily,
                     color: context.colors.muted,
                   ),
@@ -1152,7 +1447,7 @@ class _EditorState extends State<Editor> {
                 context,
                 entry: e,
                 onSave: _addOrUpdateEntry,
-                currencySymbol: _currencySymbol(effectiveCurrency),
+                currencySymbol: currencySymbol(effectiveCurrency),
                 noteCurrency: note.currency,
                 noteType: note.type,
                 customCategories: widget.customCategories,
@@ -1160,19 +1455,25 @@ class _EditorState extends State<Editor> {
                 onCategoryUsed: widget.onCategoryUsed,
               ),
               child: Padding(
-                padding: const EdgeInsets.all(4),
-                child: Icon(
-                  Icons.edit_outlined,
-                  size: 14,
-                  color: context.colors.muted,
+                padding: const EdgeInsets.all(8),
+                child: Tooltip(
+                  message: 'Edit entry',
+                  child: Icon(
+                    Icons.edit_outlined,
+                    size: 14,
+                    color: context.colors.muted,
+                  ),
                 ),
               ),
             ),
             InkWell(
               onTap: () => _removeEntry(e.id),
               child: Padding(
-                padding: const EdgeInsets.all(4),
-                child: Icon(Icons.close, size: 14, color: context.colors.muted),
+                padding: const EdgeInsets.all(8),
+                child: Tooltip(
+                  message: 'Delete entry',
+                  child: Icon(Icons.close, size: 14, color: context.colors.muted),
+                ),
               ),
             ),
           ],
@@ -1188,7 +1489,7 @@ class _EditorState extends State<Editor> {
         onPressed: () => EntrySheet.show(
           context,
           onSave: _addOrUpdateEntry,
-          currencySymbol: _currencySymbol(note.currency),
+          currencySymbol: currencySymbol(note.currency),
           noteCurrency: note.currency,
           noteType: note.type,
           customCategories: widget.customCategories,
@@ -1196,7 +1497,7 @@ class _EditorState extends State<Editor> {
           onCategoryUsed: widget.onCategoryUsed,
         ),
         icon: const Icon(Icons.add, size: 14),
-        label: const Text('Entry', style: TextStyle(fontSize: 13)),
+        label: const Text('Entry', style: TextStyle(fontSize: AppType.t13_5)),
         style: TextButton.styleFrom(
           foregroundColor: context.colors.accent,
           padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -1208,6 +1509,7 @@ class _EditorState extends State<Editor> {
   IconData _categoryIcon(String category) {
     switch (category.toLowerCase()) {
       case 'food':
+      case 'food & drink':
       case 'dining':
       case 'restaurant':
         return Icons.restaurant_outlined;
@@ -1335,7 +1637,7 @@ class _EditorState extends State<Editor> {
       return;
     }
     final lines = _contentCtrl.text.split('\n');
-    final m = RegExp(r'^(\s*-\s+\[[ x]\]\s+).*$').firstMatch(lines[lineIndex]);
+    final m = RegExp(r'^(\s*-\s+\[[ xX]\]\s+).*$').firstMatch(lines[lineIndex]);
     if (m != null) lines[lineIndex] = '${m.group(1)}$text';
     if (!addNext) {
       _contentCtrl.text = lines.join('\n');
@@ -1381,7 +1683,8 @@ class _EditorState extends State<Editor> {
                             const SizedBox(height: 12),
                             Text(
                               'No items yet',
-                              style: GoogleFonts.dmSans(
+                              style: _editorFont(
+                                display: true,
                                 fontSize: 18,
                                 fontWeight: FontWeight.w500,
                                 color: c.fg,
@@ -1390,7 +1693,7 @@ class _EditorState extends State<Editor> {
                             const SizedBox(height: 4),
                             Text(
                               'Add your first to-do item below.',
-                              style: TextStyle(fontSize: 13, color: c.muted),
+                              style: TextStyle(fontSize: AppType.t13_5, color: c.muted),
                             ),
                           ],
                         ),
@@ -1410,7 +1713,7 @@ class _EditorState extends State<Editor> {
                 icon: Icon(Icons.edit_outlined, size: 14, color: c.muted),
                 label: Text(
                   'Edit raw',
-                  style: TextStyle(fontSize: 12, color: c.muted),
+                  style: TextStyle(fontSize: AppType.t12, color: c.muted),
                 ),
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -1433,37 +1736,14 @@ class _EditorState extends State<Editor> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 1),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Semantics(
-            button: true,
-            checked: item.checked,
-            label: item.text.isEmpty ? 'Checklist item' : item.text,
-            child: InkWell(
-              onTap: () => _toggleItem(item.lineIndex, !item.checked),
-              borderRadius: BorderRadius.circular(20),
-              child: SizedBox(
-                width: 40,
-                height: 40,
-                child: Center(
-                  child: Container(
-                    width: 22,
-                    height: 22,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: item.checked ? c.accent : c.muted,
-                        width: 2,
-                      ),
-                      color: item.checked ? c.accent : Colors.transparent,
-                    ),
-                    child: item.checked
-                        ? const Icon(Icons.check, size: 14, color: Colors.white)
-                        : null,
-                  ),
-                ),
-              ),
-            ),
+          Checkbox(
+            value: item.checked,
+            onChanged: (_) => _toggleItem(item.lineIndex, !item.checked),
+            activeColor: c.accent,
+            materialTapTargetSize: MaterialTapTargetSize.padded,
+            visualDensity: VisualDensity.compact,
           ),
           const SizedBox(width: 4),
           Expanded(
@@ -1473,8 +1753,8 @@ class _EditorState extends State<Editor> {
                     child: TextField(
                       controller: _checklistEditCtrl,
                       focusNode: _checklistEditFocus,
-                      style: GoogleFonts.dmSans(
-                        fontSize: 14,
+                      style: _editorFont(
+                        fontSize: AppType.t13_5,
                         fontWeight: FontWeight.w400,
                         color: c.fg,
                         height: 1.4,
@@ -1497,17 +1777,18 @@ class _EditorState extends State<Editor> {
                     child: Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       child: Text(
-                        item.text,
-                        style: GoogleFonts.dmSans(
-                          fontSize: 14,
+                        stripInlineMarkdown(item.text),
+                        style: _editorFont(
+                          fontSize: AppType.t13_5,
                           fontWeight: item.checked
                               ? FontWeight.w400
                               : FontWeight.w500,
                           color: item.checked ? c.muted : c.fg,
+                          height: 1.4,
+                        ).copyWith(
                           decoration: item.checked
                               ? TextDecoration.lineThrough
                               : null,
-                          height: 1.4,
                         ),
                       ),
                     ),
@@ -1517,7 +1798,7 @@ class _EditorState extends State<Editor> {
             GestureDetector(
               onTap: () => _deleteItem(item.lineIndex),
               child: Padding(
-                padding: const EdgeInsets.only(left: 4, top: 4),
+                padding: const EdgeInsets.all(10),
                 child: Icon(
                   Icons.close,
                   size: 16,
@@ -1546,8 +1827,8 @@ class _EditorState extends State<Editor> {
               height: 32,
               child: TextField(
                 controller: _checklistAddCtrl,
-                style: GoogleFonts.dmSans(
-                  fontSize: 14,
+                style: _editorFont(
+                  fontSize: AppType.t13_5,
                   fontWeight: FontWeight.w400,
                   color: c.fg,
                   height: 1.4,
@@ -1555,7 +1836,7 @@ class _EditorState extends State<Editor> {
                 decoration: InputDecoration(
                   hintText: 'Add an item...',
                   hintStyle: TextStyle(
-                    fontSize: 14,
+                    fontSize: AppType.t13_5,
                     color: c.muted.withAlpha(150),
                   ),
                   isDense: true,
@@ -1577,12 +1858,11 @@ class _EditorState extends State<Editor> {
             style: TextButton.styleFrom(
               foregroundColor: c.accent,
               padding: const EdgeInsets.symmetric(horizontal: 8),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              minimumSize: const Size(44, 44),
             ),
             child: const Text(
               'Add',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+              style: TextStyle(fontSize: AppType.t13_5, fontWeight: FontWeight.w500),
             ),
           ),
         ],
@@ -1590,31 +1870,31 @@ class _EditorState extends State<Editor> {
     );
   }
 
-  void _showRawDialog() {
+  Future<void> _showRawDialog() async {
     final c = context.colors;
     final ctrl = TextEditingController(text: _contentCtrl.text);
-    showDialog(
+    await showDialog(
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: c.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.panel)),
         title: Text(
           'Raw markdown',
           style: TextStyle(
-            fontSize: 14,
+            fontSize: AppType.t13_5,
             fontWeight: FontWeight.w600,
             color: c.fg,
           ),
         ),
         content: SizedBox(
           width: double.maxFinite,
-          height: 300.0,
+          height: MediaQuery.sizeOf(context).height * 0.4,
           child: TextField(
             controller: ctrl,
             maxLines: null,
             expands: true,
             style: GoogleFonts.jetBrainsMono(
-              fontSize: 12,
+              fontSize: AppType.t12,
               color: c.fg,
               height: 1.5,
             ),
@@ -1622,7 +1902,7 @@ class _EditorState extends State<Editor> {
               filled: true,
               fillColor: c.bg,
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(AppRadius.card),
                 borderSide: BorderSide(color: c.border),
               ),
               contentPadding: const EdgeInsets.all(12),
@@ -1646,6 +1926,7 @@ class _EditorState extends State<Editor> {
         ],
       ),
     );
+    ctrl.dispose();
   }
 
   Widget _buildTagBar() {
@@ -1661,12 +1942,12 @@ class _EditorState extends State<Editor> {
           ...tags.map(
             (t) => InkWell(
               onTap: () => _removeTag(t),
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(AppRadius.chip),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: c.tagBg,
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(AppRadius.chip),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -1674,7 +1955,7 @@ class _EditorState extends State<Editor> {
                     Text(
                       '#$t',
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: AppType.t12,
                         fontWeight: FontWeight.w400,
                         color: c.tagFg,
                       ),
@@ -1701,21 +1982,21 @@ class _EditorState extends State<Editor> {
                       vertical: 4,
                     ),
                     hintText: 'tag',
-                    hintStyle: TextStyle(fontSize: 12, color: c.muted),
+                    hintStyle: TextStyle(fontSize: AppType.t12, color: c.muted),
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(AppRadius.chip),
                       borderSide: BorderSide(color: c.border),
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(AppRadius.chip),
                       borderSide: BorderSide(color: c.border),
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(AppRadius.chip),
                       borderSide: BorderSide(color: c.accent),
                     ),
                   ),
-                  style: TextStyle(fontSize: 12, color: c.fg),
+                  style: TextStyle(fontSize: AppType.t12, color: c.fg),
                   onSubmitted: _submitTag,
                   onEditingComplete: () => _submitTag(_newTagCtrl.text),
                   onTapOutside: (_) {
@@ -1734,19 +2015,19 @@ class _EditorState extends State<Editor> {
                   _newTagFocus.requestFocus();
                 });
               },
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(AppRadius.chip),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   border: Border.all(color: c.border),
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(AppRadius.chip),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.add, size: 12, color: c.muted),
                     const SizedBox(width: 4),
-                    Text('tag', style: TextStyle(fontSize: 12, color: c.muted)),
+                    Text('tag', style: TextStyle(fontSize: AppType.t12, color: c.muted)),
                   ],
                 ),
               ),
@@ -1797,17 +2078,25 @@ class _EditorState extends State<Editor> {
             child: MarkdownBody(
               data: _renderedContent(),
               selectable: true,
-              styleSheet: _buildMarkdownStyle(context.colors),
+              styleSheet: _buildMarkdownStyle(context.colors, _editorFont),
               onTapLink: (text, href, title) {
                 if (href != null && href.startsWith('#note:')) {
                   widget.onOpenNote(href.substring(6));
                 }
               },
-              builders: {'pre': _CodeBlockBuilder(context.colors.sidebarFg)},
+              builders: {
+                'pre': _CodeBlockBuilder(
+                  context.colors.sidebarFg,
+                  context.colors.monoFontFamily,
+                ),
+              },
               sizedImageBuilder: (config) {
-                final path = config.uri.scheme == 'file'
-                    ? config.uri.path
-                    : config.uri.toString();
+                final path = kIsWeb
+                    ? config.uri.toString()
+                    : resolveImagePath(
+                        config.uri,
+                        windows: !kIsWeb && Platform.isWindows,
+                      );
                 if (kIsWeb && path.startsWith('data:image/')) {
                   final comma = path.indexOf(',');
                   if (comma > 0) {
@@ -1816,7 +2105,7 @@ class _EditorState extends State<Editor> {
                       return Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(AppRadius.card),
                           child: Image.memory(
                             Uint8List.fromList(bytes),
                             fit: BoxFit.contain,
@@ -1835,11 +2124,12 @@ class _EditorState extends State<Editor> {
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(AppRadius.card),
                       child: Image.file(
                         File(path),
                         fit: BoxFit.contain,
                         width: config.width ?? double.infinity,
+                        cacheWidth: 1600,
                         errorBuilder: (_, __, ___) => _brokenImage(config.alt),
                       ),
                     ),
@@ -1866,32 +2156,40 @@ class _EditorState extends State<Editor> {
               right: leftPad,
               top: 16,
               bottom: 16,
-              child: TextField(
-                controller: _contentCtrl,
-                onChanged: (_) {
-                  _syncContent();
-                  if (!_suppressOnChanged) setState(() {});
-                },
-                maxLines: null,
-                expands: true,
-                style: GoogleFonts.dmSans(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w400,
-                  color: context.colors.fg,
-                  height: 1.6,
-                ),
-                decoration: InputDecoration(
-                  hintText:
-                      'Start writing in Markdown...\n\n'
-                      'Type #tag to categorize this note. '
-                      'Use **bold**, *italic*, `code`, [[links]], and more.',
-                  hintStyle: TextStyle(color: context.colors.muted),
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.zero,
+                child: Focus(
+                  onKeyEvent: _handleEditorKey,
+                  child: TextField(
+                    focusNode: _contentFocus,
+                    controller: _contentCtrl,
+                    onChanged: (_) => _syncContent(),
+                    maxLines: null,
+                    expands: true,
+                    style: _editorFont(
+                      fontSize: AppType.t15,
+                      fontWeight: FontWeight.w400,
+                      color: context.colors.fg,
+                      height: 1.6,
+                    ),
+                  decoration: InputDecoration(
+                    hintText:
+                        'Start writing in Markdown...\n\n'
+                        'Type / for blocks, #tag to categorize, and '
+                        '[[ to link another note.',
+                    hintStyle: TextStyle(color: context.colors.muted),
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                  ),
                 ),
               ),
             ),
-            if (_linkSuggestions.isNotEmpty)
+            if (_slashSuggestions.isNotEmpty)
+              Positioned(
+                left: leftPad,
+                right: leftPad,
+                top: 16,
+                child: _buildSlashSuggestions(),
+              ),
+            if (_slashSuggestions.isEmpty && _linkSuggestions.isNotEmpty)
               Positioned(
                 left: leftPad,
                 right: leftPad,
@@ -1904,14 +2202,64 @@ class _EditorState extends State<Editor> {
     );
   }
 
+  Widget _buildSlashSuggestions() {
+    final c = context.colors;
+    return Material(
+      elevation: 6,
+      borderRadius: BorderRadius.circular(AppRadius.card),
+      child: Container(
+        decoration: BoxDecoration(
+          color: c.surface,
+          borderRadius: BorderRadius.circular(AppRadius.card),
+          border: Border.all(color: c.border),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: _slashSuggestions.asMap().entries.map((entry) {
+            final index = entry.key;
+            final command = entry.value;
+            final selected = index == _slashSelectedIndex;
+            return InkWell(
+              onTap: () => _insertSlashCommand(command),
+              child: Container(
+                color: selected ? c.accentDim : Colors.transparent,
+                padding: const EdgeInsets.symmetric(vertical: AppSpacing.s8, horizontal: 12),
+                child: Row(
+                  children: [
+                    Icon(command.icon, size: 16, color: selected ? c.accent : c.muted),
+                    const SizedBox(width: AppSpacing.s8),
+                    Expanded(
+                      child: Text(
+                        command.label,
+                        style: TextStyle(
+                          color: c.fg,
+                          fontSize: AppType.t13_5,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      command.description,
+                      style: TextStyle(color: c.muted, fontSize: AppType.t11),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
   Widget _buildLinkSuggestions() {
     return Material(
       elevation: 6,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(AppRadius.card),
       child: Container(
         decoration: BoxDecoration(
           color: context.colors.surface,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(AppRadius.card),
           border: Border.all(color: context.colors.border),
         ),
         child: Column(
@@ -1937,7 +2285,7 @@ class _EditorState extends State<Editor> {
                           child: Text(
                             n.title,
                             style: TextStyle(
-                              fontSize: 13,
+                              fontSize: AppType.t13_5,
                               color: context.colors.fg,
                             ),
                             maxLines: 1,
@@ -1961,7 +2309,7 @@ class _EditorState extends State<Editor> {
       margin: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
         color: context.colors.listBg,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppRadius.card),
         border: Border.all(color: context.colors.border),
       ),
       child: Row(
@@ -1977,7 +2325,7 @@ class _EditorState extends State<Editor> {
               alt ?? 'Image not found',
               style: TextStyle(
                 color: context.colors.muted,
-                fontSize: 13,
+                fontSize: AppType.t13_5,
                 fontStyle: FontStyle.italic,
               ),
             ),
@@ -2000,7 +2348,8 @@ class _EditorState extends State<Editor> {
           const SizedBox(height: 12),
           Text(
             'Nothing here yet',
-            style: GoogleFonts.dmSans(
+            style: _editorFont(
+              display: true,
               fontSize: 18,
               fontWeight: FontWeight.w500,
               color: context.colors.muted.withAlpha(100),
@@ -2011,7 +2360,7 @@ class _EditorState extends State<Editor> {
           Text(
             'Ctrl+N \u2014 new note',
             style: TextStyle(
-              fontSize: 11,
+              fontSize: AppType.t11,
               fontFamily: context.colors.monoFontFamily,
               color: context.colors.muted.withAlpha(80),
               letterSpacing: 0.06,
@@ -2032,15 +2381,16 @@ class _ChecklistItem {
 
 class _CodeBlockBuilder extends MarkdownElementBuilder {
   final Color codeColor;
-  _CodeBlockBuilder(this.codeColor);
+  final String fontFamily;
+  _CodeBlockBuilder(this.codeColor, this.fontFamily);
 
   @override
   Widget? visitText(md.Text text, TextStyle? preferredStyle) {
     return Text(
       text.textContent,
       style: TextStyle(
-        fontSize: 13,
-        fontFamily: 'JetBrains Mono',
+        fontSize: AppType.t13_5,
+        fontFamily: fontFamily,
         color: codeColor,
         height: 1.55,
       ),
@@ -2048,43 +2398,59 @@ class _CodeBlockBuilder extends MarkdownElementBuilder {
   }
 }
 
-MarkdownStyleSheet _buildMarkdownStyle(AppColors c) {
+/// Instance method so the markdown preview picks up the Settings font choice
+/// (display font for headings, UI font for body) instead of hardcoded DM Sans.
+MarkdownStyleSheet _buildMarkdownStyle(
+  AppColors c,
+  TextStyle Function({
+    bool display,
+    double? fontSize,
+    FontWeight? fontWeight,
+    Color? color,
+    double? height,
+    double? letterSpacing,
+  })
+  editorFont,
+) {
   return MarkdownStyleSheet(
-    h1: GoogleFonts.dmSans(
+    h1: editorFont(
+      display: true,
       fontSize: 24,
       fontWeight: FontWeight.w700,
       color: c.fg,
       letterSpacing: -0.02,
       height: 1.3,
     ),
-    h2: GoogleFonts.dmSans(
+    h2: editorFont(
+      display: true,
       fontSize: 18,
       fontWeight: FontWeight.w600,
       color: c.fg,
       letterSpacing: -0.01,
       height: 1.3,
     ),
-    h3: GoogleFonts.dmSans(
-      fontSize: 16,
+    h3: editorFont(
+      display: true,
+      fontSize: AppType.t15,
       fontWeight: FontWeight.w600,
       color: c.fg,
       height: 1.3,
     ),
-    p: GoogleFonts.dmSans(
-      fontSize: 15,
+    p: editorFont(
+      fontSize: AppType.t15,
       fontWeight: FontWeight.w400,
       color: c.fg,
       height: 1.6,
     ),
     code: TextStyle(
-      fontSize: 13,
+      fontSize: AppType.t13_5,
       fontFamily: c.monoFontFamily,
       backgroundColor: c.listBg,
       color: c.fg,
     ),
     codeblockDecoration: BoxDecoration(
       color: c.sidebarBg,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(AppRadius.card),
       border: Border.all(color: c.border),
     ),
     codeblockPadding: const EdgeInsets.all(14),
@@ -2094,8 +2460,8 @@ MarkdownStyleSheet _buildMarkdownStyle(AppColors c) {
     blockquotePadding: const EdgeInsets.fromLTRB(16, 2, 0, 2),
     a: TextStyle(color: c.accent),
     strong: const TextStyle(fontWeight: FontWeight.w600),
-    listBullet: GoogleFonts.dmSans(fontSize: 15, color: c.fg),
-    checkbox: GoogleFonts.dmSans(fontSize: 15, color: c.accent),
+    listBullet: editorFont(fontSize: AppType.t15, color: c.fg),
+    checkbox: editorFont(fontSize: AppType.t15, color: c.accent),
     del: TextStyle(decoration: TextDecoration.lineThrough, color: c.muted),
     em: const TextStyle(fontStyle: FontStyle.italic),
   );
@@ -2119,7 +2485,7 @@ class _TypeDropdown extends StatelessWidget {
             : isTodo
             ? context.colors.accentDim
             : context.colors.listBg,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(AppRadius.chip),
         border: Border.all(
           color: isFinance
               ? context.colors.accent
@@ -2144,7 +2510,7 @@ class _TypeDropdown extends StatelessWidget {
             Text(
               _label(value),
               style: TextStyle(
-                fontSize: 12,
+                fontSize: AppType.t12,
                 fontWeight: FontWeight.w500,
                 color: isFinance || isTodo
                     ? context.colors.accent
@@ -2193,7 +2559,7 @@ class _CurrencyDropdown extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
         color: context.colors.listBg,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(AppRadius.chip),
         border: Border.all(color: context.colors.border),
       ),
       child: PopupMenuButton<String>(
@@ -2222,7 +2588,7 @@ class _CurrencyDropdown extends StatelessWidget {
             Text.rich(
               TextSpan(
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: AppType.t12,
                   fontWeight: FontWeight.w500,
                   color: context.colors.fg,
                 ),

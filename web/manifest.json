@@ -1,11 +1,11 @@
 {
-    "name": "typed",
-    "short_name": "typed",
+    "name": "Typed",
+    "short_name": "Typed",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#F8F9FA",
+    "theme_color": "#CC4D3C",
+    "description": "A quiet, local-first workspace for notes, tasks, and money.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

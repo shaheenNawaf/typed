@@ -1,0 +1,6 @@
+<svg viewBox="0 0 64 64" width="64" height="64" xmlns="http://www.w3.org/2000/svg">
+  <title>Discovery D1 — I-beam</title>
+  <rect x="21" y="10" width="22" height="6.5" rx="2" fill="#1A242E"/>
+  <rect x="28.75" y="10" width="6.5" height="46" rx="2" fill="#1A242E"/>
+  <rect x="21" y="49.5" width="22" height="6.5" rx="2" fill="#1A242E"/>
+  <rect x="46" y="49.5" width="7" height="6.5" rx="1" fill="#CC4D3C"/></svg>

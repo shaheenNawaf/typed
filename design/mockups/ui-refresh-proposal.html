@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Typed — Visual Refresh Proposal</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,700&display=swap');
+
+  :root {
+    --accent: #CC4D3C;
+    --fg: #1A242E;
+    --bg: #F8F9FA;
+    --surface: #FFFFFF;
+    --muted: #6E7A85;
+    --border: #E5E8EB;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Outfit', sans-serif;
+    background: #EDEFF1;
+    color: var(--fg);
+    padding: 48px 24px 96px;
+  }
+  .page { max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 8px 0 48px; font-size: 15px; }
+  h2 {
+    font-size: 20px; font-weight: 600; margin: 64px 0 6px;
+    padding-top: 24px; border-top: 1px solid #D8DCE0;
+  }
+  h2 .num { color: var(--accent); font-family: 'JetBrains Mono', monospace; font-size: 14px; margin-right: 8px; }
+  .desc { color: var(--muted); font-size: 14px; margin-bottom: 24px; max-width: 640px; line-height: 1.5; }
+
+  .row { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+  .panel {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; overflow: hidden; flex: 1; min-width: 320px;
+  }
+  .panel-label {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.08em;
+    text-transform: uppercase; padding: 10px 16px; border-bottom: 1px solid var(--border);
+    color: var(--muted); background: var(--bg);
+  }
+  .panel-label.bad { color: #B3261E; }
+  .panel-label.good { color: #2D8659; }
+  .panel-body { padding: 24px; display: flex; gap: 24px; justify-content: center; align-items: center; flex-wrap: wrap; }
+  .dark-tile { background: #141A20; }
+
+  /* ============ LOGO TILES ============ */
+  .logo-tile {
+    width: 160px; height: 160px; border-radius: 24px;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 10px;
+  }
+  .tile-light { background: #F3F1EC; border: 1.5px solid #D8D4CD; }
+  .tile-dark  { background: #141A20; }
+  .tile-cream { background: var(--bg); border: 1px solid var(--border); }
+  .tile-accent { background: var(--accent); }
+  .cap { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--muted); text-align: center; line-height: 1.5; }
+
+  /* ============ APP MOCKUP ============ */
+  .app {
+    width: 100%; min-width: 680px; height: 480px;
+    display: flex; font-family: 'Outfit', sans-serif;
+    border-radius: 10px; overflow: hidden; border: 1px solid var(--border);
+  }
+  .sb {
+    width: 216px; background: #F1F2F4; border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; padding: 14px 10px; flex-shrink: 0;
+  }
+  .sb-head { display: flex; align-items: center; gap: 8px; padding: 2px 8px 14px; }
+  .sb-word { font-weight: 600; font-size: 15px; letter-spacing: -0.01em; }
+  .sb-sec {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.09em; color: var(--muted);
+    text-transform: uppercase; padding: 14px 12px 5px;
+  }
+  .nav {
+    display: flex; align-items: center; gap: 9px; padding: 6px 12px; border-radius: 6px;
+    font-size: 13px; color: #3D4650; margin: 1px 0; position: relative;
+  }
+  .nav .ic { width: 16px; height: 16px; opacity: 0.62; flex-shrink: 0; }
+  .nav .cnt { margin-left: auto; font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--muted); }
+  .nav.on { background: #E5E7EA; color: var(--fg); font-weight: 500; }
+  .nav.on .ic { opacity: 1; }
+  .nav.on-old { background: var(--accent); color: #fff; }
+  .nav.on-old .ic, .nav.on-old .cnt { opacity: 1; color: rgba(255,255,255,0.75); }
+  /* proposed: quiet pill + accent tick */
+  .nav.on-new { background: #E7E9EC; color: var(--fg); font-weight: 500; }
+  .nav.on-new::before {
+    content: ''; position: absolute; left: 3px; top: 50%; transform: translateY(-50%);
+    width: 3px; height: 14px; border-radius: 2px; background: var(--accent);
+  }
+  .nav.on-new { padding-left: 14px; }
+  .main { flex: 1; background: var(--bg); display: flex; flex-direction: column; min-width: 0; }
+  .hdr {
+    height: 46px; border-bottom: 1px solid var(--border); background: var(--bg);
+    display: flex; align-items: center; padding: 0 18px; gap: 8px; flex-shrink: 0;
+  }
+  .crumb { font-size: 12.5px; color: var(--muted); }
+  .crumb.sep { color: #C4CBD1; font-size: 13px; }
+  .crumb.here { color: var(--fg); font-weight: 600; }
+  .kbd-hint {
+    margin-left: auto; font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+    color: var(--muted); border: 1px solid var(--border); background: var(--surface);
+    border-radius: 6px; padding: 4px 8px;
+  }
+  .content { flex: 1; overflow: hidden; display: flex; }
+  .notelist { width: 268px; border-right: 1px solid var(--border); overflow: hidden; flex-shrink: 0; }
+  .nl-head { padding: 14px 16px 8px; display: flex; align-items: baseline; justify-content: space-between; }
+  .nl-title { font-size: 16px; font-weight: 700; }
+  .nl-count { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--muted); }
+  .nrow { padding: 11px 16px; border-top: 1px solid #EEF0F2; }
+  .nrow.on { background: var(--surface); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .nrow-t { font-size: 13px; font-weight: 500; margin-bottom: 3px; }
+  .nrow-m { font-size: 11.5px; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .tagchip {
+    display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 9.5px;
+    background: #ECEEF0; color: #55606B; border-radius: 4px; padding: 1.5px 6px; margin-top: 5px; margin-right: 4px;
+  }
+  .editor { flex: 1; background: var(--surface); padding: 26px 30px; overflow: hidden; }
+  .ed-title { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 12px; }
+  .ed-meta { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--muted); margin-bottom: 18px; }
+  .ed-line { font-size: 13.5px; line-height: 1.75; color: #2A3440; }
+  .ed-line + .ed-line { margin-top: 8px; }
+  .ed-h2 { font-size: 16px; font-weight: 600; margin: 18px 0 8px; }
+  .ed-task { display: flex; gap: 8px; align-items: center; font-size: 13px; margin-top: 6px; color: #2A3440; }
+  .cb { width: 14px; height: 14px; border-radius: 4px; border: 1.5px solid #B9C1C8; flex-shrink: 0; }
+  .cb.done { background: var(--accent); border-color: var(--accent); position: relative; }
+  .cb.done::after { content: '✓'; color: #fff; font-size: 10px; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+  .done-txt { text-decoration: line-through; color: var(--muted); }
+  .sel-new { box-shadow: inset 3px 0 0 var(--accent); }
+  .sel-old { background: #E8F0F8; }
+
+  /* icon pill row inside note list rows — pin */
+  .pin { float: right; font-size: 10px; color: #C0C7CD; }
+
+  /* ============ WIDGETS ============ */
+  .wgrid { display: flex; gap: 24px; flex-wrap: wrap; }
+  .widget {
+    border-radius: 22px; padding: 14px; font-family: 'Roboto', 'Outfit', sans-serif;
+  }
+  .w-light { background: var(--bg); border: 1px solid var(--border); }
+  .w-dark { background: #1C2228; }
+  .w-head { display: flex; align-items: center; gap: 7px; margin-bottom: 10px; }
+  .w-title { font-size: 12.5px; font-weight: 600; }
+  .w-dark .w-title { color: #E8ECF0; }
+  .w-label { font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .w-dark .w-label { color: #8A96A1; }
+  .wcard {
+    background: var(--surface); border-radius: 12px; padding: 10px 12px; margin-bottom: 6px;
+    display: flex; align-items: center; gap: 9px; border: 1px solid #EEF0F2;
+  }
+  .w-dark .wcard { background: #262E36; border-color: #333C45; }
+  .wc-t { font-size: 12px; font-weight: 500; }
+  .w-dark .wc-t { color: #E8ECF0; }
+  .wc-m { font-size: 10px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+  .w-dark .wc-m { color: #8A96A1; }
+  .wcheck { width: 15px; height: 15px; border-radius: 5px; border: 1.5px solid #C4CBD1; flex-shrink: 0; }
+  .w-dark .wcheck { border-color: #55606B; }
+  .wcheck.on { background: var(--accent); border-color: var(--accent); position: relative; }
+  .wcheck.on::after { content: '✓'; color: #fff; font-size: 9px; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+  .w-empty { text-align: center; padding: 20px 8px; }
+  .w-empty-t { font-size: 12.5px; font-weight: 500; margin-top: 8px; }
+  .w-dark .w-empty-t { color: #C6CDD4; }
+  .w-empty-m { font-size: 10.5px; color: var(--muted); margin-top: 2px; }
+  .wbtn {
+    background: var(--accent); border-radius: 12px; padding: 11px; text-align: center;
+    color: #fff; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 7px;
+  }
+  .wbtn.ghost { background: var(--surface); color: var(--fg); border: 1px solid var(--border); }
+  .w-dark .wbtn.ghost { background: #262E36; color: #E8ECF0; border-color: #333C45; }
+  .w-money { font-family: 'JetBrains Mono', monospace; }
+  .w-money .up { color: #2D8659; } .w-money .dn { color: var(--accent); }
+  .w-dark .w-money .up { color: #5CB98A; }
+  .streak-num { font-family: 'JetBrains Mono', monospace; font-size: 26px; font-weight: 500; }
+  .w-dark .streak-num { color: #E8ECF0; }
+  .flame { color: var(--accent); }
+  .dots { display: flex; gap: 4px; margin-top: 8px; }
+  .dot { width: 16px; height: 5px; border-radius: 3px; background: #E1E4E8; }
+  .w-dark .dot { background: #333C45; }
+  .dot.on { background: var(--accent); }
+
+  . problems { }
+  .plist { background: #FFF8F7; border: 1px solid #F2D7D3; border-radius: 12px; padding: 18px 22px; margin-bottom: 20px; }
+  .plist li { font-size: 13.5px; line-height: 1.7; margin-left: 18px; color: #5A3F3B; }
+  .plist li code { font-family: 'JetBrains Mono', monospace; font-size: 11.5px; background: #F6E8E6; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Typed — Visual Refresh Proposal</h1>
+  <p class="sub">Mockups only, no code changed yet. Review, pick directions, then I implement.</p>
+
+  <!-- ==================== 1. LOGO ==================== -->
+  <h2><span class="num">01</span>The logo problem</h2>
+  <p class="desc">The current logo is a <code>&lt;text&gt;</code> element that depends on a remote Google Fonts import. Inside Flutter, <code>flutter_svg</code> can't resolve it — the mark renders with a fallback font (or nothing when offline). It's also a different shade of red (#E53E3E) from the brand accent (#CC4D3C), and the app has a <em>second</em>, blocky mark via the CustomPainter. Three logos, no consistency.</p>
+
+  <div class="plist"><ul>
+    <li><b>Broken render path:</b> <code>typed-logo-dm-sans.svg</code> needs the DM Sans webfont; <code>flutter_svg</code> doesn't load remote CSS → unpredictable glyph rendering in-app and in the README depending on network/fonts.</li>
+    <li><b>Two different marks:</b> the painter in <code>brand_mark.dart</code> is a geometric block-<code>t.</code>, the SVG is a font-<code>t.</code> — they never look like the same brand.</li>
+    <li><b>Painter bug:</b> the crossbar is painted charcoal, but BRANDING.md §1 says crossbar = accent red.</li>
+    <li><b>Wrong red:</b> SVG uses <code>#E53E3E</code> instead of <code>#CC4D3C</code>.</li>
+  </ul></div>
+
+  <div class="row">
+    <div class="panel">
+      <div class="panel-label bad">Current — as rendered in-app (font fallback)</div>
+      <div class="panel-body">
+        <div class="logo-tile tile-light">
+          <svg width="96" height="96" viewBox="0 0 200 200">
+            <!-- simulated fallback: generic serif-ish t via text -->
+            <text x="100" y="140" font-family="Georgia, serif" font-size="108" font-weight="700" text-anchor="middle" fill="#18181B">t</text>
+            <text x="100" y="140" font-family="Georgia, serif" font-size="108" font-weight="700" text-anchor="middle" fill="#E53E3E">.</text>
+          </svg>
+        </div>
+        <div class="logo-tile tile-light">
+          <svg width="96" height="96" viewBox="0 0 64 64">
+            <!-- current CustomPainter: blocky, charcoal crossbar -->
+            <rect x="12" y="22" width="40" height="7" fill="#1A242E"/>
+            <rect x="27" y="14" width="10" height="42" fill="#1A242E"/>
+            <rect x="19" y="49" width="26" height="7" fill="#1A242E"/>
+            <rect x="50" y="48" width="8" height="8" fill="#1A242E"/>
+          </svg>
+        </div>
+        <div class="cap">left: text-based SVG,<br>font depends on network<br>right: painter version —<br>crossbar & period are charcoal,<br>doesn't match the SVG at all</div>
+      </div>
+    </div>
+  </div>
+
+  <h2><span class="num">02</span>Proposed mark — one geometry, everywhere</h2>
+  <p class="desc">A single path-based mark (no font dependency): a lowercase <b>t</b> with an overshooting accent crossbar and a square accent period on the baseline. Same 64-unit geometry drives the SVG, the Flutter painter, and the Android vector — so every surface matches exactly. Slightly softened corners (1px radius) keep it typographic rather than LEGO.</p>
+
+  <div class="row">
+    <div class="panel">
+      <div class="panel-label good">Option A — refined monogram (recommended)</div>
+      <div class="panel-body">
+        <div class="logo-tile tile-light">
+          <svg width="96" height="96" viewBox="0 0 64 64">
+            <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#CC4D3C"/>
+            <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#1A242E"/>
+            <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#1A242E"/>
+            <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#CC4D3C"/>
+          </svg>
+          <div class="cap">light surface</div>
+        </div>
+        <div class="logo-tile tile-dark">
+          <svg width="96" height="96" viewBox="0 0 64 64">
+            <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#CC4D3C"/>
+            <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#E8ECF0"/>
+            <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#E8ECF0"/>
+            <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#CC4D3C"/>
+          </svg>
+          <div class="cap">dark surface</div>
+        </div>
+        <div class="logo-tile tile-cream">
+          <svg width="48" height="48" viewBox="0 0 64 64">
+            <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#CC4D3C"/>
+            <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#1A242E"/>
+            <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#1A242E"/>
+            <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#CC4D3C"/>
+          </svg>
+          <div class="cap">compact / sidebar</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-label">Option B — app-icon tile</div>
+      <div class="panel-body">
+        <div class="logo-tile tile-cream" style="border-radius: 28px;">
+          <svg width="92" height="92" viewBox="0 0 64 64">
+            <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#CC4D3C"/>
+            <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#1A242E"/>
+            <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#1A242E"/>
+            <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#CC4D3C"/>
+          </svg>
+        </div>
+        <div class="logo-tile" style="border-radius: 28px; background: var(--accent);">
+          <svg width="92" height="92" viewBox="0 0 64 64">
+            <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#F8F9FA"/>
+            <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#F8F9FA"/>
+            <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#F8F9FA"/>
+            <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#F8F9FA"/>
+          </svg>
+        </div>
+        <div class="cap">cream & full-accent variants<br>for launcher / store</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-label">Option C — wordmark lockup (header/README)</div>
+      <div class="panel-body">
+        <div style="display:flex; flex-direction:column; gap:20px; align-items:center;">
+          <div style="font-size:30px; font-weight:600; letter-spacing:-0.01em;">T<span style="color:var(--accent)">y</span>ped</div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <svg width="26" height="26" viewBox="0 0 64 64">
+              <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#CC4D3C"/>
+              <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#1A242E"/>
+              <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#1A242E"/>
+              <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#CC4D3C"/>
+            </svg>
+            <span style="font-size:19px; font-weight:600;">Typed</span>
+          </div>
+          <div class="cap">mark + wordmark lockup,<br>accent 'y' per brand guide</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2><span class="num">02b</span>Dual-tone tile variants — pick your favorites</h2>
+  <p class="desc">All use the same Option A mark geometry. Each tile shows how the two-tone system (charcoal/accent on cream, or cream on accent/dark) works as an app icon or store asset. Vote for 1–2.</p>
+
+  <div class="row">
+    <div class="panel">
+      <div class="panel-label">B1 — Cream &amp; full color (current proposal)</div>
+      <div class="panel-body">
+        <div class="logo-tile tile-cream" style="border-radius: 28px;">
+          <svg width="88" height="88" viewBox="0 0 64 64">
+            <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#CC4D3C"/>
+            <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#1A242E"/>
+            <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#1A242E"/>
+            <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#CC4D3C"/>
+          </svg>
+        </div>
+        <div class="cap">charcoal mark, red crossbar +<br>period on cream — the flagship</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-label">B2 — Full accent &amp; cream</div>
+      <div class="panel-body">
+        <div class="logo-tile" style="border-radius: 28px; background: var(--accent);">
+          <svg width="88" height="88" viewBox="0 0 64 64">
+            <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#F8F9FA"/>
+            <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#F8F9FA"/>
+            <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#F8F9FA"/>
+            <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#F8F9FA"/>
+          </svg>
+        </div>
+        <div class="cap">loudest option; entire mark<br>in cream on the red field</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-label">B3 — Charcoal &amp; color</div>
+      <div class="panel-body">
+        <div class="logo-tile" style="border-radius: 28px; background: #1A242E;">
+          <svg width="88" height="88" viewBox="0 0 64 64">
+            <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#CC4D3C"/>
+            <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#F8F9FA"/>
+            <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#F8F9FA"/>
+            <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#CC4D3C"/>
+          </svg>
+        </div>
+        <div class="cap">dark tile, cream mark,<br>red crossbar + period pop</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-label">B4 — Accent period only</div>
+      <div class="panel-body">
+        <div class="logo-tile tile-cream" style="border-radius: 28px;">
+          <svg width="88" height="88" viewBox="0 0 64 64">
+            <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#1A242E"/>
+            <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#1A242E"/>
+            <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#1A242E"/>
+            <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#CC4D3C"/>
+          </svg>
+        </div>
+        <div class="cap">monochrome mark, only the<br>period is red — most restrained</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="panel">
+      <div class="panel-label">B5 — Editorial grid (README / store hero)</div>
+      <div class="panel-body">
+        <div class="logo-tile tile-light" style="border-radius: 28px; position: relative; overflow: hidden;">
+          <svg width="160" height="160" viewBox="0 0 160 160" style="position:absolute; inset:0;">
+            <defs>
+              <pattern id="grid5" width="14" height="14" patternUnits="userSpaceOnUse">
+                <path d="M 14 0 L 0 0 0 14" fill="none" stroke="#18181B" stroke-opacity="0.06" stroke-width="0.6"/>
+              </pattern>
+            </defs>
+            <rect width="160" height="160" fill="url(#grid5)"/>
+          </svg>
+          <svg width="88" height="88" viewBox="0 0 64 64" style="position:relative;">
+            <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#CC4D3C"/>
+            <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#1A242E"/>
+            <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#1A242E"/>
+            <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#CC4D3C"/>
+          </svg>
+        </div>
+        <div class="cap">paper grid backdrop —<br>writerly, editorial feel</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-label">B6 — Split tile (cream / charcoal)</div>
+      <div class="panel-body">
+        <div class="logo-tile" style="border-radius: 28px; position: relative; overflow: hidden; background: var(--bg);">
+          <svg width="160" height="160" viewBox="0 0 160 160" style="position:absolute; inset:0;">
+            <rect x="80" y="0" width="80" height="160" fill="#1A242E"/>
+          </svg>
+          <svg width="88" height="88" viewBox="0 0 64 64" style="position:relative;">
+            <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#CC4D3C"/>
+            <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#1A242E"/>
+            <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#1A242E"/>
+            <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#CC4D3C"/>
+          </svg>
+          <svg width="160" height="160" viewBox="0 0 160 160" style="position:absolute; inset:0; clip-path: inset(0 0 0 50%);">
+            <rect x="27" y="12" width="20" height="88" fill="none"/>
+            <g transform="scale(2.5)">
+              <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#CC4D3C"/>
+              <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#F8F9FA"/>
+              <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#F8F9FA"/>
+              <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#CC4D3C"/>
+            </g>
+          </svg>
+        </div>
+        <div class="cap">half light / half dark — mark<br>inverts across the seam</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-label">B7 — Dark with accent frame</div>
+      <div class="panel-body">
+        <div class="logo-tile" style="border-radius: 28px; background: #141A20; border: 3px solid var(--accent);">
+          <svg width="88" height="88" viewBox="0 0 64 64">
+            <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#CC4D3C"/>
+            <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#F8F9FA"/>
+            <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#F8F9FA"/>
+            <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#CC4D3C"/>
+          </svg>
+        </div>
+        <div class="cap">near-black tile with a<br>thin red keyline border</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-label">B8 — White surface &amp; color</div>
+      <div class="panel-body">
+        <div class="logo-tile" style="border-radius: 28px; background: #FFFFFF; border: 1.5px solid var(--border);">
+          <svg width="88" height="88" viewBox="0 0 64 64">
+            <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#CC4D3C"/>
+            <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#1A242E"/>
+            <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#1A242E"/>
+            <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#CC4D3C"/>
+          </svg>
+        </div>
+        <div class="cap">clean white with hairline —<br>safest for store listings</div>
+      </div>
+    </div>
+  </div>
+
+  <p class="desc" style="margin-top:8px">My recommendation: <b>B1</b> as the app icon + <b>B5</b> as the README/store hero, with <b>B3</b> kept as the dark-theme icon variant. All can be generated from the same path geometry.</p>
+
+  <!-- ==================== 3. APP UI ==================== -->
+  <h2><span class="num">03</span>App UI — sidebar &amp; workspace</h2>
+  <p class="desc">Current active states are loud (solid accent fills, white text) and the accent appears 3–4× per screen, breaking the brand's own "max 2 uses" rule. Proposal: quiet selected pills with a small accent tick, consistent 13px type, mono counts kept for the technical texture, and one accent per region.</p>
+
+  <div class="row">
+    <div class="panel">
+      <div class="panel-label bad">Current feel</div>
+      <div class="panel-body" style="padding: 18px;">
+        <div class="app">
+          <div class="sb">
+            <div class="sb-head"><span style="font-weight:700; font-size:15px;">t<span style="color:var(--accent)">.</span></span><span class="sb-word">Typed</span></div>
+            <div class="sb-sec">Workspace</div>
+            <div class="nav on-old"><span class="ic">▣</span>Notes<span class="cnt">24</span></div>
+            <div class="nav"><span class="ic">▤</span>Finance<span class="cnt">12</span></div>
+            <div class="nav"><span class="ic">✓</span>Tasks<span class="cnt">8</span></div>
+            <div class="sb-sec">Library</div>
+            <div class="nav"><span class="ic">▤</span>Archive<span class="cnt">3</span></div>
+            <div class="nav"><span class="ic">✕</span>Trash<span class="cnt">0</span></div>
+          </div>
+          <div class="main">
+            <div class="hdr">
+              <span class="crumb">Workspace</span><span class="crumb sep">›</span>
+              <span class="crumb here">Notes</span>
+              <span class="kbd-hint">⌘K</span>
+            </div>
+            <div class="content">
+              <div class="notelist">
+                <div class="nl-head"><span class="nl-title">All notes</span><span class="nl-count">24</span></div>
+                <div class="nrow sel-old">
+                  <div class="nrow-t">Quarterly planning</div>
+                  <div class="nrow-m">Draft the Q4 roadmap and…</div>
+                </div>
+                <div class="nrow">
+                  <div class="nrow-t">Reading list <span class="pin">📌</span></div>
+                  <div class="nrow-m">The Design of Everyday Things…</div>
+                </div>
+                <div class="nrow">
+                  <div class="nrow-t">Groceries</div>
+                  <div class="nrow-m">Oat milk, sourdough, tomatoes…</div>
+                </div>
+              </div>
+              <div class="editor">
+                <div class="ed-title">Quarterly planning</div>
+                <div class="ed-meta">edited 2h ago · 412 words</div>
+                <div class="ed-line">Draft the roadmap for Q4 and align the team on priorities.</div>
+                <div class="ed-h2">Goals</div>
+                <div class="ed-task"><div class="cb done"></div>Ship markdown tables</div>
+                <div class="ed-task"><div class="cb"></div>Onboard two beta users</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="panel">
+      <div class="panel-label good">Proposed</div>
+      <div class="panel-body" style="padding: 18px;">
+        <div class="app">
+          <div class="sb">
+            <div class="sb-head">
+              <svg width="17" height="17" viewBox="0 0 64 64">
+                <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#CC4D3C"/>
+                <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#1A242E"/>
+                <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#1A242E"/>
+                <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#CC4D3C"/>
+              </svg>
+              <span class="sb-word">Typed</span>
+            </div>
+            <div class="sb-sec">Workspace</div>
+            <div class="nav on-new"><span class="ic">▣</span>Notes<span class="cnt">24</span></div>
+            <div class="nav"><span class="ic">▤</span>Finance<span class="cnt">12</span></div>
+            <div class="nav"><span class="ic">✓</span>Tasks<span class="cnt">8</span></div>
+            <div class="sb-sec">Library</div>
+            <div class="nav"><span class="ic">▤</span>Archive<span class="cnt">3</span></div>
+            <div class="nav"><span class="ic">✕</span>Trash<span class="cnt">0</span></div>
+          </div>
+          <div class="main">
+            <div class="hdr">
+              <span class="crumb">Workspace</span><span class="crumb sep">›</span>
+              <span class="crumb here">Notes</span>
+              <span class="kbd-hint">⌘K</span>
+            </div>
+            <div class="content">
+              <div class="notelist">
+                <div class="nl-head"><span class="nl-title">All notes</span><span class="nl-count">24</span></div>
+                <div class="nrow sel-new">
+                  <div class="nrow-t">Quarterly planning</div>
+                  <div class="nrow-m">Draft the Q4 roadmap and…</div>
+                </div>
+                <div class="nrow">
+                  <div class="nrow-t">Reading list <span class="pin">📌</span></div>
+                  <div class="nrow-m">The Design of Everyday Things…</div>
+                  <span class="tagchip">#work</span><span class="tagchip">#reading</span>
+                </div>
+                <div class="nrow">
+                  <div class="nrow-t">Groceries</div>
+                  <div class="nrow-m">Oat milk, sourdough, tomatoes…</div>
+                </div>
+              </div>
+              <div class="editor">
+                <div class="ed-title">Quarterly planning</div>
+                <div class="ed-meta">edited 2h ago · 412 words</div>
+                <div class="ed-line">Draft the roadmap for Q4 and align the team on priorities.</div>
+                <div class="ed-h2">Goals</div>
+                <div class="ed-task"><div class="cb done"></div>Ship markdown tables</div>
+                <div class="ed-task"><div class="cb"></div>Onboard two beta users</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="desc" style="margin-top:16px">Changes: ① active nav = soft neutral pill + 3px accent tick (accent count drops to 2 on screen) ② selected note = white surface + accent hairline instead of blue fill ③ tag chips surface on rows ④ everything else already close — kept.</p>
+
+  <!-- ==================== 4. WIDGETS ==================== -->
+  <h2><span class="num">04</span>Android home-screen widgets</h2>
+  <p class="desc">Today: flat lists with a tiny unexplained mark, default system font, no dark awareness, and the accent button fights the background. Proposal: card-based rows on the cream background, the mark in a consistent header row, mono for numbers, and a single accent action per widget. Dark variants shown too.</p>
+
+  <div class="row">
+    <div class="panel">
+      <div class="panel-label">Quick capture — proposed (light &amp; dark)</div>
+      <div class="panel-body" style="align-items: stretch;">
+        <div class="widget w-light" style="width: 220px;">
+          <div class="w-label">Quick capture</div>
+          <div class="w-empty">
+            <svg width="34" height="34" viewBox="0 0 64 64">
+              <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#CC4D3C"/>
+              <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#1A242E"/>
+              <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#1A242E"/>
+              <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#CC4D3C"/>
+            </svg>
+            <div class="w-empty-t">Capture a thought</div>
+            <div class="w-empty-m">Tap below to start a note</div>
+          </div>
+          <div class="wbtn">＋ New note</div>
+        </div>
+        <div class="widget w-dark" style="width: 220px;">
+          <div class="w-label">Quick capture</div>
+          <div class="w-empty">
+            <svg width="34" height="34" viewBox="0 0 64 64">
+              <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#CC4D3C"/>
+              <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#E8ECF0"/>
+              <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#E8ECF0"/>
+              <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#CC4D3C"/>
+            </svg>
+            <div class="w-empty-t">Capture a thought</div>
+            <div class="w-empty-m">Tap below to start a note</div>
+          </div>
+          <div class="wbtn">＋ New note</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-label">Recent notes — proposed (light)</div>
+      <div class="panel-body">
+        <div class="widget w-light" style="width: 300px;">
+          <div class="w-head">
+            <svg width="16" height="16" viewBox="0 0 64 64">
+              <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#CC4D3C"/>
+              <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#1A242E"/>
+              <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#1A242E"/>
+              <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#CC4D3C"/>
+            </svg>
+            <span class="w-title">Recent notes</span>
+            <span class="wc-m" style="margin-left:auto">24</span>
+          </div>
+          <div class="wcard"><div><div class="wc-t">Quarterly planning</div><div class="wc-m">2h ago</div></div></div>
+          <div class="wcard"><div><div class="wc-t">Reading list</div><div class="wc-m">yesterday</div></div></div>
+          <div class="wcard"><div><div class="wc-t">Groceries</div><div class="wc-m">3d ago</div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-label">Todos — proposed (dark)</div>
+      <div class="panel-body">
+        <div class="widget w-dark" style="width: 300px;">
+          <div class="w-head">
+            <svg width="16" height="16" viewBox="0 0 64 64">
+              <rect x="12" y="20" width="40" height="6.5" rx="1.2" fill="#CC4D3C"/>
+              <rect x="27" y="12" width="10" height="44" rx="1.2" fill="#E8ECF0"/>
+              <rect x="20" y="49.5" width="17" height="6.5" rx="1.2" fill="#E8ECF0"/>
+              <rect x="43" y="49.5" width="7" height="6.5" rx="1" fill="#CC4D3C"/>
+            </svg>
+            <span class="w-title">Todos</span>
+            <span class="wc-m" style="margin-left:auto">3 left</span>
+          </div>
+          <div class="wcard"><div class="wcheck on"></div><div class="wc-t done-txt" style="text-decoration:line-through; color:#8A96A1;">Ship markdown tables</div></div>
+          <div class="wcard"><div class="wcheck"></div><div class="wc-t">Onboard two beta users</div></div>
+          <div class="wcard"><div class="wcheck"></div><div class="wc-t">Review budget CSV export</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-label">Streak &amp; finance — proposed</div>
+      <div class="panel-body">
+        <div class="widget w-light" style="width: 190px;">
+          <div class="w-label">Streak</div>
+          <div style="display:flex; align-items:baseline; gap:6px; margin-top:6px;">
+            <span class="streak-num">12</span><span class="flame">▲</span>
+          </div>
+          <div class="wc-m">days in a row</div>
+          <div class="dots">
+            <div class="dot on"></div><div class="dot on"></div><div class="dot on"></div>
+            <div class="dot on"></div><div class="dot on"></div><div class="dot"></div><div class="dot"></div>
+          </div>
+        </div>
+        <div class="widget w-light" style="width: 190px;">
+          <div class="w-label">This month</div>
+          <div style="margin-top:8px;">
+            <div class="wc-m">spent</div>
+            <div class="streak-num w-money" style="font-size:19px;"><span class="dn">$1,284</span></div>
+          </div>
+          <div style="margin-top:6px;">
+            <div class="wc-m">income</div>
+            <div class="streak-num w-money" style="font-size:19px;"><span class="up">$3,900</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2><span class="num">05</span>What I'd change in code</h2>
+  <p class="desc">If you approve a direction, the implementation would be:</p>
+  <div class="plist" style="background:#F4F7F5; border-color:#CFE3D8;"><ul style="color:#2F4A3E;">
+    <li>Replace <code>assets/branding/typed-logo-dm-sans.svg</code> with a pure-path SVG (no font import, brand red <code>#CC4D3C</code>).</li>
+    <li>Fix <code>brand_mark.dart</code> painter: accent crossbar + accent period, softened corners, same 64-unit geometry as the SVG.</li>
+    <li>Update <code>ic_typed.xml</code> / <code>ic_launcher_foreground.xml</code> to the same geometry.</li>
+    <li>Sidebar: quiet active pill + accent tick in <code>sidebar.dart</code>; note-row selection style in <code>note_list.dart</code>.</li>
+    <li>Widget layouts: card rows, header alignment, empty states, dark color set (<code>values-night/colors.xml</code>).</li>
+  </ul></div>
+</div>
+</body>
+</html>

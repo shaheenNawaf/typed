@@ -1,7 +1,10 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../models/note.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_metrics.dart';
+import '../theme/app_motion.dart';
 import 'brand_mark.dart';
 
 class Sidebar extends StatefulWidget {
@@ -10,7 +13,6 @@ class Sidebar extends StatefulWidget {
   final String sidebarState;
   final VoidCallback onCollapse;
   final ValueChanged<String> onTagFilter;
-  final VoidCallback? onRequestOpen;
   final VoidCallback? onSettings;
   final Map<String, int> counts;
   final List<String> allTags;
@@ -25,7 +27,6 @@ class Sidebar extends StatefulWidget {
     required this.sidebarState,
     required this.onCollapse,
     required this.onTagFilter,
-    this.onRequestOpen,
     this.onSettings,
     required this.counts,
     required this.allTags,
@@ -39,8 +40,13 @@ class Sidebar extends StatefulWidget {
 }
 
 class _SidebarState extends State<Sidebar> {
-  bool _isHovered = false;
   bool _tagsExpanded = true;
+  bool _isHovered = false;
+  bool _pointerInRail = false;
+  // Latched by an explicit collapse toggle done with the pointer parked
+  // inside the rail; hover stays ignored until the pointer has genuinely
+  // left the rail zone, so the sidebar cannot spring back open underneath it.
+  bool _suppressHover = false;
   Timer? _hoverTimer;
 
   @override
@@ -49,56 +55,72 @@ class _SidebarState extends State<Sidebar> {
     super.dispose();
   }
 
-  void _onHoverEnter() {
-    try {
-      if (widget.sidebarState == 'expanded') return;
-      _hoverTimer?.cancel();
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) setState(() => _isHovered = true);
-      });
-    } catch (_) {}
+  @override
+  void didUpdateWidget(Sidebar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.sidebarState == widget.sidebarState) return;
+    _hoverTimer?.cancel();
+    _isHovered = false;
+    _suppressHover = widget.sidebarState == 'icons' && _pointerInRail;
   }
 
-  void _onHoverLeave() {
-    try {
-      if (widget.sidebarState == 'expanded') return;
-      _hoverTimer?.cancel();
-      _hoverTimer = Timer(const Duration(milliseconds: 150), () {
-        if (mounted) setState(() => _isHovered = false);
-      });
-    } catch (_) {}
+  void _onEnter(PointerEvent event) {
+    _pointerInRail = event.position.dx <= 48;
+    if (widget.sidebarState == 'expanded' || _suppressHover) return;
+    _hoverTimer?.cancel();
+    if (!_isHovered) setState(() => _isHovered = true);
   }
 
-  bool get _effectivelyCollapsed {
-    if (widget.sidebarState == 'expanded') return false;
-    if (_isHovered) return false;
-    return true;
-  }
-
-  double _computeWidth() {
-    switch (widget.sidebarState) {
-      case 'expanded':
-        return 232.0;
-      case 'icons':
-      default:
-        return _isHovered ? 232.0 : 48.0;
-    }
+  void _onExit(PointerEvent event) {
+    // A shrink-induced exit still has the pointer over the rail zone; only
+    // a real leave clears the parked-cursor latch.
+    _pointerInRail = event.position.dx <= 48;
+    if (_pointerInRail) return;
+    _suppressHover = false;
+    _hoverTimer?.cancel();
+    if (widget.sidebarState == 'expanded' || !_isHovered) return;
+    _hoverTimer = Timer(const Duration(milliseconds: 150), () {
+      if (mounted) setState(() => _isHovered = false);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 1024;
-    final width = _computeWidth();
+    final collapsed = widget.sidebarState != 'expanded' && !_isHovered;
 
     return MouseRegion(
-      onEnter: (_) => _onHoverEnter(),
-      onExit: (_) => _onHoverLeave(),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        width: width,
-        clipBehavior: Clip.hardEdge,
-        color: context.colors.sidebarBg,
-        child: _buildContent(_effectivelyCollapsed, isMobile),
+      onEnter: _onEnter,
+      onExit: _onExit,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // The mobile drawer supplies a tight width wider than the desktop
+          // rail; fill it instead of pinning content at the desktop 232px.
+          final expandedWidth = isMobile
+              ? (constraints.maxWidth.isFinite
+                  ? constraints.maxWidth
+                  : MediaQuery.of(context).size.width)
+              : 232.0;
+          final width = collapsed ? 48.0 : expandedWidth;
+          return AnimatedContainer(
+            duration: AppMotion.duration(context, AppMotion.base),
+            curve: AppMotion.emphasized,
+            width: width,
+            clipBehavior: Clip.hardEdge,
+            color: context.colors.sidebarBg,
+            child: collapsed
+                ? _buildContent(true, isMobile)
+                : OverflowBox(
+                    alignment: Alignment.centerLeft,
+                    minWidth: 0,
+                    maxWidth: expandedWidth,
+                    child: SizedBox(
+                      width: expandedWidth,
+                      child: _buildContent(false, isMobile),
+                    ),
+                  ),
+          );
+        },
       ),
     );
   }
@@ -114,6 +136,23 @@ class _SidebarState extends State<Sidebar> {
   }
 
   Widget _buildHeader(bool collapsed, bool isMobile) {
+    final logo = isMobile
+        ? BrandMark(size: 22, fg: context.colors.sidebarFg)
+        : Semantics(
+            label: collapsed ? 'Expand sidebar' : 'Collapse sidebar',
+            button: true,
+            child: InkWell(
+              onTap: widget.onCollapse,
+              borderRadius: BorderRadius.circular(AppRadius.chip),
+              child: SizedBox(
+                width: 36,
+                height: 36,
+                child: Center(
+                  child: BrandMark(size: 18, fg: context.colors.sidebarFg),
+                ),
+              ),
+            ),
+          );
     return Container(
       padding: isMobile
           ? const EdgeInsets.fromLTRB(16, 20, 16, 16)
@@ -128,7 +167,7 @@ class _SidebarState extends State<Sidebar> {
       ),
       child: Row(
         children: [
-          BrandMark(size: isMobile ? 22 : 18, fg: context.colors.sidebarFg),
+          logo,
           if (!collapsed) ...[
             SizedBox(width: isMobile ? 10 : 8),
             Text(
@@ -147,7 +186,7 @@ class _SidebarState extends State<Sidebar> {
               label: 'Settings',
               child: InkWell(
                 onTap: widget.onSettings,
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(AppRadius.chip),
                 child: Container(
                   width: 36,
                   height: 36,
@@ -160,23 +199,24 @@ class _SidebarState extends State<Sidebar> {
                 ),
               ),
             ),
-          Semantics(
-            label: 'Toggle sidebar',
-            child: InkWell(
-              onTap: widget.onCollapse,
-              borderRadius: BorderRadius.circular(6),
-              child: Container(
-                width: 36,
-                height: 36,
-                alignment: Alignment.center,
-                child: Icon(
-                  collapsed ? Icons.menu_open : Icons.chevron_left,
-                  size: 20,
-                  color: context.colors.sidebarMuted,
+          if (isMobile)
+            Semantics(
+              label: 'Toggle sidebar',
+              child: InkWell(
+                onTap: widget.onCollapse,
+                borderRadius: BorderRadius.circular(AppRadius.chip),
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  alignment: Alignment.center,
+                  child: Icon(
+                    collapsed ? Icons.menu_open : Icons.chevron_left,
+                    size: 20,
+                    color: context.colors.sidebarMuted,
+                  ),
                 ),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -184,7 +224,7 @@ class _SidebarState extends State<Sidebar> {
 
   Widget _buildNav(bool collapsed, bool isMobile) {
     return ListView(
-      padding: EdgeInsets.symmetric(vertical: isMobile ? 12 : 8),
+      padding: EdgeInsets.symmetric(vertical: isMobile ? 12 : 12),
       children: [
         _buildWorkspaceSection(collapsed, isMobile),
         _buildLibrarySection(collapsed, isMobile),
@@ -231,7 +271,7 @@ class _SidebarState extends State<Sidebar> {
       children: [
         InkWell(
           onTap: () => setState(() => _tagsExpanded = !_tagsExpanded),
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(AppRadius.chip),
           child: Padding(
             padding: EdgeInsets.symmetric(
               horizontal: isMobile ? 12 : 12,
@@ -245,20 +285,21 @@ class _SidebarState extends State<Sidebar> {
                 SizedBox(width: isMobile ? 10 : 8),
                 Text('Tags',
                     style: TextStyle(
-                      fontSize: isMobile ? 15 : 13.5,
+                      fontSize: isMobile ? AppType.t15 : AppType.t13_5,
                       color: context.colors.sidebarFg,
                     )),
                 const Spacer(),
                 Text('${widget.allTags.length}',
                     style: TextStyle(
-                      fontSize: isMobile ? 12 : 11,
+                      fontSize: isMobile ? AppType.t12 : AppType.t11,
                       fontFamily: context.colors.monoFontFamily,
                       color: context.colors.sidebarMuted,
                     )),
                 SizedBox(width: 4),
                 AnimatedRotation(
                   turns: _tagsExpanded ? 0.25 : 0,
-                  duration: const Duration(milliseconds: 180),
+                  duration: AppMotion.duration(context, AppMotion.base),
+                  curve: AppMotion.emphasized,
                   child: Icon(Icons.play_arrow,
                       size: 14,
                       color: context.colors.sidebarFg.withValues(alpha: 0.45)),
@@ -308,10 +349,10 @@ class _SidebarState extends State<Sidebar> {
         widget.onFilterChanged('pinned');
         widget.onNoteSelected?.call(note.id);
       },
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(AppRadius.chip),
       child: Padding(
         padding: EdgeInsets.symmetric(
-          vertical: isMobile ? 6 : 4,
+          vertical: isMobile ? 9 : 7,
           horizontal: isMobile ? 16 : 12,
         ),
         child: Row(
@@ -326,7 +367,7 @@ class _SidebarState extends State<Sidebar> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: isMobile ? 14 : 12.5,
+                  fontSize: isMobile ? AppType.t13_5 : AppType.t12,
                   color: context.colors.sidebarFg,
                 ),
               ),
@@ -345,21 +386,24 @@ class _SidebarState extends State<Sidebar> {
   }) {
     return Padding(
       padding: EdgeInsets.only(
-        top: topPadding ? (isMobile ? 8 : 4) : 0,
+        top: topPadding ? (isMobile ? 8 : 8) : 0,
         left: isMobile ? 12 : (collapsed ? 6 : 12),
         right: isMobile ? 12 : (collapsed ? 6 : 12),
       ),
       child: Column(
-        children: items
-            .map((e) => _buildNavItem(
-                  view: e.$1,
-                  icon: e.$2,
-                  label: e.$3,
-                  count: widget.counts[e.$1]?.toString() ?? '0',
-                  collapsed: collapsed,
-                  isMobile: isMobile,
-                ))
-            .toList(),
+        children: [
+          for (var i = 0; i < items.length; i++) ...[
+            if (i > 0) SizedBox(height: isMobile ? 3 : 4),
+            _buildNavItem(
+              view: items[i].$1,
+              icon: items[i].$2,
+              label: items[i].$3,
+              count: widget.counts[items[i].$1]?.toString() ?? '0',
+              collapsed: collapsed,
+              isMobile: isMobile,
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -375,9 +419,9 @@ class _SidebarState extends State<Sidebar> {
           Text(
             label.toUpperCase(),
             style: TextStyle(
-              fontSize: 11,
+              fontSize: AppType.t11,
               fontWeight: FontWeight.w600,
-              color: context.colors.sidebarMuted.withValues(alpha: 0.7),
+              color: context.colors.sidebarMuted,
               letterSpacing: 0.08,
             ),
           ),
@@ -390,7 +434,7 @@ class _SidebarState extends State<Sidebar> {
     return Padding(
       padding: EdgeInsets.symmetric(
         horizontal: isMobile ? 12 : 10,
-        vertical: isMobile ? 4 : 2,
+        vertical: isMobile ? 4 : 8,
       ),
       child: Container(
         height: 1,
@@ -412,54 +456,82 @@ class _SidebarState extends State<Sidebar> {
       label: collapsed ? label : '$label, $count items',
       child: InkWell(
         onTap: () => widget.onFilterChanged(view),
-        borderRadius: BorderRadius.circular(6),
-        child: Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: isMobile ? 16 : (collapsed ? 8 : 12),
-          vertical: isMobile ? 10 : 6,
-        ),
-        decoration: BoxDecoration(
-          color: active ? context.colors.sidebarActive : null,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Row(
+        borderRadius: BorderRadius.circular(AppRadius.chip),
+        hoverColor: context.colors.sidebarHover,
+        child: Stack(
           children: [
-            Icon(
-              icon,
-              size: isMobile ? 20 : 18,
-              color: active
-                  ? context.colors.sidebarFg
-                  : context.colors.sidebarFg.withAlpha(140),
+            Container(
+            constraints: BoxConstraints(
+              minHeight: isMobile ? 44 : (collapsed ? 44 : 40),
             ),
-            if (!collapsed) ...[
-              SizedBox(width: isMobile ? 10 : 8),
-              Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: isMobile ? 15 : 13.5,
-                  letterSpacing: 0.01,
-                  color: active ? context.colors.sidebarFg : context.colors.sidebarFg,
-                ),
-              ),
-              const Spacer(),
-              Text(
-                count,
-                style: TextStyle(
-                  fontSize: isMobile ? 12 : 11,
-                  letterSpacing: 0.04,
-                  fontFamily: context.colors.monoFontFamily,
+            padding: EdgeInsets.symmetric(
+              horizontal: isMobile ? 16 : (collapsed ? 8 : 12),
+              vertical: isMobile ? 10 : 8,
+            ),
+            decoration: BoxDecoration(
+              color: active ? context.colors.sidebarActive : null,
+              borderRadius: BorderRadius.circular(AppRadius.chip),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  icon,
+                  size: isMobile ? 20 : 18,
                   color: active
-                      ? context.colors.sidebarFg.withValues(alpha: 0.55)
-                      : context.colors.sidebarMuted,
+                      ? context.colors.sidebarFg
+                      : context.colors.sidebarFg.withAlpha(140),
+                ),
+                if (!collapsed) ...[
+                  SizedBox(width: isMobile ? 10 : 8),
+                  Expanded(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: isMobile ? AppType.t15 : AppType.t13_5,
+                        letterSpacing: 0.01,
+                        color: active
+                            ? context.colors.sidebarFg
+                            : context.colors.sidebarFg.withAlpha(200),
+                      ),
+                    ),
+                  ),
+                  Text(
+                    count,
+                    style: TextStyle(
+                      fontSize: isMobile ? AppType.t12 : AppType.t11,
+                      letterSpacing: 0.04,
+                      fontFamily: context.colors.monoFontFamily,
+                      color: active
+                          ? context.colors.sidebarFg.withValues(alpha: 0.55)
+                          : context.colors.sidebarMuted,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+            if (active)
+              Positioned(
+                left: 3,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: Container(
+                    width: 3,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: context.colors.accent,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
                 ),
               ),
-            ],
           ],
         ),
       ),
-    ));
+    );
   }
 
   // ponytail: derive tag groups from the actual note tags. Tags with a
@@ -513,10 +585,10 @@ class _SidebarState extends State<Sidebar> {
       padding: EdgeInsets.only(left: isMobile ? 40 : 36),
       child: InkWell(
         onTap: () => widget.onTagFilter(filter),
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(AppRadius.chip),
         child: Padding(
           padding: EdgeInsets.symmetric(
-            vertical: isMobile ? 8 : 4,
+            vertical: isMobile ? 9 : 7,
             horizontal: isMobile ? 16 : 12,
           ),
           child: Row(
@@ -524,7 +596,7 @@ class _SidebarState extends State<Sidebar> {
               Expanded(
                 child: Text('#$label',
                     style: TextStyle(
-                      fontSize: isMobile ? 14 : 12.5,
+                      fontSize: isMobile ? AppType.t13_5 : AppType.t12,
                       color: context.colors.sidebarMuted,
                       letterSpacing: 0.01,
                     )),
@@ -532,8 +604,8 @@ class _SidebarState extends State<Sidebar> {
               if (count != null && count > 0)
                 Text('$count',
                     style: TextStyle(
-                      fontSize: isMobile ? 11 : 10,
-                      color: context.colors.sidebarMuted.withValues(alpha: 0.5),
+                      fontSize: isMobile ? AppType.t11 : AppType.t10,
+                      color: context.colors.sidebarMuted,
                     )),
             ],
           ),
@@ -553,7 +625,7 @@ class _SidebarState extends State<Sidebar> {
       ),
       child: InkWell(
         onTap: widget.onCollapse,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(AppRadius.chip),
         child: SizedBox(
           width: double.infinity,
           height: 36,
@@ -601,16 +673,17 @@ class _TagGroupState extends State<_TagGroup> {
         Padding(
           padding: EdgeInsets.symmetric(
             horizontal: isMobile ? 16 : 12,
-            vertical: isMobile ? 8 : 5,
+            vertical: isMobile ? 10 : 8,
           ),
           child: Row(
             children: [
               InkWell(
                 onTap: () => setState(() => _open = !_open),
-                borderRadius: BorderRadius.circular(4),
+                borderRadius: BorderRadius.circular(AppRadius.chip),
                 child: AnimatedRotation(
                   turns: _open ? 0.25 : 0,
-                  duration: const Duration(milliseconds: 180),
+                  duration: AppMotion.duration(context, AppMotion.base),
+                  curve: AppMotion.emphasized,
                   child: Padding(
                     padding: const EdgeInsets.all(2),
                     child: Icon(
@@ -624,7 +697,7 @@ class _TagGroupState extends State<_TagGroup> {
               SizedBox(width: isMobile ? 8 : 6),
               InkWell(
                 onTap: () => widget.onTagTap(widget.label),
-                borderRadius: BorderRadius.circular(4),
+                borderRadius: BorderRadius.circular(AppRadius.chip),
                 child: Row(
                   children: [
                     Container(
@@ -639,7 +712,7 @@ class _TagGroupState extends State<_TagGroup> {
                     Text(
                       widget.label,
                       style: TextStyle(
-                        fontSize: isMobile ? 14.5 : 13,
+                        fontSize: isMobile ? AppType.t15 : AppType.t13_5,
                         color: context.colors.sidebarFg,
                     letterSpacing: 0.01,
                   ),
@@ -650,8 +723,8 @@ class _TagGroupState extends State<_TagGroup> {
                     child: Text(
                       '${widget.children.map((e) => widget.tagCounts[e.$1] ?? 0).reduce((a, b) => a + b)}',
                       style: TextStyle(
-                        fontSize: isMobile ? 11 : 10,
-                        color: context.colors.sidebarMuted.withValues(alpha: 0.5),
+                        fontSize: isMobile ? AppType.t11 : AppType.t10,
+                        color: context.colors.sidebarMuted,
                       ),
                     ),
                   ),
@@ -669,10 +742,10 @@ class _TagGroupState extends State<_TagGroup> {
                   .map(
                     (e) => InkWell(
                       onTap: () => widget.onTagTap(e.$1),
-                      borderRadius: BorderRadius.circular(4),
+                      borderRadius: BorderRadius.circular(AppRadius.chip),
                       child: Padding(
                         padding: EdgeInsets.symmetric(
-                          vertical: isMobile ? 8 : 4,
+                          vertical: isMobile ? 9 : 7,
                           horizontal: isMobile ? 16 : 12,
                         ),
                         child: Row(
@@ -680,7 +753,7 @@ class _TagGroupState extends State<_TagGroup> {
                             Expanded(
                               child: Text('#${e.$2}',
                                   style: TextStyle(
-                                    fontSize: isMobile ? 14 : 12.5,
+                                    fontSize: isMobile ? AppType.t13_5 : AppType.t12,
                                     color: context.colors.sidebarMuted,
                                     letterSpacing: 0.01,
                                   )),
@@ -688,8 +761,8 @@ class _TagGroupState extends State<_TagGroup> {
                             if (widget.tagCounts.containsKey(e.$1))
                               Text('${widget.tagCounts[e.$1]}',
                                   style: TextStyle(
-                                    fontSize: isMobile ? 11 : 10,
-                                    color: context.colors.sidebarMuted.withValues(alpha: 0.5),
+                                    fontSize: isMobile ? AppType.t11 : AppType.t10,
+                                    color: context.colors.sidebarMuted,
                                   )),
                           ],
                         ),

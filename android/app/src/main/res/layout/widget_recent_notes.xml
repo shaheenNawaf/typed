@@ -14,11 +14,11 @@
         android:orientation="horizontal"
         android:paddingStart="4dp"
         android:paddingEnd="4dp"
-        android:paddingBottom="8dp">
+        android:paddingBottom="6dp">
 
         <ImageView
-            android:layout_width="18dp"
-            android:layout_height="18dp"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
             android:src="@drawable/ic_typed"
             android:contentDescription="Typed" />
 
@@ -28,17 +28,22 @@
             android:layout_marginStart="8dp"
             android:layout_weight="1"
             android:fontFamily="sans-serif-medium"
-            android:text="Recent"
-            android:textColor="#1A242E"
-            android:textSize="14sp" />
+             android:text="@string/widget_recent_title"
+             android:textColor="@color/widget_fg"
+            android:textSize="13sp"
+            android:letterSpacing="0.02" />
     </LinearLayout>
 
-    <LinearLayout
+    <ListView
         android:id="@+id/widget_recent_list"
+        android:layout_marginTop="2dp"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:orientation="vertical" />
+        android:divider="@android:color/transparent"
+        android:dividerHeight="6dp"
+        android:overScrollMode="ifContentScrolls"
+        android:scrollbars="none" />
 
     <TextView
         android:id="@+id/widget_recent_empty"
@@ -47,8 +52,8 @@
         android:layout_weight="1"
         android:gravity="center"
         android:fontFamily="sans-serif"
-        android:text="Tap to start writing"
-        android:textColor="#6E7A85"
+         android:text="@string/widget_empty"
+         android:textColor="@color/widget_muted"
         android:textSize="13sp"
         android:visibility="gone" />
 </LinearLayout>

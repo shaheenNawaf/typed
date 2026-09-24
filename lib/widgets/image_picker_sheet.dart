@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_metrics.dart';
 
 class ImagePickerSheet extends StatelessWidget {
   final VoidCallback onGallery;
@@ -22,6 +23,7 @@ class ImagePickerSheet extends StatelessWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
+      constraints: const BoxConstraints(maxWidth: 560),
       builder: (_) => ImagePickerSheet(
         onGallery: onGallery,
         onCamera: onCamera,
@@ -32,6 +34,7 @@ class ImagePickerSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SafeArea(
+      child: SingleChildScrollView(
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: Column(
@@ -71,16 +74,17 @@ class ImagePickerSheet extends StatelessWidget {
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(AppRadius.card),
                     ),
                   ),
                   child: Text('Cancel',
-                    style: TextStyle(fontSize: 14, color: context.colors.muted)),
+                    style: TextStyle(fontSize: AppType.t13_5, color: context.colors.muted)),
                 ),
               ),
             ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -109,14 +113,14 @@ class _Option extends StatelessWidget {
               width: 40, height: 40,
               decoration: BoxDecoration(
                 color: context.colors.listBg,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(AppRadius.card),
               ),
               alignment: Alignment.center,
               child: Icon(icon, size: 20, color: context.colors.fg),
             ),
             const SizedBox(width: 14),
             Text(label, style:  TextStyle(
-              fontSize: 15, color: context.colors.fg,
+              fontSize: AppType.t15, color: context.colors.fg,
             )),
           ],
         ),

@@ -46,3 +46,7 @@ app.*.map.json
 
 # Local Netlify folder
 .netlify
+
+# Orchestrator run state
+.orchestrator/
+.playwright-mcp/

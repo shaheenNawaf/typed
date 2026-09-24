@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_quick_label">Quick note</string>
+    <string name="widget_quick_title">Capture a thought</string>
+    <string name="widget_quick_sub">Tap below to start a note</string>
+    <string name="widget_new_note">New note</string>
+    <string name="widget_recent_title">Recent</string>
+    <string name="widget_todo_title">To-do</string>
+    <string name="widget_empty">Tap to start writing</string>
+    <string name="widget_untitled">Untitled</string>
+    <string name="widget_completed">Completed</string>
+    <string name="widget_incomplete">Incomplete</string>
+    <string name="widget_todo_progress">%1$d/%2$d done</string>
+    <string name="widget_finance_title">Spend</string>
+    <string name="widget_add_expense">+ Expense</string>
+    <string name="widget_add_income">+ Income</string>
+    <string name="widget_streak_title">Writing streak</string>
+    <string name="widget_streak_today">Write today to keep it</string>
+    <string name="widget_streak_started">Start your writing streak</string>
+    <string name="widget_finance_empty">Add an entry to see your month</string>
+    <string name="widget_income_value">In %1$s</string>
+    <string name="widget_expense_value">Out %1$s</string>
+    <string name="widget_quick_description">Create a note from your home screen</string>
+    <string name="widget_recent_description">Open your most recently edited notes</string>
+    <string name="widget_todo_description">Keep your unfinished tasks in view</string>
+    <string name="widget_finance_description">See your month and add transactions quickly</string>
+    <string name="widget_streak_description">Keep your writing habit visible</string>
+    <string name="widget_streak_written">Nice work. You wrote today.</string>
+    <string name="widget_budget_default">Budget</string>
+    <string name="widget_budget_over">%1$s — over budget</string>
+    <plurals name="widget_streak_days_count">
+        <item quantity="one">%1$d day</item>
+        <item quantity="other">%1$d days</item>
+    </plurals>
+</resources>

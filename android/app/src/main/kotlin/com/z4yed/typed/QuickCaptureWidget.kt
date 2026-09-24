@@ -11,6 +11,12 @@ class QuickCaptureWidget : AppWidgetProvider() {
         appWidgetIds: IntArray
     ) {
         for (id in appWidgetIds) {
+            updateWidget(context, appWidgetManager, id)
+        }
+    }
+
+    companion object {
+        fun updateWidget(context: android.content.Context, appWidgetManager: AppWidgetManager, id: Int) {
             val views = RemoteViews(context.packageName, R.layout.widget_quick_capture)
             views.setOnClickPendingIntent(
                 R.id.widget_quick_capture,
@@ -19,6 +25,14 @@ class QuickCaptureWidget : AppWidgetProvider() {
             views.setOnClickPendingIntent(
                 R.id.widget_quick_root,
                 WidgetHelper.openAppIntent(context)
+            )
+            views.setOnClickPendingIntent(
+                R.id.widget_quick_expense,
+                WidgetHelper.expenseIntent(context)
+            )
+            views.setOnClickPendingIntent(
+                R.id.widget_quick_income,
+                WidgetHelper.incomeIntent(context)
             )
             appWidgetManager.updateAppWidget(id, views)
         }

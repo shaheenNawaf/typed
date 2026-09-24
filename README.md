@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/branding/monogram.svg" width="88" alt="Typed logo">
+  <img src="design/branding/typed-logo-hero.svg" width="88" alt="Typed logo">
 
   # Typed
 
@@ -142,9 +142,11 @@ Typed uses a small, deliberate visual system:
 - Display type: Outfit or the selected display font
 - Technical type: JetBrains Mono
 
-The crossbar, stem, and foot use the foreground color. Only the period uses the red accent.
+The mark is the `t.` from JetBrains Mono 700 as pure paths — no font dependency — shared exactly by the bundled SVG, the Flutter painter, and the Android vectors. The t uses the foreground color; the period is the single accent.
 
-Brand sources live in `assets/branding/`, while the Flutter mark is rendered by `lib/widgets/brand_mark.dart`.
+Icon tiles: cream (default, `logo-tile-cream.svg`), accent (`logo-tile-accent.svg`), and night (`logo-tile-night.svg`, used for the Android dark-mode launcher variant). The marketing hero is `typed-logo-hero.svg`.
+
+Brand sources live in `assets/branding/` (bundled) and `design/branding/` (marketing and icon tiles), while the Flutter mark is rendered by `lib/widgets/brand_mark.dart`.
 
 ## Roadmap
 

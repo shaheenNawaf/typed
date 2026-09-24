@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../models/budget.dart';
+import '../models/money_entry.dart';
 import '../models/note.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_metrics.dart';
+import '../theme/app_motion.dart';
 import '../utils/finance_utils.dart';
+import '../utils/markdown_display.dart';
 import 'finance_dashboard.dart';
 import 'long_press_menu.dart';
 
@@ -14,7 +17,6 @@ class NoteList extends StatefulWidget {
   final bool sortDesc;
   final VoidCallback onSortToggle;
   final VoidCallback onNewNote;
-  final String listTitle;
   final String searchQuery;
   final ValueChanged<String> onSearchChanged;
   final String activeFilter;
@@ -30,14 +32,34 @@ class NoteList extends StatefulWidget {
   final FinanceSummary? financeSummary;
   final String? financePeriod;
   final ValueChanged<String>? onFinancePeriodChanged;
+  final String? financeCurrency;
+  final List<String> financeCurrencyOptions;
+  final ValueChanged<String>? onFinanceCurrencyChanged;
   final String Function(String?)? dashboardCurrencySymbol;
-  final String Function(double, String?)? dashboardFormatAmount;
   final List<Budget>? budgets;
+
+  /// Spend per budget id against each budget's own calendar period,
+  /// computed by the caller from all notes (see HomeScreen._budgetActuals).
+  final Map<String, int> budgetActuals;
   final void Function(Budget)? onAddBudget;
   final void Function(Budget)? onRemoveBudget;
   final VoidCallback? onQuickAddEntry;
+  final VoidCallback? onQuickAddIncome;
+
+  /// 'simple' | 'advanced' — Simple shows a quiet this-month view;
+  /// Advanced shows the full dashboard (categories, budgets, deltas).
+  final String? financeMode;
+  final ValueChanged<String>? onFinanceModeChanged;
   final void Function(Note note, int lineIndex, bool checked)?
       onChecklistToggle;
+
+  /// When false the finance pane renders notes only (desktop shows the
+  /// dashboard in the wide FinanceWorkspace pane instead).
+  final bool showFinanceDashboard;
+  /// Tap a transaction row -> edit that entry (noteId, entryId).
+  final void Function(String noteId, String entryId)? onSelectEntry;
+  /// Minor-unit expense buckets, oldest -> newest, length 14 (sparkline).
+  final List<int> financeDailyTotals;
 
   const NoteList({
     super.key,
@@ -47,7 +69,6 @@ class NoteList extends StatefulWidget {
     required this.sortDesc,
     required this.onSortToggle,
     required this.onNewNote,
-    required this.listTitle,
     required this.searchQuery,
     required this.onSearchChanged,
     required this.activeFilter,
@@ -63,13 +84,22 @@ class NoteList extends StatefulWidget {
     this.financeSummary,
     this.financePeriod,
     this.onFinancePeriodChanged,
+    this.financeCurrency,
+    this.financeCurrencyOptions = const ['all'],
+    this.onFinanceCurrencyChanged,
     this.dashboardCurrencySymbol,
-    this.dashboardFormatAmount,
     this.budgets,
+    this.budgetActuals = const {},
     this.onAddBudget,
     this.onRemoveBudget,
     this.onQuickAddEntry,
+    this.onQuickAddIncome,
+    this.financeMode,
+    this.onFinanceModeChanged,
     this.onChecklistToggle,
+    this.showFinanceDashboard = true,
+    this.onSelectEntry,
+    this.financeDailyTotals = const [],
   });
 
   @override
@@ -77,328 +107,106 @@ class NoteList extends StatefulWidget {
 }
 
 class _NoteListState extends State<NoteList> {
-  late TextEditingController _searchCtrl;
+  /// True when the Finance pane should render the quiet this-month view.
+  bool get _financeSimpleMode =>
+      widget.activeFilter == 'finance' &&
+      (widget.financeMode ?? 'simple') == 'simple';
 
-  @override
-  void initState() {
-    super.initState();
-    _searchCtrl = TextEditingController(text: widget.searchQuery);
-  }
+  /// True when the Finance pane's Simple/Advanced toggle row owns the
+  /// sort/settings controls (they stay fixed below the navbar there).
+  bool get _showModeToggle =>
+      widget.activeFilter == 'finance' &&
+      widget.financeSummary != null &&
+      widget.showFinanceDashboard &&
+      widget.onFinanceModeChanged != null;
 
-  @override
-  void didUpdateWidget(NoteList oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.searchQuery != _searchCtrl.text) {
-      _searchCtrl.text = widget.searchQuery;
+  /// True when the sort/settings controls ride on the list's first section
+  /// header row ('Yesterday … Recent ↓ ⚙') instead of a separate fixed row
+  /// below the navbar. Finance keeps its toggle row; archive/trash are flat
+  /// lists with no section headers; empty lists keep the fixed row so the
+  /// controls stay reachable.
+  bool get _mergeControlsIntoList {
+    final showDashboard =
+        widget.activeFilter == 'finance' &&
+        widget.financeSummary != null &&
+        widget.showFinanceDashboard;
+    if (showDashboard) return false;
+    if (widget.activeFilter == 'archive' || widget.activeFilter == 'trash') {
+      return false;
     }
-  }
-
-  @override
-  void dispose() {
-    _searchCtrl.dispose();
-    super.dispose();
+    return _displayNotes.isNotEmpty;
   }
 
   @override
   Widget build(BuildContext context) {
-    final isDesktop = MediaQuery.of(context).size.width >= 1024;
     final showDashboard =
-        widget.activeFilter == 'finance' && widget.financeSummary != null;
-    final showQuickFab =
-        !isDesktop &&
         widget.activeFilter == 'finance' &&
-        widget.onQuickAddEntry != null;
-    return Stack(
-      children: [
-        Container(
-          color: context.colors.listBg,
-          child: Column(
+        widget.financeSummary != null &&
+        widget.showFinanceDashboard;
+    final simpleMode = _financeSimpleMode;
+    return Container(
+      color: context.colors.listBg,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Decide by the pane's own width, not the window: on desktop
+          // the note list column is ~340px even when the window is wide.
+          // The controls sit inside 16px horizontal padding, so decide on
+          // the CONTENT width (pane - 32) — identical to the old
+          // inside-Padding LayoutBuilder (390 pane -> 358 -> icon variant).
+          final isMobilePane = constraints.maxWidth - 32 < 380;
+          return Column(
             children: [
-              _buildSearch(),
-              _buildHeader(),
-              if (showDashboard)
+              _buildHeader(isMobilePane),
+              // The period/currency scope selector belongs to the Advanced
+              // dashboard; Simple is always a calm this-month view.
+              if (showDashboard && !simpleMode)
                 FinanceStickyHeader(
                   summary: widget.financeSummary!,
                   period: widget.financePeriod ?? 'all',
                   onPeriodChanged: widget.onFinancePeriodChanged ?? (_) {},
                   currencySymbol:
                       widget.dashboardCurrencySymbol ?? currencySymbol,
+                  currencyScope: widget.financeCurrency ?? 'all',
+                  currencyOptions: widget.financeCurrencyOptions,
+                  onCurrencyChanged: widget.onFinanceCurrencyChanged,
                 ),
-              Expanded(child: _buildCardList()),
+              Expanded(child: _buildCardList(isMobilePane)),
             ],
-          ),
-        ),
-        if (showQuickFab)
-          Positioned(
-            right: 20,
-            bottom: 20,
-            child: FloatingActionButton(
-              heroTag: 'quickAddFab',
-              onPressed: widget.onQuickAddEntry,
-              backgroundColor: context.colors.accent,
-              foregroundColor: Colors.white,
-              elevation: 4,
-              shape: const CircleBorder(),
-              child: const Icon(Icons.bolt, color: Colors.white, size: 24),
-            ),
-          ),
-        if (!isDesktop &&
-            widget.activeFilter != 'archive' &&
-            widget.activeFilter != 'trash' &&
-            widget.activeFilter != 'finance')
-          Positioned(
-            right: 20,
-            bottom: 20,
-            child: FloatingActionButton(
-              heroTag: 'newNoteFab',
-              onPressed: widget.onNewNote,
-              backgroundColor: context.colors.accent,
-              foregroundColor: Colors.white,
-              elevation: 4,
-              shape: const CircleBorder(),
-              child: const Icon(Icons.add, size: 24),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildSearch() {
-    final isMobile = MediaQuery.of(context).size.width < 1024;
-    final hasQuery = _searchCtrl.text.isNotEmpty;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        isMobile ? 12 : 16,
-        isMobile ? 10 : 14,
-        isMobile ? 12 : 16,
-        10,
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _searchCtrl,
-              onChanged: widget.onSearchChanged,
-              decoration: InputDecoration(
-                hintText: 'Search notes...',
-                hintStyle: TextStyle(
-                  fontSize: isMobile ? 15 : 13.5,
-                  color: context.colors.muted,
-                ),
-                filled: true,
-                fillColor: context.colors.surface,
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: isMobile ? 12 : 8,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: context.colors.border),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: context.colors.border),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: context.colors.accent),
-                ),
-              ),
-              style: TextStyle(
-                fontSize: isMobile ? 15 : 13.5,
-                color: context.colors.fg,
-              ),
-            ),
-          ),
-          if (hasQuery)
-            Padding(
-              padding: const EdgeInsets.only(left: 8),
-              child: Semantics(
-                label: 'Cancel search',
-                child: InkWell(
-                  onTap: () {
-                    _searchCtrl.clear();
-                    widget.onSearchChanged('');
-                  },
-                  borderRadius: BorderRadius.circular(6),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 8,
-                    ),
-                    child: Text(
-                      'Cancel',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: context.colors.accent,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
+          );
+        },
       ),
     );
   }
 
-  Widget _buildHeader() {
-    final isMobile = MediaQuery.of(context).size.width < 600;
+  Widget _buildHeader(bool isMobilePane) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                widget.listTitle,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  color: context.colors.muted,
-                  letterSpacing: 0.06,
-                ),
-              ),
-              Row(
-                children: [
-                  Semantics(
-                    label: 'Toggle sort order',
-                    child: InkWell(
-                      onTap: widget.onSortToggle,
-                      borderRadius: BorderRadius.circular(4),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 4,
-                          vertical: 2,
-                        ),
-                        child: isMobile
-                            ? Icon(
-                                widget.sortDesc
-                                    ? Icons.arrow_downward
-                                    : Icons.sort_by_alpha,
-                                size: 16,
-                                color: context.colors.muted,
-                              )
-                            : Text(
-                                widget.sortDesc
-                                    ? 'Recent \u2193'
-                                    : 'A\u2013Z \u2191',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: context.colors.muted,
-                                ),
-                              ),
-                      ),
-                    ),
+        if (!_mergeControlsIntoList)
+          Padding(
+            // One snug control row below the workspace header: page mode
+            // toggle on the left, sort/settings on the right.
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                if (_showModeToggle) ...[
+                  FinanceModeToggle(
+                    mode: widget.financeMode ?? 'simple',
+                    onChanged: widget.onFinanceModeChanged!,
                   ),
-                  const SizedBox(width: 4),
-                  Semantics(
-                    label: 'New note',
-                    child: InkWell(
-                      onTap: widget.onNewNote,
-                      borderRadius: BorderRadius.circular(4),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        child: isMobile
-                            ? Icon(
-                                Icons.add,
-                                size: 16,
-                                color: context.colors.muted,
-                              )
-                            : Row(
-                                children: [
-                                  Icon(
-                                    Icons.add,
-                                    size: 16,
-                                    color: context.colors.muted,
-                                  ),
-                                  const SizedBox(width: 2),
-                                  Text(
-                                    'New',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: context.colors.muted,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                      ),
-                    ),
-                  ),
-                  if (widget.activeFilter == 'finance' &&
-                      widget.onQuickAddEntry != null &&
-                      !isMobile) ...[
-                    const SizedBox(width: 4),
-                    Semantics(
-                      label: 'Quick add expense',
-                      child: InkWell(
-                        onTap: widget.onQuickAddEntry,
-                        borderRadius: BorderRadius.circular(4),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.bolt,
-                                size: 16,
-                                color: context.colors.accent,
-                              ),
-                              const SizedBox(width: 2),
-                              Text(
-                                'Quick',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: context.colors.accent,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                  if (widget.onOpenSettings != null) ...[
-                    const SizedBox(width: 4),
-                    Semantics(
-                      label: 'Settings',
-                      child: InkWell(
-                        onTap: widget.onOpenSettings,
-                        borderRadius: BorderRadius.circular(4),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          child: Icon(
-                            Icons.settings_outlined,
-                            size: 16,
-                            color: context.colors.muted,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+                  const Spacer(),
                 ],
-              ),
-            ],
+                ..._headerControls(isMobilePane),
+              ],
+            ),
           ),
-        ),
         if (widget.activeTag != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: InkWell(
               onTap: widget.onClearActiveTag,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(AppRadius.panel),
               child: Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
@@ -406,7 +214,7 @@ class _NoteListState extends State<NoteList> {
                 ),
                 decoration: BoxDecoration(
                   color: context.colors.tagBg,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadius.panel),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -414,7 +222,7 @@ class _NoteListState extends State<NoteList> {
                     Text(
                       '#${widget.activeTag}',
                       style: TextStyle(
-                        fontSize: 12,
+                        fontSize: AppType.t12,
                         fontWeight: FontWeight.w500,
                         color: context.colors.tagFg,
                       ),
@@ -430,8 +238,95 @@ class _NoteListState extends State<NoteList> {
     );
   }
 
-  Widget _buildCardItem(dynamic item) {
-    if (item is String) return _buildSectionHeader(item);
+  /// Sort / new-note / settings controls, shared by the fixed header row and
+  /// the merged first-section-header row.
+  List<Widget> _headerControls(bool isMobilePane) {
+    final isDesktopWindow = MediaQuery.of(context).size.width >= 1024;
+    return [
+      Semantics(
+        label: 'Toggle sort order',
+        child: InkWell(
+          onTap: widget.onSortToggle,
+          borderRadius: BorderRadius.circular(AppRadius.chip),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            child: isMobilePane
+                ? Icon(
+                    widget.sortDesc
+                        ? Icons.arrow_downward
+                        : Icons.sort_by_alpha,
+                    size: 16,
+                    color: context.colors.muted,
+                  )
+                : Text(
+                    widget.sortDesc ? 'Recent \u2193' : 'A\u2013Z \u2191',
+                    style: TextStyle(
+                      fontSize: AppType.t13_5,
+                      color: context.colors.muted,
+                    ),
+                  ),
+          ),
+        ),
+      ),
+      const SizedBox(width: 4),
+      if (widget.activeFilter != 'finance' && isDesktopWindow)
+        Semantics(
+          label: 'New note',
+          child: InkWell(
+            onTap: widget.onNewNote,
+            borderRadius: BorderRadius.circular(AppRadius.chip),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              child: isMobilePane
+                  ? const Icon(Icons.add, size: 16)
+                  : Row(
+                      children: [
+                        const Icon(Icons.add, size: 16),
+                        const SizedBox(width: 2),
+                        Text(
+                          'New',
+                          style: TextStyle(
+                            fontSize: AppType.t13_5,
+                            color: context.colors.muted,
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+          ),
+        ),
+      if (widget.onOpenSettings != null) ...[
+        const SizedBox(width: 4),
+        Semantics(
+          label: 'Settings',
+          child: InkWell(
+            onTap: widget.onOpenSettings,
+            borderRadius: BorderRadius.circular(AppRadius.chip),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              child: Icon(
+                Icons.settings_outlined,
+                size: 16,
+                color: context.colors.muted,
+              ),
+            ),
+          ),
+        ),
+      ],
+    ];
+  }
+
+  Widget _buildCardItem(
+    dynamic item, {
+    bool isMobilePane = false,
+    bool withControls = false,
+  }) {
+    if (item is String) {
+      return _buildSectionHeader(
+        item,
+        trailing: withControls ? _headerControls(isMobilePane) : null,
+      );
+    }
     final note = item as Note;
     final isArchiveOrTrash =
         widget.activeFilter == 'archive' || widget.activeFilter == 'trash';
@@ -449,36 +344,71 @@ class _NoteListState extends State<NoteList> {
       longPressActions: _buildLongPressActions(note),
       activeFilter: widget.activeFilter,
       budgets: widget.budgets ?? const [],
+      budgetActuals: widget.budgetActuals,
       onChecklistToggle: widget.onChecklistToggle,
+      financeEntries: widget.financeSummary?.entriesByNote[note.id],
     );
   }
 
-  Widget _buildCardList() {
+  List<Note> get _displayNotes {
+    if (widget.activeFilter == 'finance' && widget.financeSummary != null) {
+      final ids = widget.financeSummary!.noteIds;
+      return widget.notes.where((note) => ids.contains(note.id)).toList();
+    }
+    return widget.notes;
+  }
+
+  Widget _buildCardList(bool isMobilePane) {
     final showDashboard =
-        widget.activeFilter == 'finance' && widget.financeSummary != null;
+        widget.activeFilter == 'finance' &&
+        widget.financeSummary != null &&
+        widget.showFinanceDashboard;
+    final displayNotes = _displayNotes;
 
     final Widget child;
 
     if (showDashboard) {
-      final body = FinanceDashboardBody(
-        summary: widget.financeSummary!,
-        period: widget.financePeriod ?? 'all',
-        currencySymbol: widget.dashboardCurrencySymbol ?? currencySymbol,
-        budgets: widget.budgets ?? const [],
-        onAddBudget: widget.onAddBudget,
-        onRemoveBudget: widget.onRemoveBudget,
-        onSelectNote: widget.onSelectNote,
-      );
+      final Widget body;
+      if (_financeSimpleMode) {
+        body = SimpleFinanceView(
+          summary: widget.financeSummary!,
+          budgets: widget.budgets ?? const [],
+          budgetActuals: widget.budgetActuals,
+          onAddExpense: widget.onQuickAddEntry,
+          onAddIncome: widget.onQuickAddIncome,
+          onSelectNote: widget.onSelectNote,
+          onSelectEntry: widget.onSelectEntry,
+          onOpenAdvanced: widget.onFinanceModeChanged == null
+              ? null
+              : () => widget.onFinanceModeChanged!('advanced'),
+        );
+      } else {
+        body = FinanceDashboardBody(
+          summary: widget.financeSummary!,
+          period: widget.financePeriod ?? 'all',
+          currencySymbol: widget.dashboardCurrencySymbol ?? currencySymbol,
+          budgets: widget.budgets ?? const [],
+          budgetActuals: widget.budgetActuals,
+          onAddBudget: widget.onAddBudget,
+          onRemoveBudget: widget.onRemoveBudget,
+          onSelectNote: widget.onSelectNote,
+          onAddExpense: widget.onQuickAddEntry,
+          onAddIncome: widget.onQuickAddIncome,
+          currencyScope: widget.financeCurrency ?? 'all',
+          onSelectEntry: widget.onSelectEntry,
+          dailyTotals: widget.financeDailyTotals,
+        );
+      }
 
-      if (widget.notes.isEmpty) {
+      if (displayNotes.isEmpty) {
         child = ListView(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
           children: [body],
         );
       } else {
-        final sectioned = _buildSectionedItems();
+        final sectioned = _buildSectionedItems(displayNotes);
         child = ListView.builder(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
           itemCount: sectioned.length + 1,
           itemBuilder: (context, index) {
             if (index == 0) return body;
@@ -486,7 +416,7 @@ class _NoteListState extends State<NoteList> {
           },
         );
       }
-    } else if (widget.notes.isEmpty) {
+    } else if (displayNotes.isEmpty) {
       switch (widget.activeFilter) {
         case 'archive':
           child = _emptyState(
@@ -587,18 +517,31 @@ class _NoteListState extends State<NoteList> {
           }
       }
     } else {
-      final sectioned = _buildSectionedItems();
+      final sectioned = _buildSectionedItems(displayNotes);
       child = ListView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
         itemCount: sectioned.length,
         itemBuilder: (context, index) {
-          return _buildCardItem(sectioned[index]);
+          return _buildCardItem(
+            sectioned[index],
+            isMobilePane: isMobilePane,
+            withControls: _mergeControlsIntoList &&
+                index == 0 &&
+                sectioned[0] is String,
+          );
         },
       );
     }
+    final switchKey = displayNotes.isEmpty
+        ? (widget.searchQuery.isNotEmpty
+            ? 'empty-search'
+            : 'empty-${widget.activeFilter}')
+        : 'list';
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 200),
-      child: child,
+      duration: AppMotion.duration(context, AppMotion.base),
+      switchInCurve: AppMotion.decelerate,
+      switchOutCurve: AppMotion.accelerate,
+      child: KeyedSubtree(key: ValueKey(switchKey), child: child),
     );
   }
 
@@ -613,13 +556,14 @@ class _NoteListState extends State<NoteList> {
     return 'Older';
   }
 
-  List<dynamic> _buildSectionedItems() {
+  List<dynamic> _buildSectionedItems([List<Note>? source]) {
+    final notes = source ?? widget.notes;
     if (widget.activeFilter == 'archive' || widget.activeFilter == 'trash') {
-      return widget.notes.toList();
+      return notes.toList();
     }
     final items = <dynamic>[];
     String? currentSection;
-    for (final note in widget.notes) {
+    for (final note in notes) {
       final section = _dateSection(note.updatedAt);
       if (section != currentSection) {
         items.add(section);
@@ -630,18 +574,29 @@ class _NoteListState extends State<NoteList> {
     return items;
   }
 
-  Widget _buildSectionHeader(String label) {
+  Widget _buildSectionHeader(String label, {List<Widget>? trailing}) {
+    final hasTrailing = trailing != null && trailing.isNotEmpty;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(0, 24, 0, 8),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          color: context.colors.muted,
-          letterSpacing: 0.08,
-          height: 1.2,
-        ),
+      padding: EdgeInsets.fromLTRB(
+        0,
+        hasTrailing ? 6 : 24,
+        0,
+        hasTrailing ? 6 : 8,
+      ),
+      child: Row(
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: AppType.t11,
+              fontWeight: FontWeight.w600,
+              color: context.colors.muted,
+              letterSpacing: 0.08,
+              height: 1.2,
+            ),
+          ),
+          if (hasTrailing) ...[const Spacer(), ...trailing],
+        ],
       ),
     );
   }
@@ -708,9 +663,7 @@ class _NoteListState extends State<NoteList> {
           ],
           Text(
             title,
-            style: GoogleFonts.dmSans(
-              fontSize: 20,
-              fontWeight: FontWeight.w500,
+            style: Theme.of(context).textTheme.displayMedium?.copyWith(
               color: context.colors.fg,
               height: 1.3,
             ),
@@ -721,7 +674,7 @@ class _NoteListState extends State<NoteList> {
             child: Text(
               subtitle,
               style: TextStyle(
-                fontSize: 13,
+                fontSize: AppType.t13_5,
                 color: context.colors.muted,
                 height: 1.4,
               ),
@@ -747,6 +700,8 @@ class _NoteCard extends StatefulWidget {
   final List<LongPressAction> longPressActions;
   final String activeFilter;
   final List<Budget> budgets;
+  final Map<String, int> budgetActuals;
+  final List<MoneyEntry>? financeEntries;
   final void Function(Note note, int lineIndex, bool checked)?
       onChecklistToggle;
 
@@ -759,6 +714,8 @@ class _NoteCard extends StatefulWidget {
     required this.longPressActions,
     this.activeFilter = 'notes',
     this.budgets = const [],
+    this.budgetActuals = const {},
+    this.financeEntries,
     this.onChecklistToggle,
   });
 
@@ -769,6 +726,8 @@ class _NoteCard extends StatefulWidget {
 class _NoteCardState extends State<_NoteCard> {
   double _dragOffset = 0;
   bool _isSnapping = false;
+  bool _hovered = false;
+  bool _pressed = false;
 
   static const double _kActionZoneWidth = 80.0;
   static const double _kActionThreshold = 48.0;
@@ -800,7 +759,14 @@ class _NoteCardState extends State<_NoteCard> {
   @override
   Widget build(BuildContext context) {
     final isDesktop = MediaQuery.of(context).size.width >= 1024;
-    return Padding(
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: Listener(
+        onPointerDown: (_) => setState(() => _pressed = true),
+        onPointerUp: (_) => setState(() => _pressed = false),
+        onPointerCancel: (_) => setState(() => _pressed = false),
+        child: Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Stack(
         children: [
@@ -813,12 +779,12 @@ class _NoteCardState extends State<_NoteCard> {
               child: Container(
                 decoration: BoxDecoration(
                   color: context.colors.destructive,
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(AppRadius.card),
                 ),
-                child: const Center(
+                child: Center(
                   child: Icon(
                     Icons.delete_outline,
-                    color: Color(0xFFF0F0F0),
+                    color: context.colors.onDestructive,
                     size: 26,
                   ),
                 ),
@@ -832,13 +798,15 @@ class _NoteCardState extends State<_NoteCard> {
               width: _kActionZoneWidth,
               child: Container(
                 decoration: BoxDecoration(
-                  color: context.colors.income,
-                  borderRadius: BorderRadius.circular(10),
+                  // Neutral reveal — income green implied a money meaning
+                  // for what is an archive action.
+                  color: context.colors.muted,
+                  borderRadius: BorderRadius.circular(AppRadius.card),
                 ),
-                child: const Center(
+                child: Center(
                   child: Icon(
                     Icons.archive_outlined,
-                    color: Color(0xFFF0F0F0),
+                    color: AppColors.readableOn(context.colors.muted),
                     size: 26,
                   ),
                 ),
@@ -846,9 +814,9 @@ class _NoteCardState extends State<_NoteCard> {
             ),
           AnimatedContainer(
             duration: _isSnapping
-                ? const Duration(milliseconds: 200)
+                ? AppMotion.duration(context, AppMotion.base)
                 : Duration.zero,
-            curve: Curves.easeOut,
+            curve: AppMotion.decelerate,
             transform: Matrix4.translationValues(_dragOffset, 0, 0),
             child: GestureDetector(
               behavior: HitTestBehavior.translucent,
@@ -868,7 +836,9 @@ class _NoteCardState extends State<_NoteCard> {
           ),
         ],
       ),
-    );
+    ),
+  ),
+);
   }
 
   Widget _buildCard() {
@@ -877,75 +847,117 @@ class _NoteCardState extends State<_NoteCard> {
     // filters keep the full card layout.
     final isFinance =
         widget.activeFilter == 'finance' && widget.note.type != 'text';
+    final isDesktop = MediaQuery.of(context).size.width >= 1024;
 
-    return InkWell(
+    return Semantics(
+      button: true,
+      label: widget.note.title.isEmpty ? 'Untitled' : widget.note.title,
+      child: InkWell(
       onTap: widget.onTap,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(isDesktop ? AppRadius.chip : AppRadius.card),
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
+        duration: AppMotion.duration(context, AppMotion.base),
+        curve: AppMotion.emphasized,
         padding: isFinance
             ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10)
-            : const EdgeInsets.all(14),
+            : EdgeInsets.symmetric(
+                horizontal: isDesktop ? 12 : 14,
+                vertical: isDesktop ? 11 : 14,
+              ),
         decoration: BoxDecoration(
-          color: context.colors.surface,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: widget.selected ? context.colors.accent : Colors.transparent,
-            width: widget.selected ? 1 : 0,
-          ),
-          boxShadow: widget.selected
-              ? [
-                  BoxShadow(
-                    color: context.colors.accentDim,
-                    blurRadius: 0,
-                    spreadRadius: 2,
+          color: isDesktop && !widget.selected
+              ? Colors.transparent
+              : context.colors.surface,
+          // Desktop pairs a non-uniform border (accent rail + hairline) with
+          // this decoration; a borderRadius on non-uniform border colors
+          // throws in debug paints, and release already ignores the radius
+          // for the border — so desktop drops it (release pixels unchanged).
+          borderRadius: isDesktop ? null : BorderRadius.circular(AppRadius.card),
+          border: isDesktop
+              ? Border(
+                  left: BorderSide(
+                    color: widget.selected || _hovered
+                        ? context.colors.accent
+                        : Colors.transparent,
+                    width: 2,
                   ),
-                ]
-              : null,
+                  bottom: BorderSide(
+                    color: context.colors.border.withValues(alpha: 0.7),
+                  ),
+                )
+              : Border.all(
+                  color: widget.selected
+                      ? context.colors.accent
+                      : Colors.transparent,
+                  width: widget.selected ? 1 : 0,
+                ),
+          boxShadow: null,
+        ),
+        transform: Matrix4.translationValues(
+          0,
+          _hovered && isDesktop && !_pressed ? -2 : 0,
+          0,
+        )..scaleByDouble(
+          _pressed ? 0.985 : 1.0,
+          _pressed ? 0.985 : 1.0,
+          1.0,
+          1.0,
         ),
         child: isFinance ? _buildFinanceCardBody() : _buildFullCardBody(),
+      ),
       ),
     );
   }
 
   Widget _buildFinanceCardBody() {
-    final dominant = _dominantCategory(widget.note);
+    final amounts = widget.financeEntries ?? widget.note.amounts;
+    final incomeEntries = amounts
+        .where((e) => (e.type ?? widget.note.type) == 'income')
+        .toList();
+    final expenseEntries = amounts
+        .where((e) => (e.type ?? widget.note.type) == 'expense')
+        .toList();
+    final hasIncome = incomeEntries.isNotEmpty;
+    final hasExpense = expenseEntries.isNotEmpty;
+    final amountColor = hasIncome && !hasExpense
+        ? context.colors.income
+        : hasIncome && hasExpense
+            ? context.colors.accent
+            : context.colors.fg;
+    final dominant = _dominantCategory(widget.note, amounts);
     final budget = dominant != null
         ? widget.budgets.cast<Budget?>().firstWhere(
             (b) => b!.category == dominant,
             orElse: () => null,
           )
         : null;
-    final budgetActual = budget != null && dominant != null
-        ? widget.note.amounts
-              .where(
-                (e) =>
-                    e.category == dominant &&
-                    (e.type ?? widget.note.type) == 'expense',
-              )
-              .fold<double>(0, (s, e) => s + e.amount)
-        : 0.0;
+    // Calendar-period spend for this budget's category across ALL notes —
+    // comparing a single note's entries against the whole monthly limit
+    // used to render a misleading progress bar.
+    final budgetActual = budget != null
+        ? widget.budgetActuals[budget.id] ?? 0
+        : 0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Icon(
-              widget.note.type == 'income'
-                  ? Icons.arrow_downward
-                  : Icons.arrow_upward,
-              size: 12,
-              color: widget.note.type == 'income'
-                  ? context.colors.income
-                  : context.colors.fg,
-            ),
+               Icon(
+                hasIncome && hasExpense
+                    ? Icons.swap_vert
+                    : hasIncome
+                        ? Icons.arrow_upward
+                        : Icons.arrow_downward,
+                size: 12,
+                color: amountColor,
+             ),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
                 widget.note.title,
                 style: TextStyle(
-                  fontSize: 13.5,
+                  fontSize: AppType.t13_5,
                   fontWeight: FontWeight.w600,
                   color: context.colors.fg,
                   letterSpacing: -0.01,
@@ -959,14 +971,15 @@ class _NoteCardState extends State<_NoteCard> {
               Text.rich(
                 TextSpan(
                   style: TextStyle(
-                    fontSize: 12.5,
+                    fontSize: AppType.t12,
                     fontFamily: context.colors.monoFontFamily,
                     fontWeight: FontWeight.w600,
-                    color: widget.note.type == 'income'
-                        ? context.colors.income
-                        : context.colors.fg,
+                   color: amountColor,
                   ),
-                  children: _buildCardAmountSpans(widget.note),
+                  children: _buildCardAmountSpans(
+                    widget.note,
+                    widget.financeEntries,
+                  ),
                 ),
               ),
           ],
@@ -980,7 +993,9 @@ class _NoteCardState extends State<_NoteCard> {
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(2),
                     child: LinearProgressIndicator(
-                      value: (budgetActual / budget.limit).clamp(0.0, 1.0),
+                      value: budget.limit > 0
+                          ? (budgetActual / budget.limit).clamp(0.0, 1.0)
+                          : (budgetActual > 0 ? 1.0 : 0.0),
                       minHeight: 4,
                       backgroundColor: context.colors.border,
                       valueColor: AlwaysStoppedAnimation(
@@ -992,14 +1007,26 @@ class _NoteCardState extends State<_NoteCard> {
                   ),
                 ),
                 const SizedBox(width: 6),
-                Text(
-                  '${formatAmount(budgetActual, widget.note.currency)} / ${formatAmount(budget.limit, widget.note.currency)}',
-                  style: TextStyle(
-                    fontSize: 9.5,
-                    fontFamily: context.colors.monoFontFamily,
-                    color: budgetActual > budget.limit
-                        ? context.colors.destructive
-                        : context.colors.muted,
+                Text.rich(
+                  TextSpan(
+                    style: TextStyle(
+                      fontSize: AppType.t10,
+                      fontFamily: context.colors.monoFontFamily,
+                      color: budgetActual > budget.limit
+                          ? context.colors.destructive
+                          : context.colors.muted,
+                    ),
+                    children: [
+                      currencySpan(budget.currency, null),
+                      TextSpan(
+                        text: formatMinor(budgetActual, budget.currency),
+                      ),
+                      const TextSpan(text: ' / '),
+                      currencySpan(budget.currency, null),
+                      TextSpan(
+                        text: formatMinor(budget.limit, budget.currency),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -1009,10 +1036,11 @@ class _NoteCardState extends State<_NoteCard> {
     );
   }
 
-  String? _dominantCategory(Note note) {
-    if (note.amounts.isEmpty) return null;
-    final totals = <String, double>{};
-    for (final e in note.amounts) {
+  String? _dominantCategory(Note note, [List<MoneyEntry>? amounts]) {
+    final entries = amounts ?? note.amounts;
+    if (entries.isEmpty) return null;
+    final totals = <String, int>{};
+    for (final e in entries) {
       if ((e.type ?? note.type) != 'expense') continue;
       totals[e.category] = (totals[e.category] ?? 0) + e.amount;
     }
@@ -1026,6 +1054,10 @@ class _NoteCardState extends State<_NoteCard> {
   }
 
   Widget _buildFullCardBody() {
+    final taskItems =
+        (widget.activeFilter == 'tasks' && widget.onChecklistToggle != null)
+        ? parseChecklist(widget.note.content)
+        : const <ChecklistItem>[];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1051,7 +1083,7 @@ class _NoteCardState extends State<_NoteCard> {
               child: Text(
                 widget.note.title,
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: AppType.t13_5,
                   fontWeight: FontWeight.w600,
                   color: context.colors.fg,
                   letterSpacing: -0.01,
@@ -1063,13 +1095,13 @@ class _NoteCardState extends State<_NoteCard> {
           ],
         ),
         const SizedBox(height: 4),
-        if (_contentPreview(widget.note.content).isNotEmpty)
+        if (taskItems.isEmpty && _contentPreview(widget.note.content).isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
             child: Text(
               _contentPreview(widget.note.content),
               style: TextStyle(
-                fontSize: 12,
+                fontSize: AppType.t12,
                 color: context.colors.muted,
                 height: 1.4,
               ),
@@ -1077,9 +1109,7 @@ class _NoteCardState extends State<_NoteCard> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-        if (widget.activeFilter == 'tasks' &&
-            widget.onChecklistToggle != null)
-          _buildTaskChecklist(),
+        if (taskItems.isNotEmpty) _buildTaskChecklist(taskItems),
         Row(
           children: [
             ...widget.note.tags
@@ -1094,12 +1124,12 @@ class _NoteCardState extends State<_NoteCard> {
                       ),
                       decoration: BoxDecoration(
                         color: context.colors.tagBg,
-                        borderRadius: BorderRadius.circular(4),
+                        borderRadius: BorderRadius.circular(AppRadius.chip),
                       ),
                       child: Text(
                         '#$t',
                         style: TextStyle(
-                          fontSize: 11.5,
+                          fontSize: AppType.t12,
                           fontWeight: FontWeight.w500,
                           color: context.colors.tagFg,
                         ),
@@ -1113,10 +1143,13 @@ class _NoteCardState extends State<_NoteCard> {
           const SizedBox(height: 4),
           Row(
             children: [
+              // Up for income, down for expense — matching the finance card
+              // and quick actions (the full card previously had these
+              // inverted).
               Icon(
                 widget.note.type == 'income'
-                    ? Icons.arrow_downward
-                    : Icons.arrow_upward,
+                    ? Icons.arrow_upward
+                    : Icons.arrow_downward,
                 size: 10,
                 color: widget.note.type == 'income'
                     ? context.colors.income
@@ -1126,21 +1159,24 @@ class _NoteCardState extends State<_NoteCard> {
               Text.rich(
                 TextSpan(
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: AppType.t12,
                     fontFamily: context.colors.monoFontFamily,
                     fontWeight: FontWeight.w500,
                     color: widget.note.type == 'income'
                         ? context.colors.income
                         : context.colors.fg,
                   ),
-                  children: _buildCardAmountSpans(widget.note),
+                   children: _buildCardAmountSpans(
+                     widget.note,
+                     widget.financeEntries,
+                   ),
                 ),
               ),
-              if (widget.note.amounts.length > 1) ...[
+               if ((widget.financeEntries ?? widget.note.amounts).length > 1) ...[
                 const SizedBox(width: 4),
                 Text(
                   '(${widget.note.amounts.length} entries)',
-                  style: TextStyle(fontSize: 10, color: context.colors.muted),
+                  style: TextStyle(fontSize: AppType.t10, color: context.colors.muted),
                 ),
               ],
             ],
@@ -1150,7 +1186,7 @@ class _NoteCardState extends State<_NoteCard> {
         Text(
           _relativeTime(widget.note.updatedAt),
           style: TextStyle(
-            fontSize: 10.5,
+            fontSize: AppType.t11,
             fontFamily: context.colors.monoFontFamily,
             color: context.colors.muted.withValues(alpha: 0.7),
             letterSpacing: 0.03,
@@ -1160,19 +1196,8 @@ class _NoteCardState extends State<_NoteCard> {
     );
   }
 
-  Widget _buildTaskChecklist() {
-    final items = <(int, bool, String)>[];
-    for (final entry in widget.note.content.split('\n').asMap().entries) {
-      final match = RegExp(r'^\s*-\s+\[([ xX])\]\s+(.*)$')
-          .firstMatch(entry.value);
-      if (match == null) continue;
-      items.add((
-        entry.key,
-        match.group(1)!.toLowerCase() == 'x',
-        match.group(2)?.trim() ?? '',
-      ));
-      if (items.length == 5) break;
-    }
+  Widget _buildTaskChecklist(List<ChecklistItem> allItems) {
+    final items = allItems.take(5).toList();
     if (items.isEmpty) return const SizedBox.shrink();
 
     final c = context.colors;
@@ -1181,46 +1206,64 @@ class _NoteCardState extends State<_NoteCard> {
       child: Column(
         children: [
           for (final item in items)
-            Semantics(
-              button: true,
-              checked: item.$2,
-              label: item.$3.isEmpty ? 'Checklist item' : item.$3,
-              child: InkWell(
-                onTap: () => widget.onChecklistToggle!(
-                  widget.note,
-                  item.$1,
-                  !item.$2,
-                ),
-                borderRadius: BorderRadius.circular(6),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 3),
-                  child: Row(
-                    children: [
-                      Icon(
-                        item.$2
-                            ? Icons.check_box_outlined
-                            : Icons.check_box_outline_blank,
-                        size: 17,
-                        color: item.$2 ? c.accent : c.muted,
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 1),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: Center(
+                      child: Checkbox(
+                        value: item.done,
+                        onChanged: (_) => widget.onChecklistToggle!(
+                          widget.note,
+                          item.lineIndex,
+                          !item.done,
+                        ),
+                        activeColor: c.accent,
+                        materialTapTargetSize:
+                            MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
                       ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          item.$3.isEmpty ? 'Untitled task' : item.$3,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: item.$2 ? c.muted : c.fg,
-                            decoration: item.$2
-                                ? TextDecoration.lineThrough
-                                : null,
+                      ),
+                    ),
+                  const SizedBox(width: 2),
+                  Expanded(
+                    child: InkWell(
+                      onTap: () => widget.onChecklistToggle!(
+                        widget.note,
+                        item.lineIndex,
+                        !item.done,
+                      ),
+                      borderRadius: BorderRadius.circular(AppRadius.chip),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: SizedBox(
+                          height: 32,
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              stripInlineMarkdown(item.text).isEmpty
+                                  ? 'Untitled task'
+                                  : stripInlineMarkdown(item.text),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: AppType.t12,
+                                color: item.done ? c.muted : c.fg,
+                                decoration: item.done
+                                    ? TextDecoration.lineThrough
+                                    : null,
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ],
+                    ),
                   ),
-                ),
+                ],
               ),
             ),
         ],
@@ -1228,25 +1271,7 @@ class _NoteCardState extends State<_NoteCard> {
     );
   }
 
-  static String _contentPreview(String content) {
-    // ponytail: strip markdown syntax, take first ~120 chars
-    var text = content
-        .replaceAll(RegExp(r'^#{1,6}\s+', multiLine: true), '')
-        .replaceAll(RegExp(r'\*\*|__'), '')
-        .replaceAll(RegExp(r'\*|_'), '')
-        .replaceAll(RegExp(r'`[^`]+`'), '')
-        .replaceAll(RegExp(r'!\[[^\]]*\]\([^)]+\)'), '')
-        .replaceAll(RegExp(r'\[[^\]]*\]\([^)]+\)'), '')
-        .replaceAll(RegExp(r'^\s*[-+]\s+', multiLine: true), '')
-        .replaceAll(RegExp(r'^\s*>\s+', multiLine: true), '')
-        .replaceAll(RegExp(r'^\s*\|.*$', multiLine: true), '')
-        .replaceAll(RegExp(r'^\s*---+\s*$', multiLine: true), '')
-        .replaceAll(RegExp(r'[[\]]'), '')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    if (text.length > 120) text = '${text.substring(0, 120)}...';
-    return text;
-  }
+  static String _contentPreview(String content) => contentPreview(content);
 
   static String _relativeTime(DateTime d) {
     final now = DateTime.now();
@@ -1258,12 +1283,43 @@ class _NoteCardState extends State<_NoteCard> {
     return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   }
 
-  static List<InlineSpan> _buildCardAmountSpans(Note note) {
-    final total = note.amounts.fold<double>(0, (sum, e) => sum + e.amount);
+  static List<InlineSpan> _buildCardAmountSpans(
+    Note note,
+    List<MoneyEntry>? filteredAmounts,
+  ) {
+    final amounts = filteredAmounts ?? note.amounts;
+    final income = amounts
+        .where((e) => (e.type ?? note.type) == 'income')
+        .fold<int>(0, (sum, e) => sum + e.amount);
+    final expense = amounts
+        .where((e) => (e.type ?? note.type) == 'expense')
+        .fold<int>(0, (sum, e) => sum + e.amount);
+    final hasIncome = amounts.any((e) => (e.type ?? note.type) == 'income');
+    final hasExpense = amounts.any((e) => (e.type ?? note.type) == 'expense');
+    final label = hasIncome && hasExpense
+        ? 'Net '
+        : hasIncome
+            ? 'Income '
+            : 'Expenses ';
+    final total = hasIncome && hasExpense
+        ? income - expense
+        : hasIncome
+            ? income
+            : expense;
+    final currencies = amounts
+        .map((e) => e.currency ?? note.currency ?? 'PHP')
+        .toSet();
+    if (currencies.length > 1) {
+      return const [TextSpan(text: 'Mixed currencies')];
+    }
+    final currency = currencies.isEmpty
+        ? (note.currency ?? 'PHP')
+        : currencies.first;
     return [
-      currencySpan(note.currency, null),
+      TextSpan(text: label),
+      currencySpan(currency, null),
       TextSpan(
-        text: formatNumber(total, decimals: note.currency == 'JPY' ? 0 : 2),
+        text: formatMinor(total, currency),
       ),
     ];
   }

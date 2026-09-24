@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Typed — Home Screen Redesign</title>
+<style>
+  :root{
+    --bg:#15171A; --surface:#1C1F22; --surface2:#232629;
+    --fg:#E8EAEC; --muted:#8A929A; --border:#2A2D30;
+    --accent:#E0634F; --accent-dim:rgba(224,99,79,.14);
+    --income:#3CA06B;
+    --emph:cubic-bezier(.2,0,0,1);
+    --mono:ui-monospace,'Cascadia Mono',Consolas,monospace;
+    --sans:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--fg);font-family:var(--sans);padding:0 0 100px}
+  .wrap{max-width:1060px;margin:0 auto;padding:0 32px}
+  header{padding:56px 0 10px;border-bottom:1px solid var(--border)}
+  .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--accent);text-transform:uppercase}
+  h1{font-size:32px;font-weight:700;letter-spacing:-.02em;margin:10px 0 6px}
+  .sub{color:var(--muted);font-size:15px;max-width:680px;padding-bottom:28px}
+  h2{font-size:19px;font-weight:650;margin:48px 0 4px;display:flex;align-items:center;gap:10px}
+  h2 .n{font-family:var(--mono);font-size:11px;color:var(--accent);background:var(--accent-dim);border-radius:6px;padding:3px 8px;letter-spacing:.08em}
+  .lede{color:var(--muted);font-size:14px;margin:6px 0 20px;max-width:720px}
+
+  .audit{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .f{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;font-size:13.5px}
+  .f b{font-weight:600}
+  .f p{color:var(--muted);font-size:12.5px;margin-top:4px}
+
+  .variants{display:flex;gap:26px;flex-wrap:wrap;justify-content:center;align-items:flex-start}
+  .variant{width:280px}
+  .vname{font-size:15px;font-weight:650;margin:0 0 2px}
+  .vtag{font-family:var(--mono);font-size:10px;letter-spacing:.1em;margin-bottom:10px}
+  .vtag.rec{color:var(--accent)}
+  .vtag.exp{color:var(--muted)}
+  .vdesc{color:var(--muted);font-size:12.5px;margin-top:12px;min-height:80px}
+
+  .phone{width:280px;background:#101215;border:1px solid #33373c;border-radius:30px;padding:10px;box-shadow:0 20px 50px rgba(0,0,0,.45)}
+  .screen{background:var(--bg);border-radius:22px;overflow:hidden;position:relative;min-height:540px;display:flex;flex-direction:column}
+  .statusbar{height:24px;display:flex;justify-content:space-between;align-items:center;padding:0 16px;font-family:var(--mono);font-size:9px;color:var(--muted);flex:none}
+  .appbar{height:40px;display:flex;align-items:center;padding:0 14px;gap:8px;flex:none;color:var(--fg)}
+  .appbar .hamb{color:var(--muted);font-size:14px}
+  .appbar .srch{margin-left:auto;font-family:var(--mono);font-size:9px;color:var(--muted);border:1px solid var(--border);border-radius:7px;padding:3px 8px}
+  .scroll{flex:1;padding:6px 16px 20px;overflow:hidden}
+
+  /* shared pieces */
+  .greet{font-size:19px;font-weight:700;letter-spacing:-.02em}
+  .gdate{font-size:11px;color:var(--muted)}
+  .newbtn{background:var(--accent);color:#15171A;font-size:11.5px;font-weight:600;border-radius:16px;padding:6px 12px;display:inline-block}
+  .sec{font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:var(--muted);text-transform:uppercase;margin:16px 0 6px}
+  .nrow{display:flex;gap:10px;align-items:center;padding:9px 2px;border-bottom:1px solid rgba(255,255,255,.05);font-size:12.5px}
+  .nrow .ic{width:26px;height:26px;border-radius:8px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:12px;flex:none}
+  .nrow .nm{font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .nrow .sm{font-size:10.5px;color:var(--muted);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .nrow .tm{margin-left:auto;font-family:var(--mono);font-size:9.5px;color:var(--muted);flex:none}
+  .pillchip{display:inline-flex;align-items:center;gap:5px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:4px 10px;font-size:10.5px;margin:0 4px 4px 0}
+  .statcard{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:11px 12px}
+  .statcard .l{font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;color:var(--muted);text-transform:uppercase}
+  .statcard .v{font-size:15px;font-weight:650;margin-top:2px}
+  .accent{color:var(--accent)} .green{color:var(--income)}
+  .qa{display:inline-flex;align-items:center;gap:4px;background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:5px 9px;font-size:10.5px;margin:0 4px 4px 0}
+  .navdock{flex:none;margin-top:auto;background:var(--surface);border-top:1px solid var(--border);padding:8px 6px 12px;display:flex}
+  .nd{flex:1;display:flex;justify-content:center;color:var(--muted);font-size:16px}
+  .nd.on{color:var(--accent)}
+  .nd.cap{color:#15171A}
+  .nd .c{width:34px;height:34px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:17px}
+  .meta{font-size:11px;color:var(--muted);display:flex;gap:10px;margin-top:3px}
+  .meta b{color:var(--fg);font-weight:600}
+  .divider{height:1px;background:var(--border);margin:14px 0}
+  .bigdate{font-family:var(--mono);font-size:26px;font-weight:700;letter-spacing:-.02em}
+  .bigdate .dot{color:var(--accent)}
+  .tline{padding:8px 2px;display:flex;gap:10px;font-size:12.5px;align-items:baseline;border-bottom:1px solid rgba(255,255,255,.05)}
+  .tline .amt{margin-left:auto;font-family:var(--mono);font-size:11px}
+  .now{color:var(--muted);font-size:12px;padding:8px 2px}
+
+  footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--border);color:var(--muted);font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="kicker">Typed · Mobile · Read-only proposal</div>
+    <h1>Home Screen — Redesign</h1>
+    <p class="sub">The current home stacks seven same-weight sections. These directions cut it to two or three visual layers, merge the overlapping lists, and let the icon dock carry creation.</p>
+  </header>
+
+  <h2><span class="n">00</span>What makes it feel cluttered today</h2>
+  <div class="audit">
+    <div class="f"><b>Seven stacked sections, one hierarchy</b><p>Greeting, Pinned, Continue, Today, This Month, Quick Actions, Recent — all with similar visual weight, so nothing leads.</p></div>
+    <div class="f"><b>Two lists that overlap</b><p>“Continue” and “Recent” show nearly the same pages; Pinned can also repeat them.</p></div>
+    <div class="f"><b>Mixed card languages</b><p>Outline stat cards, pill rows, chips, and action pills — four component styles on one screen.</p></div>
+    <div class="f"><b>Redundant creation paths</b><p>New note button + Note quick-action + dock create all do the same thing.</p></div>
+  </div>
+
+  <h2><span class="n">01</span>Current — for contrast</h2>
+  <div class="variants">
+    <div class="variant">
+      <div class="phone"><div class="screen">
+        <div class="statusbar"><span>9:41</span><span>t.</span></div>
+        <div class="appbar"><span class="hamb">☰</span><span class="srch">SEARCH ⌘K</span></div>
+        <div class="scroll">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div><div class="greet">Good afternoon</div><div class="gdate">September 19, 2026</div></div>
+            <div class="newbtn">+ New note</div>
+          </div>
+          <div class="sec">Pinned</div>
+          <div><span class="pillchip">📌 Welcome to Typed</span></div>
+          <div class="sec">Continue</div>
+          <div class="nrow"><div class="ic">▣</div><div style="flex:1"><div class="nm">Quick expenses — Sep 19</div><div class="sm">₱15,180.00 · 2 entries</div></div><span class="tm">12h</span></div>
+          <div class="sec">Today</div>
+          <div class="statcard" style="font-size:11.5px;color:var(--muted)">✏️ <b style="color:var(--fg)">8</b> notes · ○ <b style="color:var(--fg)">5</b> open tasks · ⇄ <b style="color:var(--fg)">1</b> transaction</div>
+          <div class="sec">This Month</div>
+          <div style="display:flex;gap:8px"><div class="statcard" style="flex:1"><div class="l">Spent</div><div class="v accent">₱180.00</div></div><div class="statcard" style="flex:1"><div class="l">Income</div><div class="v green">₱15,000.00</div></div></div>
+          <div class="sec">Quick Actions</div>
+          <div><span class="qa">＋ Note</span><span class="qa">↓ Expense</span><span class="qa">↑ Income</span></div>
+          <div class="sec">Recent</div>
+          <div class="nrow"><div class="ic">📓</div><div style="flex:1"><div class="nm">Welcome to Typed</div></div><span class="tm">2m</span></div>
+        </div>
+        <div class="navdock"><div class="nd on">⌂</div><div class="nd">▤</div><div class="nd"><span class="c">＋</span></div><div class="nd">▣</div><div class="nd">✓</div></div>
+      </div></div>
+      <div class="vdesc" style="margin-top:12px">Seven sections, four component styles, ~2.5 screens of scroll before the list ends.</div>
+    </div>
+
+    <div class="variant">
+      <div class="vname" style="margin-top:0">01 — Quiet index</div>
+      <div class="vtag rec">RECOMMENDED</div>
+      <div class="phone"><div class="screen">
+        <div class="statusbar"><span>9:41</span><span>t.</span></div>
+        <div class="appbar"><span class="hamb">☰</span><span class="srch">⌘K</span></div>
+        <div class="scroll">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div><div class="greet">Good afternoon</div>
+            <div class="meta"><span>Sep 19</span><span>·</span><span><b>₱180</b> out</span><span>·</span><span><b>5</b> open tasks</span></div></div>
+            <div class="newbtn">＋</div>
+          </div>
+          <div class="sec">Pinned</div>
+          <div><span class="pillchip">📌 Welcome to Typed</span></div>
+          <div class="sec">Jump back in</div>
+          <div class="nrow"><div class="ic">▣</div><div style="flex:1"><div class="nm">Quick expenses — Sep 19</div><div class="sm">₱15,180.00 · 2 entries</div></div><span class="tm">12h</span></div>
+          <div class="nrow"><div class="ic">✓</div><div style="flex:1"><div class="nm">Todo — 2026-09-19</div><div class="sm">0 of 1 done</div></div><span class="tm">12h</span></div>
+          <div class="nrow"><div class="ic">📓</div><div style="flex:1"><div class="nm">Welcome to Typed</div></div><span class="tm">2m</span></div>
+          <div class="nrow" style="color:var(--muted)"><div class="ic">＋</div>New page</div>
+        </div>
+        <div class="navdock"><div class="nd on">⌂</div><div class="nd">▤</div><div class="nd"><span class="c">＋</span></div><div class="nd">▣</div><div class="nd">✓</div></div>
+      </div></div>
+      <div class="vdesc"><b>Three layers:</b> greeting + one meta line (today/month folded into text), pinned chips only when they exist, and a single merged “Jump back in” list (Continue + Recent deduped) ending in a New-page row. No cards at all. Quick actions live in the dock’s create flow.</div>
+    </div>
+
+    <div class="variant">
+      <div class="vname" style="margin-top:0">02 — At-a-glance hero</div>
+      <div class="vtag exp">STRUCTURED</div>
+      <div class="phone"><div class="screen">
+        <div class="statusbar"><span>9:41</span><span>t.</span></div>
+        <div class="appbar"><span class="hamb">☰</span><span class="srch">⌘K</span></div>
+        <div class="scroll">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div class="greet">Good afternoon</div>
+            <div class="newbtn">＋</div>
+          </div>
+          <div class="gdate" style="margin-bottom:10px">September 19, 2026</div>
+          <div class="statcard" style="border-radius:14px;padding:14px">
+            <div style="display:flex;gap:14px">
+              <div style="flex:1"><div class="l">Today</div><div class="v" style="font-size:13px">8 notes · 5 tasks</div></div>
+              <div style="flex:1"><div class="l">This month</div><div class="v" style="font-size:13px"><span class="accent">₱180</span> · <span class="green">₱15k</span></div></div>
+            </div>
+            <div style="height:1px;background:var(--border);margin:10px 0"></div>
+            <div><span class="qa">＋ Note</span><span class="qa">↓ Expense</span><span class="qa">✓ Task</span><span class="qa">＋ More</span></div>
+          </div>
+          <div class="sec">Jump back in</div>
+          <div class="nrow"><div class="ic">▣</div><div style="flex:1"><div class="nm">Quick expenses — Sep 19</div><div class="sm">₱15,180.00 · 2 entries</div></div><span class="tm">12h</span></div>
+          <div class="nrow"><div class="ic">✓</div><div style="flex:1"><div class="nm">Todo — 2026-09-19</div><div class="sm">0 of 1 done</div></div><span class="tm">12h</span></div>
+          <div class="nrow"><div class="ic">📓</div><div style="flex:1"><div class="nm">Welcome to Typed</div></div><span class="tm">2m</span></div>
+        </div>
+        <div class="navdock"><div class="nd on">⌂</div><div class="nd">▤</div><div class="nd"><span class="c">＋</span></div><div class="nd">▣</div><div class="nd">✓</div></div>
+      </div></div>
+      <div class="vdesc"><b>Two layers:</b> one hero card owns every number (today + month) and the quick actions; below it, the single merged list. Keeps a dashboard feel without scattering cards.</div>
+    </div>
+
+    <div class="variant">
+      <div class="vname" style="margin-top:0">03 — Editorial timeline</div>
+      <div class="vtag exp">MOST RADICAL</div>
+      <div class="phone"><div class="screen">
+        <div class="statusbar"><span>9:41</span><span>t.</span></div>
+        <div class="appbar"><span class="hamb">☰</span><span class="srch">⌘K</span></div>
+        <div class="scroll">
+          <div style="display:flex;justify-content:space-between;align-items:flex-end">
+            <div class="bigdate">SEP 19<span class="dot">.</span></div>
+            <div class="newbtn">＋</div>
+          </div>
+          <div class="greet" style="font-size:15px;font-weight:550;margin:2px 0 4px">Good afternoon.</div>
+          <div class="sec">Today</div>
+          <div class="tline"><span>📓</span><span>Welcome to Typed</span><span class="tm" style="margin-left:auto">2m</span></div>
+          <div class="tline"><span>↓</span><span>Morning coffee</span><span class="amt accent">₱180.00</span></div>
+          <div class="tline"><span>↑</span><span>Freelance payment</span><span class="amt green">₱15,000.00</span></div>
+          <div class="sec">This month</div>
+          <div class="now"><span class="green">₱15,000.00 in</span> · <span class="accent">₱180.00 out</span> · 5 tasks open</div>
+          <div class="sec">Earlier</div>
+          <div class="tline"><span>📓</span><span>Tracking Finance</span><span class="tm" style="margin-left:auto">2d</span></div>
+          <div class="tline"><span>📓</span><span>Navigating Typed</span><span class="tm" style="margin-left:auto">2d</span></div>
+        </div>
+        <div class="navdock"><div class="nd on">⌂</div><div class="nd">▤</div><div class="nd"><span class="c">＋</span></div><div class="nd">▣</div><div class="nd">✓</div></div>
+      </div></div>
+      <div class="vdesc"><b>Typography-led:</b> a big mono date replaces the greeting, notes and money merge into one timeline with amount columns, months collapse to a single text line. Zero cards — the quietest option, biggest departure.</div>
+    </div>
+  </div>
+
+  <h2><span class="n">＋</span>Shared across all directions</h2>
+  <p class="lede">The icon-only dock carries creation (already shipped). Continue + Recent merge into one deduped list. Pinned chips render only when pins exist. Section entrances keep the accepted stagger — once per start, 320ms decelerate. Reduce-motion collapses everything.</p>
+
+  <footer>Read-only proposal — the home screen is unchanged until you pick a direction.</footer>
+</div>
+</body>
+</html>

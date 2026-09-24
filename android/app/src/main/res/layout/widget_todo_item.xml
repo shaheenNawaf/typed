@@ -16,7 +16,7 @@
         android:layout_width="20dp"
         android:layout_height="20dp"
         android:src="@drawable/ic_check_empty"
-        android:contentDescription="Done" />
+        android:contentDescription="@string/widget_incomplete" />
 
     <TextView
         android:id="@+id/todo_item_text"
@@ -28,6 +28,6 @@
         android:fontFamily="sans-serif"
         android:maxLines="1"
         android:text=""
-        android:textColor="#1A242E"
+         android:textColor="@color/widget_fg"
         android:textSize="13sp" />
 </LinearLayout>

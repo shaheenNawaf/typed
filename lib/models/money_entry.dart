@@ -1,6 +1,10 @@
+import '../utils/finance_utils.dart';
+
 class MoneyEntry {
   String id;
-  double amount;
+
+  /// Amount in integer minor units of [currency] (see finance_utils).
+  int amount;
   String category;
   DateTime date;
   String? note;
@@ -11,6 +15,10 @@ class MoneyEntry {
   String? recurInterval;
   DateTime? recurEnd;
   DateTime? lastGenerated;
+
+  /// First-run sample data: excluded from dashboards, totals, alerts, and
+  /// the finance widget so the demo cannot pollute real numbers.
+  bool isDemo;
 
   MoneyEntry({
     required this.id,
@@ -25,6 +33,7 @@ class MoneyEntry {
     this.recurInterval,
     this.recurEnd,
     this.lastGenerated,
+    this.isDemo = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -40,11 +49,17 @@ class MoneyEntry {
         'recurInterval': recurInterval,
         'recurEnd': recurEnd?.toIso8601String(),
         'lastGenerated': lastGenerated?.toIso8601String(),
+        if (isDemo) 'isDemo': true,
       };
 
   factory MoneyEntry.fromJson(Map<String, dynamic> json) => MoneyEntry(
         id: json['id'] as String,
-        amount: (json['amount'] as num).toDouble(),
+        // Legacy documents stored major units as JSON doubles; ints are
+        // already minor units. decodeMinorAmount migrates on load.
+        amount: decodeMinorAmount(
+          json['amount'],
+          json['currency'] as String?,
+        ),
         category: json['category'] as String,
         date: DateTime.parse(json['date'] as String),
         note: json['note'] as String?,
@@ -59,5 +74,6 @@ class MoneyEntry {
         lastGenerated: json['lastGenerated'] != null
             ? DateTime.parse(json['lastGenerated'] as String)
             : null,
+        isDemo: (json['isDemo'] as bool?) ?? false,
       );
 }

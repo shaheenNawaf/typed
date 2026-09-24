@@ -1,18 +1,17 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_metrics.dart';
 
 class LongPressAction {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
-  final Color? color;
   final bool destructive;
 
   const LongPressAction({
     required this.icon,
     required this.label,
     required this.onTap,
-    this.color,
     this.destructive = false,
   });
 }
@@ -33,6 +32,7 @@ class LongPressMenu {
           borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
         ),
         builder: (ctx) => SafeArea(
+          child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -58,14 +58,14 @@ class LongPressMenu {
                           size: 20,
                           color: a.destructive
                               ? c.destructive
-                              : (a.color ?? context.colors.fg)),
+                              : c.fg),
                       const SizedBox(width: 14),
                       Text(a.label,
                           style: TextStyle(
-                            fontSize: 14,
+                            fontSize: AppType.t13_5,
                             color: a.destructive
                                 ? c.destructive
-                                : (a.color ?? context.colors.fg),
+                                : c.fg,
                           )),
                     ],
                   ),
@@ -74,13 +74,17 @@ class LongPressMenu {
               const SizedBox(height: 8),
             ],
           ),
+          ),
         ),
       );
     } else {
       final pos = tapPosition ?? const Offset(100, 100);
       final screenSize = MediaQuery.of(context).size;
-      final clampedX = pos.dx.clamp(0.0, screenSize.width - 200);
-      final clampedY = pos.dy.clamp(0.0, screenSize.height - 300);
+      // clamp() throws when max < min, so floor the bounds for tiny windows.
+      final maxX = screenSize.width < 200 ? 0.0 : screenSize.width - 200;
+      final maxY = screenSize.height < 300 ? 0.0 : screenSize.height - 300;
+      final clampedX = pos.dx.clamp(0.0, maxX);
+      final clampedY = pos.dy.clamp(0.0, maxY);
       await showMenu(
         context: context,
         position: RelativeRect.fromLTRB(clampedX, clampedY, clampedX + 1, clampedY + 1),
@@ -95,14 +99,14 @@ class LongPressMenu {
                           size: 18,
                           color: a.destructive
                               ? c.destructive
-                              : (a.color ?? context.colors.fg)),
+                              : c.fg),
                       const SizedBox(width: 10),
                       Text(a.label,
                           style: TextStyle(
-                            fontSize: 14,
+                            fontSize: AppType.t13_5,
                             color: a.destructive
                                 ? c.destructive
-                              : (a.color ?? context.colors.fg),
+                              : c.fg,
                           )),
                     ],
                   ),

@@ -353,8 +353,11 @@ const AppColors _monochromeLight = AppColors(
   sidebarMuted: _sidebarMuted,
   sidebarActive: _sidebarActive,
   sidebarHover: _sidebarHover,
-  income: Color(0xFF404040),
-  destructive: Color(0xFF8A8A8A),
+  // income == accent and destructive == muted made finance semantics
+  // invisible; warm-neutral destructive keeps the monochrome mood while
+  // staying distinguishable.
+  income: Color(0xFF1A1A1A),
+  destructive: Color(0xFF8C554C),
   monoFontFamily: _mono,
 );
 
@@ -374,8 +377,8 @@ const AppColors _monochromeDark = AppColors(
   sidebarMuted: _sidebarMuted,
   sidebarActive: _sidebarActive,
   sidebarHover: _sidebarHover,
-  income: Color(0xFFB0B0B0),
-  destructive: Color(0xFF808080),
+  income: Color(0xFFE0E0E0),
+  destructive: Color(0xFFC98F82),
   monoFontFamily: _mono,
 );
 

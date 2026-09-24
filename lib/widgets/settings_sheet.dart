@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_metrics.dart';
 import '../theme/fonts.dart';
 import '../theme/palettes.dart';
 import '../theme/theme_controller.dart';
+import '../utils/notifications.dart';
 
 class SettingsSheet extends StatelessWidget {
   final Future<void> Function() onExport;
   final Future<void> Function() onImport;
   final Future<void> Function()? onExportFinance;
   final VoidCallback? onShowOnboarding;
+  final VoidCallback? onReplayIntro;
+  final Future<void> Function()? onNotificationsChanged;
+  final VoidCallback? onRemoveSamples;
 
   const SettingsSheet({
     super.key,
@@ -16,6 +21,9 @@ class SettingsSheet extends StatelessWidget {
     required this.onImport,
     this.onExportFinance,
     this.onShowOnboarding,
+    this.onReplayIntro,
+    this.onNotificationsChanged,
+    this.onRemoveSamples,
   });
 
   static Future<void> show(
@@ -24,6 +32,9 @@ class SettingsSheet extends StatelessWidget {
     required Future<void> Function() onImport,
     Future<void> Function()? onExportFinance,
     VoidCallback? onShowOnboarding,
+    VoidCallback? onReplayIntro,
+    Future<void> Function()? onNotificationsChanged,
+    VoidCallback? onRemoveSamples,
   }) {
     return showModalBottomSheet(
       context: context,
@@ -31,6 +42,7 @@ class SettingsSheet extends StatelessWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
+      constraints: const BoxConstraints(maxWidth: 560),
       builder: (_) => ListenableBuilder(
         listenable: ThemeController.instance!,
         builder: (ctx, _) => SettingsSheet(
@@ -38,6 +50,9 @@ class SettingsSheet extends StatelessWidget {
           onImport: onImport,
           onExportFinance: onExportFinance,
           onShowOnboarding: onShowOnboarding,
+          onReplayIntro: onReplayIntro,
+          onNotificationsChanged: onNotificationsChanged,
+          onRemoveSamples: onRemoveSamples,
         ),
       ),
     );
@@ -60,7 +75,7 @@ class SettingsSheet extends StatelessWidget {
                   Text(
                     'Settings',
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: AppType.t13_5,
                       fontWeight: FontWeight.w600,
                       color: context.colors.fg,
                       letterSpacing: 0.01,
@@ -82,7 +97,7 @@ class SettingsSheet extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
               child: Text(
                 'Text only — images are not included.',
-                style: TextStyle(fontSize: 11, color: context.colors.muted),
+                style: TextStyle(fontSize: AppType.t11, color: context.colors.muted),
               ),
             ),
             _Option(
@@ -101,7 +116,7 @@ class SettingsSheet extends StatelessWidget {
                 child: Text(
                   'Finance',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: AppType.t12,
                     fontWeight: FontWeight.w500,
                     color: context.colors.fg,
                     letterSpacing: 0.04,
@@ -116,6 +131,15 @@ class SettingsSheet extends StatelessWidget {
                   await onExportFinance?.call();
                 },
               ),
+              if (onRemoveSamples != null)
+                _Option(
+                  icon: Icons.cleaning_services_outlined,
+                  label: 'Remove sample finance data',
+                  onTap: () {
+                    Navigator.pop(context);
+                    onRemoveSamples?.call();
+                  },
+                ),
             ],
             const SizedBox(height: 4),
             const Divider(height: 16, indent: 20, endIndent: 20),
@@ -124,7 +148,7 @@ class SettingsSheet extends StatelessWidget {
               child: Text(
                 'Theme',
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: AppType.t12,
                   fontWeight: FontWeight.w500,
                   color: context.colors.fg,
                   letterSpacing: 0.04,
@@ -146,7 +170,7 @@ class SettingsSheet extends StatelessWidget {
                 child: Text(
                   'Brightness',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: AppType.t12,
                     fontWeight: FontWeight.w500,
                     color: context.colors.fg,
                     letterSpacing: 0.04,
@@ -154,21 +178,18 @@ class SettingsSheet extends StatelessWidget {
                 ),
               ),
               _BrightnessRow(
-                mode: ThemeMode.system,
                 icon: Icons.brightness_auto_outlined,
                 label: 'System',
                 selected: controller.mode == ThemeMode.system,
                 onTap: () => controller.setMode(ThemeMode.system),
               ),
               _BrightnessRow(
-                mode: ThemeMode.light,
                 icon: Icons.light_mode_outlined,
                 label: 'Light',
                 selected: controller.mode == ThemeMode.light,
                 onTap: () => controller.setMode(ThemeMode.light),
               ),
               _BrightnessRow(
-                mode: ThemeMode.dark,
                 icon: Icons.dark_mode_outlined,
                 label: 'Dark',
                 selected: controller.mode == ThemeMode.dark,
@@ -181,7 +202,7 @@ class SettingsSheet extends StatelessWidget {
                 child: Text(
                   'Font',
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: AppType.t12,
                     fontWeight: FontWeight.w500,
                     color: context.colors.fg,
                     letterSpacing: 0.04,
@@ -196,6 +217,11 @@ class SettingsSheet extends StatelessWidget {
                 ),
               ),
             ],
+            if (onNotificationsChanged != null) ...[
+              const SizedBox(height: 4),
+              const Divider(height: 16, indent: 20, endIndent: 20),
+              _ReminderSection(onChanged: onNotificationsChanged!),
+            ],
             if (onShowOnboarding != null) ...[
               const SizedBox(height: 4),
               const Divider(height: 16, indent: 20, endIndent: 20),
@@ -208,6 +234,15 @@ class SettingsSheet extends StatelessWidget {
                 },
               ),
             ],
+            if (onReplayIntro != null)
+              _Option(
+                icon: Icons.slideshow_outlined,
+                label: 'Replay introduction',
+                onTap: () {
+                  Navigator.pop(context);
+                  onReplayIntro?.call();
+                },
+              ),
             const SizedBox(height: 8),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -218,13 +253,13 @@ class SettingsSheet extends StatelessWidget {
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(AppRadius.card),
                     ),
                   ),
                   child: Text(
                     'Done',
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: AppType.t13_5,
                       color: context.colors.accent,
                     ),
                   ),
@@ -233,6 +268,178 @@ class SettingsSheet extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _ReminderSection extends StatefulWidget {
+  final Future<void> Function() onChanged;
+
+  const _ReminderSection({required this.onChanged});
+
+  @override
+  State<_ReminderSection> createState() => _ReminderSectionState();
+}
+
+class _ReminderSectionState extends State<_ReminderSection> {
+  ReminderSettings _settings = const ReminderSettings();
+
+  @override
+  void initState() {
+    super.initState();
+    NotificationService.instance.loadSettings().then((settings) {
+      if (mounted) setState(() => _settings = settings);
+    });
+  }
+
+  Future<void> _save(ReminderSettings settings) async {
+    ReminderSettings effective = settings;
+    if (settings.eveningEnabled ||
+        settings.streakEnabled ||
+        settings.budgetEnabled) {
+      final granted = await NotificationService.instance.requestPermission();
+      if (!granted) {
+        // Turning a toggle on and having the OS deny permission used to flip
+        // the switch on anyway while nothing ever fired.
+        effective = settings.copyWith(
+          eveningEnabled: false,
+          streakEnabled: false,
+          budgetEnabled: false,
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Notifications are blocked. Allow them for Typed in '
+                'system settings, then try again.',
+              ),
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+      }
+    }
+    setState(() => _settings = effective);
+    await NotificationService.instance.saveSettings(effective);
+    await widget.onChanged();
+  }
+
+  Future<void> _pickTime({required bool evening}) async {
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(
+        hour: evening ? _settings.eveningHour : _settings.streakHour,
+        minute: evening ? _settings.eveningMinute : _settings.streakMinute,
+      ),
+    );
+    if (time == null) return;
+    await _save(
+      evening
+          ? _settings.copyWith(
+              eveningHour: time.hour,
+              eveningMinute: time.minute,
+            )
+          : _settings.copyWith(
+              streakHour: time.hour,
+              streakMinute: time.minute,
+            ),
+    );
+  }
+
+  String _formatTime(int hour, int minute) =>
+      TimeOfDay(hour: hour, minute: minute).format(context);
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+          child: Text(
+            'Reminders',
+            style: TextStyle(
+              fontSize: AppType.t12,
+              fontWeight: FontWeight.w500,
+              color: context.colors.fg,
+              letterSpacing: 0.04,
+            ),
+          ),
+        ),
+        _ReminderRow(
+          label: 'Evening recap',
+          detail: _formatTime(_settings.eveningHour, _settings.eveningMinute),
+          value: _settings.eveningEnabled,
+          onChanged: (value) =>
+              _save(_settings.copyWith(eveningEnabled: value)),
+          onTime: () => _pickTime(evening: true),
+        ),
+        _ReminderRow(
+          label: 'Streak reminder',
+          detail: _formatTime(_settings.streakHour, _settings.streakMinute),
+          value: _settings.streakEnabled,
+          onChanged: (value) => _save(_settings.copyWith(streakEnabled: value)),
+          onTime: () => _pickTime(evening: false),
+        ),
+        _ReminderRow(
+          label: 'Budget alerts',
+          detail: 'Monthly budgets at 80% & over',
+          value: _settings.budgetEnabled,
+          onChanged: (value) => _save(_settings.copyWith(budgetEnabled: value)),
+        ),
+      ],
+    );
+  }
+}
+
+class _ReminderRow extends StatelessWidget {
+  final String label;
+  final String detail;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  final VoidCallback? onTime;
+
+  const _ReminderRow({
+    required this.label,
+    required this.detail,
+    required this.value,
+    required this.onChanged,
+    this.onTime,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 20, right: 12, bottom: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: InkWell(
+              onTap: onTime,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: AppSpacing.s8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(fontSize: AppType.t13_5, color: context.colors.fg),
+                    ),
+                    Text(
+                      detail,
+                      style: TextStyle(
+                        fontSize: AppType.t11,
+                        color: context.colors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Switch(value: value, onChanged: onChanged),
+        ],
       ),
     );
   }
@@ -275,7 +482,7 @@ class _ThemeRow extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: AppType.t13_5,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
                   color: c.fg,
                 ),
@@ -334,7 +541,7 @@ class _FontRow extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: AppType.t13_5,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
                   color: c.fg,
                   fontFamily: option.uiFontFamily == 'System'
@@ -366,7 +573,7 @@ class _Swatch extends StatelessWidget {
       height: 18,
       decoration: BoxDecoration(
         color: color,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(AppRadius.chip),
         border: Border.all(color: context.colors.border),
       ),
     );
@@ -393,7 +600,7 @@ class _Option extends StatelessWidget {
             Expanded(
               child: Text(
                 label,
-                style: TextStyle(fontSize: 14, color: context.colors.fg),
+                style: TextStyle(fontSize: AppType.t13_5, color: context.colors.fg),
               ),
             ),
             Icon(Icons.chevron_right, size: 18, color: context.colors.muted),
@@ -405,14 +612,12 @@ class _Option extends StatelessWidget {
 }
 
 class _BrightnessRow extends StatelessWidget {
-  final ThemeMode mode;
   final IconData icon;
   final String label;
   final bool selected;
   final VoidCallback onTap;
 
   const _BrightnessRow({
-    required this.mode,
     required this.icon,
     required this.label,
     required this.selected,
@@ -434,7 +639,7 @@ class _BrightnessRow extends StatelessWidget {
               child: Text(
                 label,
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: AppType.t13_5,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
                   color: c.fg,
                 ),
