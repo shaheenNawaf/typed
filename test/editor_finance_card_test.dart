@@ -7,6 +7,7 @@ import 'package:typed/models/note.dart';
 import 'package:typed/screens/home_screen.dart';
 import 'package:typed/theme/palettes.dart';
 import 'package:typed/utils/note_storage.dart';
+import 'package:typed/widgets/editor_toolbar.dart';
 import 'package:typed/widgets/markdown_controller.dart';
 
 void main() {
@@ -263,6 +264,43 @@ void main() {
     await openNote(tester, 'Card');
 
     expect(find.textContaining('₱1,234,567.89', findRichText: true), findsWidgets);
+    expectNoFlexOverflow(drainExceptions(tester));
+  });
+
+  testWidgets('finance note shows no markdown editor or toolbar', (tester) async {
+    await seed(
+      [finNote([mkEntry(1, amount: 10000)])],
+      tab: 'notes',
+    );
+    await pumpHome(tester, surface: const Size(390, 844));
+    await openNote(tester, 'Card');
+
+    expect(find.text('EXPENSES'), findsOneWidget);
+    expect(find.byType(EditorToolbar), findsNothing);
+    expect(find.textContaining('Start writing'), findsNothing);
+    expect(find.text('Preview'), findsNothing);
+    expectNoFlexOverflow(drainExceptions(tester));
+  });
+
+  testWidgets('text note still shows body toolbar and Preview chip', (tester) async {
+    final now = DateTime.now();
+    await seed(
+      [
+        Note(
+          id: 'txt2',
+          title: 'Text No Editor',
+          content: '',
+          tags: [],
+          updatedAt: now,
+        ),
+      ],
+      tab: 'notes',
+    );
+    await pumpHome(tester, surface: const Size(390, 844));
+    await openNote(tester, 'Text No Editor');
+
+    expect(find.byType(EditorToolbar), findsOneWidget);
+    expect(find.text('Preview'), findsOneWidget);
     expectNoFlexOverflow(drainExceptions(tester));
   });
 }

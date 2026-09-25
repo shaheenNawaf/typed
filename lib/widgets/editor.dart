@@ -559,6 +559,7 @@ class _EditorState extends State<Editor> {
   }
 
   void _insertMD(String pattern) {
+    if (_isFinanceNote) return;
     final parts = pattern.split('|');
     final before = parts[0];
     final after = parts.length > 1 ? parts[1] : '';
@@ -580,6 +581,7 @@ class _EditorState extends State<Editor> {
   }
 
   void _insertLine(String prefix) {
+    if (_isFinanceNote) return;
     final selStart = _bodySelection.start;
     final lastNewline = _contentCtrl.text.lastIndexOf('\n', selStart - 1);
     final lineStart = lastNewline + 1;
@@ -607,6 +609,7 @@ class _EditorState extends State<Editor> {
   }
 
   void _insertTable(int rows, int cols, TableAlign align) {
+    if (_isFinanceNote) return;
     final widths = List.generate(cols, (i) => 'Col ${i + 1}'.length);
     for (var i = 0; i < cols; i++) {
       if (widths[i] < 5) widths[i] = 5;
@@ -824,6 +827,10 @@ class _EditorState extends State<Editor> {
     );
   }
 
+  bool get _isFinanceNote =>
+      widget.note != null &&
+      (widget.note!.type == 'expense' || widget.note!.type == 'income');
+
   @override
   Widget build(BuildContext context) {
     if (widget.note == null) return _emptyState();
@@ -852,36 +859,33 @@ class _EditorState extends State<Editor> {
         child: Column(
           children: [
             _buildTitleBar(),
-            if (widget.note != null &&
-                widget.note!.type != 'expense' &&
-                widget.note!.type != 'income')
-              _buildTagBar(),
-            if (widget.note != null &&
-                (widget.note!.type == 'expense' ||
-                    widget.note!.type == 'income'))
-              _buildFinanceContent(),
-            Expanded(
-              child: widget.note != null && widget.note!.type == 'todo'
-                  ? _buildChecklistPanel()
-                  : _buildBody(),
-            ),
-            EditorToolbar(
-              onInsertMD: (p) => _insertMD(p),
-              onInsertLine: (p) => _insertLine(p),
-              onInsertTable: (rows, cols, align) =>
-                  _insertTable(rows, cols, align),
-              previewMode: widget.previewMode,
-              onTogglePreview: widget.onTogglePreview,
-              wordCount: _wordCount,
-              onImagePick: _openImagePicker,
-              rawMode: _rawMode,
-              onToggleRaw: () {
-                setState(() {
-                  _rawMode = !_rawMode;
-                  _contentCtrl.rawMode = _rawMode;
-                });
-              },
-            ),
+            if (_isFinanceNote)
+              _buildFinanceContent()
+            else ...[
+              if (widget.note != null) _buildTagBar(),
+              Expanded(
+                child: widget.note != null && widget.note!.type == 'todo'
+                    ? _buildChecklistPanel()
+                    : _buildBody(),
+              ),
+              EditorToolbar(
+                onInsertMD: (p) => _insertMD(p),
+                onInsertLine: (p) => _insertLine(p),
+                onInsertTable: (rows, cols, align) =>
+                    _insertTable(rows, cols, align),
+                previewMode: widget.previewMode,
+                onTogglePreview: widget.onTogglePreview,
+                wordCount: _wordCount,
+                onImagePick: _openImagePicker,
+                rawMode: _rawMode,
+                onToggleRaw: () {
+                  setState(() {
+                    _rawMode = !_rawMode;
+                    _contentCtrl.rawMode = _rawMode;
+                  });
+                },
+              ),
+            ],
           ],
         ),
       ),

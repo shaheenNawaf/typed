@@ -2348,45 +2348,47 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.only(right: 12),
-                  child: InkWell(
-                    onTap: _togglePreview,
-                    borderRadius: BorderRadius.circular(AppRadius.chip),
-                    child: Container(
-                      constraints: const BoxConstraints(
-                        minWidth: 44,
-                        minHeight: 44,
-                      ),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: _previewMode
-                            ? context.colors.accentDim
-                            : context.colors.surface,
-                        border: Border.all(
-                          color: _previewMode
-                              ? context.colors.accent
-                              : context.colors.accent.withAlpha(150),
-                          width: 1.5,
+                if (!(_currentNote?.type == 'expense' ||
+                    _currentNote?.type == 'income'))
+                  Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: InkWell(
+                      onTap: _togglePreview,
+                      borderRadius: BorderRadius.circular(AppRadius.chip),
+                      child: Container(
+                        constraints: const BoxConstraints(
+                          minWidth: 44,
+                          minHeight: 44,
                         ),
-                        borderRadius: BorderRadius.circular(AppRadius.chip),
-                      ),
-                      child: Text(
-                        _previewMode ? 'Edit' : 'Preview',
-                        style: TextStyle(
-                          fontSize: AppType.t13_5,
-                          letterSpacing: 0.02,
-                          fontWeight: FontWeight.w600,
-                          color: context.colors.accent,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: _previewMode
+                              ? context.colors.accentDim
+                              : context.colors.surface,
+                          border: Border.all(
+                            color: _previewMode
+                                ? context.colors.accent
+                                : context.colors.accent.withAlpha(150),
+                            width: 1.5,
+                          ),
+                          borderRadius: BorderRadius.circular(AppRadius.chip),
+                        ),
+                        child: Text(
+                          _previewMode ? 'Edit' : 'Preview',
+                          style: TextStyle(
+                            fontSize: AppType.t13_5,
+                            letterSpacing: 0.02,
+                            fontWeight: FontWeight.w600,
+                            color: context.colors.accent,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
               ],
             ),
           ),
