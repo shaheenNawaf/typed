@@ -2359,7 +2359,14 @@ class _HomeScreenState extends State<HomeScreen>
                         vertical: 6,
                       ),
                       decoration: BoxDecoration(
-                        color: _previewMode ? context.colors.accentDim : null,
+                        color: _previewMode
+                            ? context.colors.accentDim
+                            : context.colors.surface,
+                        border: Border.all(
+                          color: _previewMode
+                              ? context.colors.accent.withAlpha(60)
+                              : context.colors.border,
+                        ),
                         borderRadius: BorderRadius.circular(AppRadius.chip),
                       ),
                       child: Text(
@@ -2367,9 +2374,10 @@ class _HomeScreenState extends State<HomeScreen>
                         style: TextStyle(
                           fontSize: AppType.t13_5,
                           letterSpacing: 0.02,
+                          fontWeight: FontWeight.w500,
                           color: _previewMode
                               ? context.colors.accent
-                              : context.colors.muted,
+                              : context.colors.fg,
                         ),
                       ),
                     ),

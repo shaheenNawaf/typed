@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_metrics.dart';
@@ -217,7 +218,7 @@ class SettingsSheet extends StatelessWidget {
                 ),
               ),
             ],
-            if (onNotificationsChanged != null) ...[
+            if (onNotificationsChanged != null && !kIsWeb) ...[
               const SizedBox(height: 4),
               const Divider(height: 16, indent: 20, endIndent: 20),
               _ReminderSection(onChanged: onNotificationsChanged!),
@@ -352,6 +353,10 @@ class _ReminderSectionState extends State<_ReminderSection> {
 
   @override
   Widget build(BuildContext context) {
+    // Linux has no scheduled notifications in the plugin; budget alerts
+    // (instant show) still work, so keep the section but drop the two
+    // scheduled rows and say why.
+    final supportsScheduling = defaultTargetPlatform != TargetPlatform.linux;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -367,27 +372,42 @@ class _ReminderSectionState extends State<_ReminderSection> {
             ),
           ),
         ),
-        _ReminderRow(
-          label: 'Evening recap',
-          detail: _formatTime(_settings.eveningHour, _settings.eveningMinute),
-          value: _settings.eveningEnabled,
-          onChanged: (value) =>
-              _save(_settings.copyWith(eveningEnabled: value)),
-          onTime: () => _pickTime(evening: true),
-        ),
-        _ReminderRow(
-          label: 'Streak reminder',
-          detail: _formatTime(_settings.streakHour, _settings.streakMinute),
-          value: _settings.streakEnabled,
-          onChanged: (value) => _save(_settings.copyWith(streakEnabled: value)),
-          onTime: () => _pickTime(evening: false),
-        ),
+        if (supportsScheduling) ...[
+          _ReminderRow(
+            label: 'Evening recap',
+            detail: _formatTime(_settings.eveningHour, _settings.eveningMinute),
+            value: _settings.eveningEnabled,
+            onChanged: (value) =>
+                _save(_settings.copyWith(eveningEnabled: value)),
+            onTime: () => _pickTime(evening: true),
+          ),
+          _ReminderRow(
+            label: 'Streak reminder',
+            detail: _formatTime(_settings.streakHour, _settings.streakMinute),
+            value: _settings.streakEnabled,
+            onChanged: (value) =>
+                _save(_settings.copyWith(streakEnabled: value)),
+            onTime: () => _pickTime(evening: false),
+          ),
+        ],
         _ReminderRow(
           label: 'Budget alerts',
           detail: 'Monthly budgets at 80% & over',
           value: _settings.budgetEnabled,
           onChanged: (value) => _save(_settings.copyWith(budgetEnabled: value)),
         ),
+        if (!supportsScheduling)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
+            child: Text(
+              'Scheduled reminders are not supported on Linux yet — '
+              'budget alerts still work.',
+              style: TextStyle(
+                fontSize: AppType.t11,
+                color: context.colors.muted,
+              ),
+            ),
+          ),
       ],
     );
   }

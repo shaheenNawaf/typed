@@ -50,6 +50,13 @@ class MainApp extends StatelessWidget {
               data: mq.copyWith(
                 padding: clampInset(mq.padding),
                 viewPadding: clampInset(mq.viewPadding),
+                // Large system font scales blow out fixed-height chrome
+                // (finance summary cards, dense rows). Clamp app-wide; 1.3
+                // keeps accessibility headroom without breaking layouts.
+                textScaler: mq.textScaler.clamp(
+                  minScaleFactor: 1.0,
+                  maxScaleFactor: 1.3,
+                ),
               ),
               child: child!,
             );

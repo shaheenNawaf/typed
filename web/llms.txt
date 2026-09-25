@@ -1,0 +1,15 @@
+# Typed
+
+> Typed is a quiet, local-first workspace for notes, tasks, and money. Everything is a note — text, to-do lists, and finance records live in one plain-markdown store on your own device.
+
+## What it does
+- Notes with markdown editing, rendered preview, tags, [[wikilinks]], and full-text search
+- Tasks parsed from markdown checklists (`- [ ]` / `- [x]`) with a structured checklist editor and an Android home-screen widget
+- Finance: expense/income entries, budgets with alerts, category breakdowns, 14-day sparkline, honest multi-currency totals (dominant currency, never mixed sums)
+- Reminders: evening recap, writing streak, budget alerts (Android, iOS, Windows, macOS)
+
+## Privacy
+Local-first: data stays on the device (SharedPreferences storage, JSON export/import backup). No accounts, no servers, no tracking.
+
+## Platforms
+Web (https://typed.shaheen.works/), Windows, macOS, Linux, Android.

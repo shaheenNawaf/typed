@@ -85,8 +85,28 @@ class NotificationService {
       }
       const android = AndroidInitializationSettings('@mipmap/ic_launcher');
       const ios = DarwinInitializationSettings();
+      // Desktop platforms: the plugin throws ArgumentError when the running
+      // platform's settings are null, and the catch below would silently
+      // disable every reminder. macOS defers its permission prompt to
+      // requestPermission() (fired by the settings toggle); Windows
+      // self-registers its AUMID + activation GUID in HKCU on initialize.
+      const macOS = DarwinInitializationSettings(requestAlertPermission: false);
+      const linux = LinuxInitializationSettings(
+        defaultActionName: 'Open Typed',
+      );
+      const windows = WindowsInitializationSettings(
+        appName: 'Typed',
+        appUserModelId: 'com.z4yed.typed',
+        guid: '3f7c2a1e-8d4b-4f6a-9c2e-1a5b7d3e9f04',
+      );
       await _plugin.initialize(
-        const InitializationSettings(android: android, iOS: ios),
+        const InitializationSettings(
+          android: android,
+          iOS: ios,
+          macOS: macOS,
+          linux: linux,
+          windows: windows,
+        ),
         onDidReceiveNotificationResponse: _onResponse,
       );
       final launch = await _plugin.getNotificationAppLaunchDetails();
@@ -123,7 +143,19 @@ class NotificationService {
             ) ??
             false;
       }
-      // Desktop and other platforms need no runtime permission.
+      final macos = _plugin
+          .resolvePlatformSpecificImplementation<
+              MacOSFlutterLocalNotificationsPlugin
+          >();
+      if (macos != null) {
+        return await macos.requestPermissions(
+              alert: true,
+              sound: true,
+              badge: true,
+            ) ??
+            false;
+      }
+      // Windows and Linux need no runtime permission.
       return true;
     } catch (_) {
       return false;
@@ -167,7 +199,11 @@ class NotificationService {
     try {
       await _plugin.cancel(_eveningId);
       await _plugin.cancel(_streakId);
-      if (settings.eveningEnabled) {
+      // Linux has no zonedSchedule in the plugin (UnimplementedError); without
+      // this guard the throw would kill the whole sync, budget alerts included.
+      final supportsScheduling =
+          defaultTargetPlatform != TargetPlatform.linux;
+      if (settings.eveningEnabled && supportsScheduling) {
         await _scheduleDaily(
           id: _eveningId,
           hour: settings.eveningHour,
@@ -178,7 +214,7 @@ class NotificationService {
         );
       }
       final streak = computeWritingStreak(notes);
-      if (settings.streakEnabled && !streak.writtenToday) {
+      if (settings.streakEnabled && !streak.writtenToday && supportsScheduling) {
         await _scheduleDaily(
           id: _streakId,
           hour: settings.streakHour,
@@ -230,6 +266,8 @@ class NotificationService {
     if (!scheduled.isAfter(now)) {
       scheduled = scheduled.add(const Duration(days: 1));
     }
+    // Windows ignores matchDateTimeComponents (no repeating notifications):
+    // the daily re-arm happens because sync() runs at every launch and save.
     const details = NotificationDetails(
       android: AndroidNotificationDetails(
         'typed_reminders',
@@ -239,6 +277,9 @@ class NotificationService {
         priority: Priority.defaultPriority,
       ),
       iOS: DarwinNotificationDetails(),
+      macOS: DarwinNotificationDetails(),
+      linux: LinuxNotificationDetails(),
+      windows: WindowsNotificationDetails(),
     );
     await _plugin.zonedSchedule(
       id,
@@ -327,6 +368,9 @@ class NotificationService {
             priority: Priority.defaultPriority,
           ),
           iOS: DarwinNotificationDetails(),
+          macOS: DarwinNotificationDetails(),
+          linux: LinuxNotificationDetails(),
+          windows: WindowsNotificationDetails(),
         ),
         payload: 'finance',
       );

@@ -254,7 +254,12 @@ class _EditorToolbarState extends State<EditorToolbar> {
         decoration: BoxDecoration(
           color: widget.previewMode
               ? context.colors.accentDim
-              : Colors.transparent,
+              : context.colors.surface,
+          border: Border.all(
+            color: widget.previewMode
+                ? context.colors.accent.withAlpha(60)
+                : context.colors.border,
+          ),
           borderRadius: BorderRadius.circular(20),
         ),
         child: Text(widget.previewMode ? 'Edit' : 'Preview',
@@ -262,7 +267,7 @@ class _EditorToolbarState extends State<EditorToolbar> {
             fontSize: AppType.t12, letterSpacing: 0.02,
             color: widget.previewMode
                 ? context.colors.accent
-                : context.colors.muted,
+                : context.colors.fg,
             fontWeight: FontWeight.w500,
           ),
         ),

@@ -1,0 +1,11 @@
+flutter_launcher_icons:
+  image_path: "design/branding/icon-1024.png"
+  android: false
+  ios: false
+  web:
+    generate: false
+  windows:
+    generate: false
+  macos:
+    generate: true
+    image_path: "design/branding/icon-1024.png"

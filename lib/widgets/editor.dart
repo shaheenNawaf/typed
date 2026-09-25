@@ -21,6 +21,7 @@ import '../utils/finance_utils.dart';
 import '../utils/id.dart';
 import '../utils/image_paths.dart';
 import '../utils/markdown_display.dart';
+import '../utils/markdown_highlight.dart';
 import '../utils/slash_commands.dart';
 import 'editor_toolbar.dart';
 import 'entry_sheet.dart';
@@ -87,6 +88,8 @@ class Editor extends StatefulWidget {
 class _EditorState extends State<Editor> {
   late TextEditingController _titleCtrl;
   late TextEditingController _contentCtrl;
+  final ScrollController _bodyScroll = ScrollController();
+  double _bodyScrollOffset = 0;
   late TextEditingController _newTagCtrl;
   final FocusNode _titleFocus = FocusNode();
   final FocusNode _newTagFocus = FocusNode();
@@ -153,11 +156,13 @@ class _EditorState extends State<Editor> {
     _contentCtrl = TextEditingController(text: widget.note?.content ?? '');
     _newTagCtrl = TextEditingController();
     _contentCtrl.addListener(_onContentChange);
+    _bodyScroll.addListener(_onBodyScroll);
   }
 
   @override
   void dispose() {
     _contentCtrl.removeListener(_onContentChange);
+    _bodyScroll.dispose();
     _titleFocus.dispose();
     _newTagFocus.dispose();
     _contentFocus.dispose();
@@ -621,6 +626,14 @@ class _EditorState extends State<Editor> {
     if (mounted) setState(() {});
     widget.onTitleChange(_titleCtrl.text);
     widget.onContentChange(_contentCtrl.text);
+  }
+
+  void _onBodyScroll() {
+    if (!mounted) return;
+    final offset = _bodyScroll.offset;
+    if (offset != _bodyScrollOffset) {
+      setState(() => _bodyScrollOffset = offset);
+    }
   }
 
   Future<void> _pickFromGallery() async {
@@ -1336,6 +1349,8 @@ class _EditorState extends State<Editor> {
         children: [
           Text(
             label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: AppType.t11,
               fontWeight: FontWeight.w500,
@@ -1343,19 +1358,24 @@ class _EditorState extends State<Editor> {
               letterSpacing: 0.5,
             ),
           ),
-          Text.rich(
-            TextSpan(
-              style: TextStyle(
-                fontSize: AppType.t22,
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
-              children: [
-                currencySpan(currency, null),
-                TextSpan(
-                  text: formatMinor(value, currency),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text.rich(
+              TextSpan(
+                style: TextStyle(
+                  fontSize: AppType.t22,
+                  fontWeight: FontWeight.bold,
+                  color: color,
                 ),
-              ],
+                children: [
+                  currencySpan(currency, null),
+                  TextSpan(
+                    text: formatMinor(value, currency),
+                  ),
+                ],
+              ),
+              maxLines: 1,
             ),
           ),
         ],
@@ -2148,9 +2168,41 @@ class _EditorState extends State<Editor> {
         final available = constraints.maxWidth - horizontalPad * 2;
         final bodyWidth = available > maxBodyWidth ? maxBodyWidth : available;
         final leftPad = (constraints.maxWidth - bodyWidth) / 2;
+        final bodyStyle = _editorFont(
+          fontSize: AppType.t15,
+          fontWeight: FontWeight.w400,
+          color: context.colors.fg,
+          height: 1.6,
+        );
         return Stack(
           children: [
             SizedBox.expand(),
+            Positioned(
+              left: leftPad,
+              right: leftPad,
+              top: 16,
+              bottom: 16,
+              child: IgnorePointer(
+                child: ClipRect(
+                  child: Transform.translate(
+                    offset: Offset(0, -_bodyScrollOffset),
+                    child: RichText(
+                      key: const Key('md-highlight-layer'),
+                      text: TextSpan(
+                        style: bodyStyle,
+                        children: highlightMarkdownSpans(
+                          _contentCtrl.text,
+                          base: bodyStyle,
+                          syntax: context.colors.muted.withAlpha(150),
+                          link: context.colors.accent,
+                          codeBg: context.colors.muted.withAlpha(26),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
             Positioned(
               left: leftPad,
               right: leftPad,
@@ -2161,15 +2213,12 @@ class _EditorState extends State<Editor> {
                   child: TextField(
                     focusNode: _contentFocus,
                     controller: _contentCtrl,
+                    scrollController: _bodyScroll,
                     onChanged: (_) => _syncContent(),
                     maxLines: null,
                     expands: true,
-                    style: _editorFont(
-                      fontSize: AppType.t15,
-                      fontWeight: FontWeight.w400,
-                      color: context.colors.fg,
-                      height: 1.6,
-                    ),
+                    cursorColor: context.colors.fg,
+                    style: bodyStyle.copyWith(color: Colors.transparent),
                   decoration: InputDecoration(
                     hintText:
                         'Start writing in Markdown...\n\n'

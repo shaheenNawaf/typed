@@ -444,6 +444,16 @@ class _NoteListState extends State<NoteList> {
             icon: Icons.check_circle_outline,
             title: 'No tasks yet',
             subtitle: 'Create your first task.',
+            actions: [
+              TextButton.icon(
+                onPressed: widget.onNewNote,
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('Create Task'),
+                style: TextButton.styleFrom(
+                  foregroundColor: context.colors.accent,
+                ),
+              ),
+            ],
           );
           break;
         case 'meeting':
@@ -451,6 +461,16 @@ class _NoteListState extends State<NoteList> {
             icon: Icons.groups_outlined,
             title: 'No meetings recorded',
             subtitle: 'Capture attendees, decisions and action items.',
+            actions: [
+              TextButton.icon(
+                onPressed: widget.onNewNote,
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('New Meeting'),
+                style: TextButton.styleFrom(
+                  foregroundColor: context.colors.accent,
+                ),
+              ),
+            ],
           );
           break;
         case 'journal':
@@ -458,6 +478,16 @@ class _NoteListState extends State<NoteList> {
             icon: Icons.menu_book_outlined,
             title: 'No journal entries yet',
             subtitle: 'Record your thoughts, wins and lessons.',
+            actions: [
+              TextButton.icon(
+                onPressed: widget.onNewNote,
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('New Journal Entry'),
+                style: TextButton.styleFrom(
+                  foregroundColor: context.colors.accent,
+                ),
+              ),
+            ],
           );
           break;
         case 'finance':
@@ -482,6 +512,16 @@ class _NoteListState extends State<NoteList> {
             icon: Icons.calendar_today_outlined,
             title: 'Nothing today',
             subtitle: 'Notes you edit today will appear here.',
+            actions: [
+              TextButton.icon(
+                onPressed: widget.onNewNote,
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('Create Note'),
+                style: TextButton.styleFrom(
+                  foregroundColor: context.colors.accent,
+                ),
+              ),
+            ],
           );
           break;
         case 'untagged':
