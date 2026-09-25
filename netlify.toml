@@ -1,6 +1,9 @@
 [build]
   # Keep deployment builds aligned with the verified local Flutter toolchain.
-  command = "git clone --depth 1 -b 3.35.7 https://github.com/flutter/flutter.git flutter_sdk && flutter_sdk/bin/flutter config --suppress-analytics && flutter_sdk/bin/flutter build web --release"
+  # Netlify restores the previous build's workspace from cache, so clone only
+  # when the cached SDK stamp (bin/cache/flutter.version.json) is missing or
+  # does not match the pinned version; otherwise reuse it.
+  command = "if grep -qs 3.35.7 flutter_sdk/bin/cache/flutter.version.json; then echo Reusing cached Flutter SDK 3.35.7; else rm -rf flutter_sdk && git clone --depth 1 -b 3.35.7 https://github.com/flutter/flutter.git flutter_sdk; fi && flutter_sdk/bin/flutter config --suppress-analytics && flutter_sdk/bin/flutter build web --release"
   publish = "build/web"
 
 [build.environment]

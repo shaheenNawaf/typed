@@ -47,6 +47,9 @@ app.*.map.json
 # Local Netlify folder
 .netlify
 
+# Leftover when the Netlify CLI tries the Linux build command locally
+flutter_sdk/
+
 # Orchestrator run state
 .orchestrator/
 .playwright-mcp/
