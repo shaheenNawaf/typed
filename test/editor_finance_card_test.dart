@@ -7,6 +7,7 @@ import 'package:typed/models/note.dart';
 import 'package:typed/screens/home_screen.dart';
 import 'package:typed/theme/palettes.dart';
 import 'package:typed/utils/note_storage.dart';
+import 'package:typed/widgets/markdown_controller.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -75,6 +76,28 @@ void main() {
     );
   }
 
+  MoneyEntry mkEntry(int i, {int amount = 10000, String type = 'expense', String? note}) =>
+      MoneyEntry(
+        id: 'e$i',
+        amount: amount,
+        category: 'Item $i',
+        note: note,
+        date: DateTime(2026, 1, 1, 10, 30),
+        type: type,
+        currency: 'PHP',
+      );
+
+  Note finNote(List<MoneyEntry> amounts) => Note(
+        id: 'fin2',
+        title: 'Card',
+        content: '',
+        tags: ['finance'],
+        type: 'expense',
+        currency: 'PHP',
+        amounts: amounts,
+        updatedAt: DateTime(2026, 1, 1),
+      );
+
   testWidgets('finance summary card never overflows', (tester) async {
     final now = DateTime.now();
     await seed(
@@ -109,7 +132,7 @@ void main() {
     expectNoFlexOverflow(drainExceptions(tester));
   });
 
-  testWidgets('highlight overlay lives under the editor and preserves text',
+  testWidgets('body renders WYSIWYG: no overlay, syntax hidden off the cursor line',
       (tester) async {
     final now = DateTime.now();
     await seed(
@@ -125,36 +148,121 @@ void main() {
       tab: 'notes',
     );
     await pumpHome(tester, surface: const Size(390, 844));
-
     await openNote(tester, 'Draft');
 
-    expect(find.byKey(const Key('md-highlight-layer')), findsOneWidget);
+    expect(find.byKey(const Key('md-highlight-layer')), findsNothing);
 
     final contentField = find.byWidgetPredicate(
       (w) =>
           w is TextField &&
           (w.decoration?.hintText ?? '').startsWith('Start writing'),
     );
-
-    await tester.enterText(contentField, '# Title **bold**');
+    await tester.enterText(contentField, '# Title\n\nSome **bold** text');
     await tester.pump();
 
-    TextSpan overlay() {
-      final rich = tester.widget<RichText>(
-        find.byKey(const Key('md-highlight-layer')),
-      );
-      return rich.text as TextSpan;
+    final ctrl =
+        tester.widget<TextField>(contentField).controller!
+            as MarkdownEditingController;
+    // Storage stays pure markdown.
+    expect(ctrl.text, '# Title\n\nSome **bold** text');
+
+    final root = ctrl.buildTextSpan(style: null, withComposing: false);
+    final leaves = <TextSpan>[];
+    root.visitChildren((s) {
+      if (s is TextSpan && (s.text ?? '').isNotEmpty) leaves.add(s);
+      return true;
+    });
+    expect(leaves.map((s) => s.text).join(), '# Title\n\nSome **bold** text');
+
+    // Cursor sits on line 2: line 0's '# ' marker is hidden (fontSize 0.1),
+    // the cursor line's '**' markers stay visible (dimmed, full size).
+    final hash = leaves.firstWhere((s) => s.text == '# ');
+    expect(hash.style?.fontSize, 0.1);
+    final stars = leaves.where((s) => s.text == '**').toList();
+    expect(stars, isNotEmpty);
+    for (final s in stars) {
+      expect(s.style?.fontSize, isNot(0.1));
     }
+    final bold = leaves.firstWhere((s) => s.text == 'bold');
+    expect(bold.style?.fontWeight, FontWeight.w700);
 
-    String overlayText() =>
-        overlay().children!.map((c) => (c as TextSpan).text ?? '').join();
+    expectNoFlexOverflow(drainExceptions(tester));
+  });
 
-    expect(overlayText(), contains('**bold**'));
+  testWidgets('negative net renders minus before the symbol', (tester) async {
+    await seed(
+      [finNote([mkEntry(1, amount: 100000), mkEntry(2, amount: 50000, type: 'income')])],
+      tab: 'notes',
+    );
+    await pumpHome(tester, surface: const Size(390, 844));
+    await openNote(tester, 'Card');
 
-    await tester.enterText(contentField, '# Title **bold** tail');
-    await tester.pump();
+    expect(find.textContaining('\u2212₱500.00', findRichText: true), findsOneWidget);
+    expect(find.textContaining('₱-500.00', findRichText: true), findsNothing);
+    expectNoFlexOverflow(drainExceptions(tester));
+  });
 
-    expect(overlayText(), contains('tail'));
+  testWidgets('short viewport: totals, entries and footer all reachable', (tester) async {
+    await seed(
+      [finNote(List.generate(20, (i) => mkEntry(i)))],
+      tab: 'notes',
+    );
+    await pumpHome(tester, surface: const Size(390, 420));
+    await openNote(tester, 'Card');
+
+    expect(find.text('EXPENSES'), findsOneWidget);
+    // 20 x 10000 minor = 200000 -> ₱2,000.00 total equals sum of entries
+    // EXPENSES card + the NET card's '−₱2,000.00' both contain this substring.
+    expect(find.textContaining('₱2,000.00', findRichText: true), findsNWidgets(2));
+    expect(
+      find.textContaining('\u2212₱2,000.00', findRichText: true),
+      findsOneWidget,
+    );
+    expect(find.text('Entry'), findsOneWidget);
+
+    // Anchor the drag to the card ListView's viewport center: 'EXPENSES'
+    // unmounts after the first scroll in the lazy list, so a finder-based
+    // drag throws on iteration 2.
+    final cardList = find
+        .ancestor(of: find.text('EXPENSES'), matching: find.byType(ListView))
+        .first;
+    final center = tester.getRect(cardList).center;
+    for (var i = 0; i < 15 && find.text('Item 19').evaluate().isEmpty; i++) {
+      await tester.dragFrom(center, const Offset(0, -300));
+      await tester.pump(const Duration(milliseconds: 250));
+    }
+    expect(find.text('Item 19'), findsOneWidget);
+    expectNoFlexOverflow(drainExceptions(tester));
+  });
+
+  testWidgets('empty finance note shows CTA and no duplicate add button', (tester) async {
+    await seed([finNote([])], tab: 'notes');
+    await pumpHome(tester, surface: const Size(390, 844));
+    await openNote(tester, 'Card');
+
+    expect(find.text('Add your first expense'), findsOneWidget);
+    expect(find.text('Entry'), findsNothing);
+    expect(find.text('EXPENSES'), findsNothing);
+    expectNoFlexOverflow(drainExceptions(tester));
+  });
+
+  testWidgets('long text and huge amount never overflow at 320px', (tester) async {
+    await seed(
+      [
+        finNote([
+          mkEntry(1,
+              amount: 123456789,
+              note: 'A very long note that keeps going and going and going well past any reasonable length'),
+        ]),
+      ],
+      tab: 'notes',
+    );
+    // rename category to a long title via a second entry is not needed; category is
+    // 'Item 1' — instead assert the huge amount renders and nothing overflows.
+    await pumpHome(tester, surface: const Size(320, 568));
+    await openNote(tester, 'Card');
+
+    expect(find.textContaining('₱1,234,567.89', findRichText: true), findsWidgets);
     expectNoFlexOverflow(drainExceptions(tester));
   });
 }

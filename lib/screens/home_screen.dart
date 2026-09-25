@@ -2354,18 +2354,24 @@ class _HomeScreenState extends State<HomeScreen>
                     onTap: _togglePreview,
                     borderRadius: BorderRadius.circular(AppRadius.chip),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
+                      constraints: const BoxConstraints(
+                        minWidth: 44,
+                        minHeight: 44,
                       ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: _previewMode
                             ? context.colors.accentDim
                             : context.colors.surface,
                         border: Border.all(
                           color: _previewMode
-                              ? context.colors.accent.withAlpha(60)
-                              : context.colors.border,
+                              ? context.colors.accent
+                              : context.colors.accent.withAlpha(150),
+                          width: 1.5,
                         ),
                         borderRadius: BorderRadius.circular(AppRadius.chip),
                       ),
@@ -2374,10 +2380,8 @@ class _HomeScreenState extends State<HomeScreen>
                         style: TextStyle(
                           fontSize: AppType.t13_5,
                           letterSpacing: 0.02,
-                          fontWeight: FontWeight.w500,
-                          color: _previewMode
-                              ? context.colors.accent
-                              : context.colors.fg,
+                          fontWeight: FontWeight.w600,
+                          color: context.colors.accent,
                         ),
                       ),
                     ),
@@ -2505,6 +2509,7 @@ class _HomeScreenState extends State<HomeScreen>
 
     final groups = <Widget>[
       _buildHomeIntro(),
+      if (notes.isEmpty) _buildHomeEmptyCta(),
       if (hasPins) _homeSection('PINNED', _buildPinnedHome()),
       if (jumpRows.isNotEmpty)
         _homeSection('JUMP BACK IN', _buildJumpBackIn(jumpRows)),
@@ -2530,6 +2535,49 @@ class _HomeScreenState extends State<HomeScreen>
     return Container(
       color: context.colors.listBg,
       child: isDesktop ? body : SafeArea(child: body),
+    );
+  }
+
+  /// Zero-notes home: one explanation + one primary CTA (same action as the
+  /// dock + button). Hidden as soon as any note exists.
+  Widget _buildHomeEmptyCta() {
+    final c = context.colors;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(AppRadius.panel),
+        border: Border.all(color: c.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Nothing here yet',
+            style: TextStyle(
+              fontSize: AppType.t15,
+              fontWeight: FontWeight.w600,
+              color: c.fg,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Create a note, track an expense, or start a task list — '
+            'the + button does it all.',
+            style: TextStyle(fontSize: AppType.t12, height: 1.45, color: c.muted),
+          ),
+          const SizedBox(height: 14),
+          FilledButton.icon(
+            onPressed: _openTemplatePicker,
+            icon: const Icon(Icons.add, size: 16),
+            label: const Text('Create your first note'),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(44, 44),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

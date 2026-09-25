@@ -12,6 +12,8 @@ class EditorToolbar extends StatefulWidget {
   final VoidCallback onTogglePreview;
   final int wordCount;
   final VoidCallback? onImagePick;
+  final bool rawMode;
+  final VoidCallback? onToggleRaw;
 
   const EditorToolbar({
     super.key,
@@ -22,6 +24,8 @@ class EditorToolbar extends StatefulWidget {
     required this.onTogglePreview,
     required this.wordCount,
     this.onImagePick,
+    this.rawMode = false,
+    this.onToggleRaw,
   });
 
   @override
@@ -30,6 +34,28 @@ class EditorToolbar extends StatefulWidget {
 
 class _EditorToolbarState extends State<EditorToolbar> {
   bool _expanded = false;
+  final ScrollController _mobileScroll = ScrollController();
+  bool _moreToScroll = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _mobileScroll.addListener(_updateMoreToScroll);
+  }
+
+  @override
+  void dispose() {
+    _mobileScroll.removeListener(_updateMoreToScroll);
+    _mobileScroll.dispose();
+    super.dispose();
+  }
+
+  void _updateMoreToScroll() {
+    if (!_mobileScroll.hasClients) return;
+    final p = _mobileScroll.position;
+    final value = p.maxScrollExtent > 2 && p.pixels < p.maxScrollExtent - 2;
+    if (value != _moreToScroll) setState(() => _moreToScroll = value);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -65,6 +91,14 @@ class _EditorToolbarState extends State<EditorToolbar> {
               widget.onInsertTable(rows, cols, align),
         );
       }, tooltip: 'Insert table'),
+      if (widget.onToggleRaw != null)
+        _tbText(
+          widget.rawMode ? 'Styled' : 'Raw',
+          () => widget.onToggleRaw!(),
+          tooltip: widget.rawMode
+              ? 'Back to formatted editing'
+              : 'Show raw markdown',
+        ),
       _tbIcon(Icons.help_outline, () {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -149,6 +183,9 @@ class _EditorToolbarState extends State<EditorToolbar> {
   }
 
   Widget _buildMobile(List<Widget> primaryRow) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _updateMoreToScroll();
+    });
     if (primaryRow.isEmpty) {
       return Row(
         children: [
@@ -165,25 +202,51 @@ class _EditorToolbarState extends State<EditorToolbar> {
         const SizedBox(width: 4),
         if (!_expanded)
           Expanded(
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: EdgeInsets.zero,
+            child: Stack(
               children: [
-                _tbIcon(Icons.format_bold, () => widget.onInsertMD('**|**')),
-                _tbIcon(Icons.format_italic, () => widget.onInsertMD('*|*')),
-                _tbIcon(Icons.code, () => widget.onInsertMD('`|`')),
-                _sep(),
-                _tbIcon(Icons.format_list_bulleted, () => widget.onInsertLine('- ')),
-                _tbIcon(Icons.check_box_outlined, () => widget.onInsertLine('- [ ] ')),
-                _sep(),
-                _tbText('H2', () => widget.onInsertLine('## ')),
-                _tbText('H3', () => widget.onInsertLine('### ')),
+                Positioned.fill(
+                  child: ListView(
+                    controller: _mobileScroll,
+                    scrollDirection: Axis.horizontal,
+                    padding: EdgeInsets.zero,
+                    children: [
+                      _tbIcon(Icons.format_bold, () => widget.onInsertMD('**|**')),
+                      _tbIcon(Icons.format_italic, () => widget.onInsertMD('*|*')),
+                      _tbIcon(Icons.code, () => widget.onInsertMD('`|`')),
+                      _sep(),
+                      _tbIcon(Icons.format_list_bulleted, () => widget.onInsertLine('- ')),
+                      _tbIcon(Icons.check_box_outlined, () => widget.onInsertLine('- [ ] ')),
+                      _sep(),
+                      _tbText('H2', () => widget.onInsertLine('## ')),
+                      _tbText('H3', () => widget.onInsertLine('### ')),
+                    ],
+                  ),
+                ),
+                if (_moreToScroll)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: 24,
+                    child: IgnorePointer(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.centerLeft,
+                            end: Alignment.centerRight,
+                            colors: [
+                              context.colors.surface.withAlpha(0),
+                              context.colors.surface,
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
         if (!_expanded) ...[
-          _wordCountBadge(),
-          const SizedBox(width: 4),
           InkWell(
             onTap: () => setState(() => _expanded = true),
             borderRadius: BorderRadius.circular(20),
@@ -204,6 +267,8 @@ class _EditorToolbarState extends State<EditorToolbar> {
                 children: [
                   ...primaryRow,
                   _sep(),
+                  _wordCountBadge(),
+                  const SizedBox(width: 4, height: 36),
                   _previewToggle(),
                   const SizedBox(width: 4, height: 36),
                   InkWell(
@@ -246,10 +311,11 @@ class _EditorToolbarState extends State<EditorToolbar> {
   Widget _previewToggle() {
     return InkWell(
       onTap: widget.onTogglePreview,
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(AppRadius.chip),
       child: Container(
-        height: 36,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
+        constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: widget.previewMode
@@ -257,18 +323,19 @@ class _EditorToolbarState extends State<EditorToolbar> {
               : context.colors.surface,
           border: Border.all(
             color: widget.previewMode
-                ? context.colors.accent.withAlpha(60)
-                : context.colors.border,
-          ),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(widget.previewMode ? 'Edit' : 'Preview',
-          style: TextStyle(
-            fontSize: AppType.t12, letterSpacing: 0.02,
-            color: widget.previewMode
                 ? context.colors.accent
-                : context.colors.fg,
-            fontWeight: FontWeight.w500,
+                : context.colors.accent.withAlpha(150),
+            width: 1.5,
+          ),
+          borderRadius: BorderRadius.circular(AppRadius.chip),
+        ),
+        child: Text(
+          widget.previewMode ? 'Edit' : 'Preview',
+          style: TextStyle(
+            fontSize: AppType.t12,
+            letterSpacing: 0.02,
+            color: context.colors.accent,
+            fontWeight: FontWeight.w600,
           ),
         ),
       ),
@@ -282,7 +349,7 @@ class _EditorToolbarState extends State<EditorToolbar> {
         onTap: onTap,
         borderRadius: BorderRadius.circular(AppRadius.card),
         child: Container(
-          width: 40, height: 40,
+          width: 40, height: 44,
           alignment: Alignment.center,
           child: Icon(icon, size: 20, color: context.colors.muted),
         ),
@@ -297,9 +364,10 @@ class _EditorToolbarState extends State<EditorToolbar> {
         onTap: onTap,
         borderRadius: BorderRadius.circular(AppRadius.card),
         child: Container(
-          width: 40, height: 40,
+          constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
           alignment: Alignment.center,
-          child: Text(label, style: TextStyle(
+          child: Text(label, maxLines: 1, style: TextStyle(
             fontSize: AppType.t13_5, fontWeight: FontWeight.w700,
             color: context.colors.muted,
           )),

@@ -21,11 +21,12 @@ import '../utils/finance_utils.dart';
 import '../utils/id.dart';
 import '../utils/image_paths.dart';
 import '../utils/markdown_display.dart';
-import '../utils/markdown_highlight.dart';
+import '../utils/markdown_spans.dart';
 import '../utils/slash_commands.dart';
 import 'editor_toolbar.dart';
 import 'entry_sheet.dart';
 import 'image_picker_sheet.dart';
+import 'markdown_controller.dart';
 import 'table_picker_sheet.dart';
 
 class Editor extends StatefulWidget {
@@ -87,9 +88,8 @@ class Editor extends StatefulWidget {
 
 class _EditorState extends State<Editor> {
   late TextEditingController _titleCtrl;
-  late TextEditingController _contentCtrl;
+  late MarkdownEditingController _contentCtrl;
   final ScrollController _bodyScroll = ScrollController();
-  double _bodyScrollOffset = 0;
   late TextEditingController _newTagCtrl;
   final FocusNode _titleFocus = FocusNode();
   final FocusNode _newTagFocus = FocusNode();
@@ -104,9 +104,12 @@ class _EditorState extends State<Editor> {
       ? null
       : TextRecognizer(script: TextRecognitionScript.latin);
   int? _checklistEditIdx;
+  bool _addItemHint = false;
+  bool _rawMode = false;
   final TextEditingController _checklistAddCtrl = TextEditingController();
   final TextEditingController _checklistEditCtrl = TextEditingController();
   final FocusNode _checklistEditFocus = FocusNode();
+  final FocusNode _checklistAddFocus = FocusNode();
   int? _dismissedSlashStart;
   String? _dismissedSlashText;
 
@@ -149,14 +152,31 @@ class _EditorState extends State<Editor> {
     );
   }
 
+  // Placeholder only: the real palette-derived styles are assigned in
+  // _buildBody before the field paints (Theme.of is unavailable in initState).
+  static const MdSpanStyles _kFallbackMdStyles = MdSpanStyles(
+    base: TextStyle(),
+    syntaxColor: Color(0xFF888888),
+    linkColor: Color(0xFF888888),
+    codeColor: Color(0xFF888888),
+    codeBackground: Color(0x1A888888),
+    quoteColor: Color(0xFF888888),
+    listMarkerColor: Color(0xFF888888),
+    checkboxColor: Color(0xFF888888),
+    checkboxCheckedColor: Color(0xFF888888),
+    monoFontFamily: 'monospace',
+  );
+
   @override
   void initState() {
     super.initState();
     _titleCtrl = TextEditingController(text: widget.note?.title ?? '');
-    _contentCtrl = TextEditingController(text: widget.note?.content ?? '');
+    _contentCtrl = MarkdownEditingController(
+      text: widget.note?.content ?? '',
+      styles: _kFallbackMdStyles,
+    );
     _newTagCtrl = TextEditingController();
     _contentCtrl.addListener(_onContentChange);
-    _bodyScroll.addListener(_onBodyScroll);
   }
 
   @override
@@ -172,6 +192,7 @@ class _EditorState extends State<Editor> {
     _checklistAddCtrl.dispose();
     _checklistEditCtrl.dispose();
     _checklistEditFocus.dispose();
+    _checklistAddFocus.dispose();
     try {
       _textRecognizer?.close();
     } catch (_) {}
@@ -192,6 +213,8 @@ class _EditorState extends State<Editor> {
       _slashSuggestions = [];
       _slashToken = null;
       _dismissedSlashStart = null;
+      _rawMode = false;
+      _contentCtrl.rawMode = false;
       return;
     }
     // Same note, but its content changed outside this editor (e.g. a
@@ -503,6 +526,7 @@ class _EditorState extends State<Editor> {
     if (note == null) return;
     final list = note.amounts.toList();
     final idx = list.indexWhere((e) => e.id == entry.id);
+    final isUpdate = idx >= 0;
     if (idx >= 0) {
       list[idx] = entry;
     } else {
@@ -510,6 +534,12 @@ class _EditorState extends State<Editor> {
     }
     list.sort((a, b) => b.date.compareTo(a.date));
     widget.onAmountsChange(list);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(isUpdate ? 'Entry updated' : 'Entry added'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   void _removeEntry(String entryId) {
@@ -626,14 +656,6 @@ class _EditorState extends State<Editor> {
     if (mounted) setState(() {});
     widget.onTitleChange(_titleCtrl.text);
     widget.onContentChange(_contentCtrl.text);
-  }
-
-  void _onBodyScroll() {
-    if (!mounted) return;
-    final offset = _bodyScroll.offset;
-    if (offset != _bodyScrollOffset) {
-      setState(() => _bodyScrollOffset = offset);
-    }
   }
 
   Future<void> _pickFromGallery() async {
@@ -852,6 +874,13 @@ class _EditorState extends State<Editor> {
               onTogglePreview: widget.onTogglePreview,
               wordCount: _wordCount,
               onImagePick: _openImagePicker,
+              rawMode: _rawMode,
+              onToggleRaw: () {
+                setState(() {
+                  _rawMode = !_rawMode;
+                  _contentCtrl.rawMode = _rawMode;
+                });
+              },
             ),
           ],
         ),
@@ -1191,6 +1220,7 @@ class _EditorState extends State<Editor> {
     return Flexible(
       child: Container(
         margin: EdgeInsets.fromLTRB(_horizontalPad, 12, _horizontalPad, 0),
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: context.colors.listBg,
           borderRadius: BorderRadius.circular(AppRadius.card),
@@ -1199,37 +1229,40 @@ class _EditorState extends State<Editor> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _buildSummaryCards(totalExpenses, totalIncome, netAmount, currency),
-            if (excludedCounts.isNotEmpty)
-              _buildExcludedCurrenciesRow(excludedSpent, excludedCounts),
-            if (note.amounts.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Divider(height: 1, color: context.colors.border.withAlpha(100)),
-              const SizedBox(height: 8),
-              Expanded(
-                child: ListView.separated(
-                  padding: EdgeInsets.zero,
-                  itemCount: note.amounts.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (_, index) =>
-                      _buildTransactionItem(note, note.amounts[index]),
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  if (note.amounts.isNotEmpty) ...[
+                    _buildSummaryCards(
+                      totalExpenses,
+                      totalIncome,
+                      netAmount,
+                      currency,
+                    ),
+                    if (excludedCounts.isNotEmpty)
+                      _buildExcludedCurrenciesRow(excludedSpent, excludedCounts),
+                    const SizedBox(height: 4),
+                    Divider(height: 1, color: context.colors.border.withAlpha(100)),
+                    const SizedBox(height: 8),
+                    for (var i = 0; i < note.amounts.length; i++) ...[
+                      if (i > 0) const SizedBox(height: 8),
+                      _buildTransactionItem(note, note.amounts[i]),
+                    ],
+                    const SizedBox(height: 8),
+                  ] else
+                    _buildEmptyEntries(note),
+                ],
+              ),
+            ),
+            if (note.amounts.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: _buildAddEntryButton(note),
                 ),
               ),
-              const SizedBox(height: 6),
-              _buildAddEntryButton(note),
-              const SizedBox(height: 12),
-            ] else ...[
-              Expanded(
-                child: Center(
-                  child: Text(
-                    'No entries yet. Tap "+ Entry" to add one.',
-                    style: TextStyle(fontSize: AppType.t12, color: context.colors.muted),
-                  ),
-                ),
-              ),
-              _buildAddEntryButton(note),
-              const SizedBox(height: 12),
-            ],
           ],
         ),
       ),
@@ -1289,11 +1322,16 @@ class _EditorState extends State<Editor> {
   ) {
     final expenseColor = context.colors.destructive;
     final incomeColor = context.colors.income;
-    final netColor = netAmount >= 0 ? incomeColor : expenseColor;
+    final netColor = netAmount > 0
+        ? incomeColor
+        : netAmount < 0
+            ? expenseColor
+            : context.colors.muted;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
@@ -1316,15 +1354,8 @@ class _EditorState extends State<Editor> {
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Flexible(
-                child: _summaryCard('NET', netAmount, netColor, currency),
-              ),
-              const Spacer(),
-            ],
-          ),
+          const SizedBox(height: 6),
+          _summaryCard('NET', netAmount, netColor, currency),
         ],
       ),
     );
@@ -1337,8 +1368,8 @@ class _EditorState extends State<Editor> {
     String currency,
   ) {
     return Container(
-      height: 80,
-      padding: const EdgeInsets.all(12),
+      height: 64,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: color.withAlpha(20),
         borderRadius: BorderRadius.circular(AppRadius.card),
@@ -1368,12 +1399,7 @@ class _EditorState extends State<Editor> {
                   fontWeight: FontWeight.bold,
                   color: color,
                 ),
-                children: [
-                  currencySpan(currency, null),
-                  TextSpan(
-                    text: formatMinor(value, currency),
-                  ),
-                ],
+                children: moneySpans(value, currency, null),
               ),
               maxLines: 1,
             ),
@@ -1386,7 +1412,6 @@ class _EditorState extends State<Editor> {
   Widget _buildTransactionItem(Note note, MoneyEntry e) {
     final effectiveCurrency = e.currency ?? note.currency;
     final effectiveType = e.type ?? note.type;
-    final effectiveCurrencySym = effectiveCurrency ?? 'PHP';
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1426,36 +1451,39 @@ class _EditorState extends State<Editor> {
               ),
             ),
             const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text.rich(
-                  TextSpan(
-                    style: TextStyle(
-                      fontSize: AppType.t13_5,
-                      fontWeight: FontWeight.w500,
-                      color: effectiveType == 'income'
-                          ? context.colors.income
-                          : context.colors.fg,
-                    ),
-                    children: [
-                      currencySpan(effectiveCurrencySym, null),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 120),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text.rich(
                       TextSpan(
-                        text: formatMinor(e.amount, effectiveCurrency),
+                        style: TextStyle(
+                          fontSize: AppType.t13_5,
+                          fontWeight: FontWeight.w500,
+                          color: effectiveType == 'income'
+                              ? context.colors.income
+                              : context.colors.fg,
+                        ),
+                        children: moneySpans(e.amount, effectiveCurrency, null),
                       ),
-                    ],
-                  ),
+                      maxLines: 1,
+                    ),
+                    Text(
+                      '${e.date.hour.toString().padLeft(2, '0')}:${e.date.minute.toString().padLeft(2, '0')}',
+                      style: TextStyle(
+                        fontSize: AppType.t10,
+                        fontFamily: context.colors.monoFontFamily,
+                        color: context.colors.muted,
+                      ),
+                    ),
+                  ],
                 ),
-                Text(
-                  '${e.date.hour.toString().padLeft(2, '0')}:${e.date.minute.toString().padLeft(2, '0')}',
-                  style: TextStyle(
-                    fontSize: AppType.t10,
-                    fontFamily: context.colors.monoFontFamily,
-                    color: context.colors.muted,
-                  ),
-                ),
-              ],
+              ),
             ),
             if (e.isRecurring)
               Padding(
@@ -1502,26 +1530,62 @@ class _EditorState extends State<Editor> {
     );
   }
 
+  void _showEntrySheet(Note note) {
+    EntrySheet.show(
+      context,
+      onSave: _addOrUpdateEntry,
+      currencySymbol: currencySymbol(note.currency),
+      noteCurrency: note.currency,
+      noteType: note.type,
+      customCategories: widget.customCategories,
+      recentCategories: widget.recentCategories,
+      onCategoryUsed: widget.onCategoryUsed,
+    );
+  }
+
   Widget _buildAddEntryButton(Note note) {
-    return Align(
-      alignment: Alignment.centerRight,
-      child: TextButton.icon(
-        onPressed: () => EntrySheet.show(
-          context,
-          onSave: _addOrUpdateEntry,
-          currencySymbol: currencySymbol(note.currency),
-          noteCurrency: note.currency,
-          noteType: note.type,
-          customCategories: widget.customCategories,
-          recentCategories: widget.recentCategories,
-          onCategoryUsed: widget.onCategoryUsed,
-        ),
-        icon: const Icon(Icons.add, size: 14),
-        label: const Text('Entry', style: TextStyle(fontSize: AppType.t13_5)),
-        style: TextButton.styleFrom(
-          foregroundColor: context.colors.accent,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-        ),
+    return TextButton.icon(
+      onPressed: () => _showEntrySheet(note),
+      icon: const Icon(Icons.add, size: 16),
+      label: const Text('Entry', style: TextStyle(fontSize: AppType.t13_5)),
+      style: TextButton.styleFrom(
+        foregroundColor: context.colors.accent,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        minimumSize: const Size(44, 44),
+      ),
+    );
+  }
+
+  Widget _buildEmptyEntries(Note note) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 28, 24, 28),
+      child: Column(
+        children: [
+          Icon(Icons.receipt_long_outlined, size: 28, color: context.colors.muted),
+          const SizedBox(height: 10),
+          Text(
+            'Track money in and out',
+            style: TextStyle(
+              fontSize: AppType.t13_5,
+              fontWeight: FontWeight.w600,
+              color: context.colors.fg,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Add expenses and income here — totals update as you go.',
+            style: TextStyle(fontSize: AppType.t12, color: context.colors.muted),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: () => _showEntrySheet(note),
+            icon: const Icon(Icons.add, size: 16),
+            label: const Text('Add your first expense'),
+            style: FilledButton.styleFrom(minimumSize: const Size(44, 44)),
+          ),
+        ],
       ),
     );
   }
@@ -1627,14 +1691,37 @@ class _EditorState extends State<Editor> {
 
   void _deleteItem(int lineIndex) {
     final lines = _contentCtrl.text.split('\n');
-    lines.removeAt(lineIndex);
+    if (lineIndex < 0 || lineIndex >= lines.length) return;
+    final removed = lines.removeAt(lineIndex);
     _contentCtrl.text = lines.join('\n');
     _syncContent();
     setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Task deleted'),
+        duration: const Duration(seconds: 4),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            if (!mounted) return;
+            final current = _contentCtrl.text.split('\n');
+            final idx = lineIndex.clamp(0, current.length);
+            current.insert(idx, removed);
+            _contentCtrl.text = current.join('\n');
+            _syncContent();
+            setState(() {});
+          },
+        ),
+      ),
+    );
   }
 
   void _addItem(String text) {
-    if (text.trim().isEmpty) return;
+    if (text.trim().isEmpty) {
+      setState(() => _addItemHint = true);
+      return;
+    }
+    if (_addItemHint) setState(() => _addItemHint = false);
     _contentCtrl.text = '${_contentCtrl.text}- [ ] ${text.trim()}\n';
     _checklistAddCtrl.clear();
     _syncContent();
@@ -1710,10 +1797,14 @@ class _EditorState extends State<Editor> {
                                 color: c.fg,
                               ),
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Add your first to-do item below.',
-                              style: TextStyle(fontSize: AppType.t13_5, color: c.muted),
+                            const SizedBox(height: 14),
+                            FilledButton.icon(
+                              onPressed: () => _checklistAddFocus.requestFocus(),
+                              icon: const Icon(Icons.add, size: 16),
+                              label: const Text('Add your first to-do'),
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size(44, 44),
+                              ),
                             ),
                           ],
                         ),
@@ -1815,14 +1906,14 @@ class _EditorState extends State<Editor> {
                   ),
           ),
           if (!editing)
-            GestureDetector(
-              onTap: () => _deleteItem(item.lineIndex),
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: Icon(
-                  Icons.close,
-                  size: 16,
-                  color: c.muted.withAlpha(120),
+            SizedBox(
+              width: 44,
+              height: 44,
+              child: InkWell(
+                onTap: () => _deleteItem(item.lineIndex),
+                borderRadius: BorderRadius.circular(AppRadius.card),
+                child: Center(
+                  child: Icon(Icons.close, size: 18, color: c.muted),
                 ),
               ),
             ),
@@ -1834,57 +1925,74 @@ class _EditorState extends State<Editor> {
   Widget _buildAddRow(AppColors c) {
     return Padding(
       padding: const EdgeInsets.only(top: 8),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            Icons.add_circle_outline,
-            size: 18,
-            color: c.accent.withAlpha(180),
+          Row(
+            children: [
+              Icon(
+                Icons.add_circle_outline,
+                size: 18,
+                color: c.accent.withAlpha(180),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: SizedBox(
+                  height: 32,
+                  child: TextField(
+                    controller: _checklistAddCtrl,
+                    focusNode: _checklistAddFocus,
+                    style: _editorFont(
+                      fontSize: AppType.t13_5,
+                      fontWeight: FontWeight.w400,
+                      color: c.fg,
+                      height: 1.4,
+                    ),
+                    decoration: InputDecoration(
+                      hintText: 'Add an item...',
+                      hintStyle: TextStyle(
+                        fontSize: AppType.t13_5,
+                        color: c.muted.withAlpha(150),
+                      ),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 0,
+                        vertical: 6,
+                      ),
+                      border: InputBorder.none,
+                    ),
+                    onChanged: (_) {
+                      if (_addItemHint) setState(() => _addItemHint = false);
+                    },
+                    onSubmitted: (v) {
+                      _addItem(v);
+                      _checklistAddCtrl.clear();
+                    },
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () => _addItem(_checklistAddCtrl.text),
+                style: TextButton.styleFrom(
+                  foregroundColor: c.accent,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(44, 44),
+                ),
+                child: const Text(
+                  'Add',
+                  style: TextStyle(fontSize: AppType.t13_5, fontWeight: FontWeight.w500),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: SizedBox(
-              height: 32,
-              child: TextField(
-                controller: _checklistAddCtrl,
-                style: _editorFont(
-                  fontSize: AppType.t13_5,
-                  fontWeight: FontWeight.w400,
-                  color: c.fg,
-                  height: 1.4,
-                ),
-                decoration: InputDecoration(
-                  hintText: 'Add an item...',
-                  hintStyle: TextStyle(
-                    fontSize: AppType.t13_5,
-                    color: c.muted.withAlpha(150),
-                  ),
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 0,
-                    vertical: 6,
-                  ),
-                  border: InputBorder.none,
-                ),
-                onSubmitted: (v) {
-                  _addItem(v);
-                  _checklistAddCtrl.clear();
-                },
+          if (_addItemHint)
+            Padding(
+              padding: const EdgeInsets.only(top: 2, left: 28),
+              child: Text(
+                'Type something to add.',
+                style: TextStyle(fontSize: AppType.t12, color: c.destructive),
               ),
             ),
-          ),
-          TextButton(
-            onPressed: () => _addItem(_checklistAddCtrl.text),
-            style: TextButton.styleFrom(
-              foregroundColor: c.accent,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              minimumSize: const Size(44, 44),
-            ),
-            child: const Text(
-              'Add',
-              style: TextStyle(fontSize: AppType.t13_5, fontWeight: FontWeight.w500),
-            ),
-          ),
         ],
       ),
     );
@@ -1964,7 +2072,7 @@ class _EditorState extends State<Editor> {
               onTap: () => _removeTag(t),
               borderRadius: BorderRadius.circular(AppRadius.chip),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 decoration: BoxDecoration(
                   color: c.tagBg,
                   borderRadius: BorderRadius.circular(AppRadius.chip),
@@ -1999,7 +2107,7 @@ class _EditorState extends State<Editor> {
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 8,
-                      vertical: 4,
+                      vertical: 8,
                     ),
                     hintText: 'tag',
                     hintStyle: TextStyle(fontSize: AppType.t12, color: c.muted),
@@ -2037,7 +2145,7 @@ class _EditorState extends State<Editor> {
               },
               borderRadius: BorderRadius.circular(AppRadius.chip),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 decoration: BoxDecoration(
                   border: Border.all(color: c.border),
                   borderRadius: BorderRadius.circular(AppRadius.chip),
@@ -2174,6 +2282,18 @@ class _EditorState extends State<Editor> {
           color: context.colors.fg,
           height: 1.6,
         );
+        _contentCtrl.styles = MdSpanStyles(
+          base: bodyStyle,
+          syntaxColor: context.colors.muted.withAlpha(150),
+          linkColor: context.colors.accent,
+          codeColor: context.colors.fg,
+          codeBackground: context.colors.muted.withAlpha(26),
+          quoteColor: context.colors.muted,
+          listMarkerColor: context.colors.muted,
+          checkboxColor: context.colors.muted,
+          checkboxCheckedColor: context.colors.accent,
+          monoFontFamily: 'monospace',
+        );
         return Stack(
           children: [
             SizedBox.expand(),
@@ -2182,48 +2302,22 @@ class _EditorState extends State<Editor> {
               right: leftPad,
               top: 16,
               bottom: 16,
-              child: IgnorePointer(
-                child: ClipRect(
-                  child: Transform.translate(
-                    offset: Offset(0, -_bodyScrollOffset),
-                    child: RichText(
-                      key: const Key('md-highlight-layer'),
-                      text: TextSpan(
-                        style: bodyStyle,
-                        children: highlightMarkdownSpans(
-                          _contentCtrl.text,
-                          base: bodyStyle,
-                          syntax: context.colors.muted.withAlpha(150),
-                          link: context.colors.accent,
-                          codeBg: context.colors.muted.withAlpha(26),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              left: leftPad,
-              right: leftPad,
-              top: 16,
-              bottom: 16,
-                child: Focus(
-                  onKeyEvent: _handleEditorKey,
-                  child: TextField(
-                    focusNode: _contentFocus,
-                    controller: _contentCtrl,
-                    scrollController: _bodyScroll,
-                    onChanged: (_) => _syncContent(),
-                    maxLines: null,
-                    expands: true,
-                    cursorColor: context.colors.fg,
-                    style: bodyStyle.copyWith(color: Colors.transparent),
+              child: Focus(
+                onKeyEvent: _handleEditorKey,
+                child: TextField(
+                  focusNode: _contentFocus,
+                  controller: _contentCtrl,
+                  scrollController: _bodyScroll,
+                  onChanged: (_) => _syncContent(),
+                  maxLines: null,
+                  expands: true,
+                  cursorColor: context.colors.fg,
+                  style: bodyStyle,
                   decoration: InputDecoration(
                     hintText:
-                        'Start writing in Markdown...\n\n'
-                        'Type / for blocks, #tag to categorize, and '
-                        '[[ to link another note.',
+                        'Start writing…\n\n'
+                        'Type / for blocks, #tag to categorize, '
+                        '[[ to link a note.',
                     hintStyle: TextStyle(color: context.colors.muted),
                     border: InputBorder.none,
                     contentPadding: EdgeInsets.zero,

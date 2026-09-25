@@ -3,9 +3,10 @@ import '../theme/app_motion.dart';
 import '../utils/finance_utils.dart';
 
 /// A money amount that counts up from 0 on first build and re-animates
-/// whenever [minor] changes (period/currency switches). Renders the currency
-/// symbol via [currencySpan] (Outfit lacks the ₱ glyph) and the digits with
-/// [formatMinor] in [style]. Collapses to the final value instantly under
+/// whenever [minor] changes (period/currency switches). Renders via
+/// [moneySpans]: sign (U+2212 for negatives) before the currency symbol
+/// (Outfit lacks the ₱ glyph), digits with [formatMinor] in [style].
+/// Collapses to the final value instantly under
 /// reduce-motion (AppMotion.duration -> Duration.zero).
 class CountUpAmount extends StatelessWidget {
   /// Amount in integer minor units of [currency].
@@ -31,10 +32,7 @@ class CountUpAmount extends StatelessWidget {
       builder: (context, value, _) => Text.rich(
         TextSpan(
           style: style,
-          children: [
-            currencySpan(currency, style),
-            TextSpan(text: formatMinor(value.round(), currency)),
-          ],
+          children: moneySpans(value.round(), currency, style),
         ),
       ),
     );

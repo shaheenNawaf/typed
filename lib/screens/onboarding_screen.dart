@@ -28,7 +28,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   String _financeMode = 'simple';
   bool _includeSamples = true;
 
-  static const _pageCount = 3;
+  static const _pageCount = 4;
 
   bool get _isLast => _page == _pageCount - 1;
 
@@ -96,6 +96,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           _welcomePage(),
                           _writingPage(),
                           _financePage(),
+                          _gettingAroundPage(),
                         ],
                       ),
                     ),
@@ -344,6 +345,62 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     ],
                   ),
                 ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _gettingAroundPage() {
+    final c = context.colors;
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Everything in reach',
+                style: TextStyle(
+                  fontSize: AppType.t22,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.3,
+                  color: c.fg,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'A quick tour before you start — replay any time from Settings.',
+                style: TextStyle(fontSize: AppType.t13_5, height: 1.5, color: c.muted),
+              ),
+              const SizedBox(height: 24),
+              _featureRow(
+                c,
+                Icons.dashboard_outlined,
+                'The dock',
+                'Home, Notes, Finance and Tasks live in the bottom dock. '
+                    'The + button creates anything.',
+              ),
+              const SizedBox(height: 16),
+              _featureRow(
+                c,
+                Icons.visibility_outlined,
+                'Preview & Edit',
+                'Tap Preview to read a clean copy of a note; tap Edit to '
+                    'change it.',
+              ),
+              const SizedBox(height: 16),
+              _featureRow(
+                c,
+                Icons.code,
+                'Raw mode',
+                'Prefer the plain symbols? The Raw button in the toolbar '
+                    'shows the exact Markdown.',
               ),
             ],
           ),

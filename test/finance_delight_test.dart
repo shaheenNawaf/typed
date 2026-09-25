@@ -146,7 +146,7 @@ void main() {
       expect(find.textContaining('1,234.50'), findsOneWidget);
     });
 
-    testWidgets('negative amounts keep the sign', (tester) async {
+    testWidgets('negative amounts put the sign before the symbol', (tester) async {
       await tester.pumpWidget(wrap(CountUpAmount(
         minor: -123450,
         currency: 'PHP',
@@ -154,7 +154,7 @@ void main() {
       )));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('-1,234.50'), findsOneWidget);
+      expect(find.textContaining('−₱1,234.50'), findsOneWidget);
     });
 
     testWidgets('JPY renders zero decimals', (tester) async {

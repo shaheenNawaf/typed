@@ -1196,20 +1196,24 @@ class _NoteCardState extends State<_NoteCard> {
                     : context.colors.fg,
               ),
               const SizedBox(width: 4),
-              Text.rich(
-                TextSpan(
-                  style: TextStyle(
-                    fontSize: AppType.t12,
-                    fontFamily: context.colors.monoFontFamily,
-                    fontWeight: FontWeight.w500,
-                    color: widget.note.type == 'income'
-                        ? context.colors.income
-                        : context.colors.fg,
+              Flexible(
+                child: Text.rich(
+                  TextSpan(
+                    style: TextStyle(
+                      fontSize: AppType.t12,
+                      fontFamily: context.colors.monoFontFamily,
+                      fontWeight: FontWeight.w500,
+                      color: widget.note.type == 'income'
+                          ? context.colors.income
+                          : context.colors.fg,
+                    ),
+                    children: _buildCardAmountSpans(
+                      widget.note,
+                      widget.financeEntries,
+                    ),
                   ),
-                   children: _buildCardAmountSpans(
-                     widget.note,
-                     widget.financeEntries,
-                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
                if ((widget.financeEntries ?? widget.note.amounts).length > 1) ...[
@@ -1357,10 +1361,7 @@ class _NoteCardState extends State<_NoteCard> {
         : currencies.first;
     return [
       TextSpan(text: label),
-      currencySpan(currency, null),
-      TextSpan(
-        text: formatMinor(total, currency),
-      ),
+      ...moneySpans(total, currency, null),
     ];
   }
 }

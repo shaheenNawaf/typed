@@ -66,6 +66,8 @@ class _BudgetSheetState extends State<BudgetSheet> {
   late TextEditingController _limitCtrl;
   late String _currencyCode;
   late String _period;
+  String? _limitError;
+  String? _categoryError;
 
   @override
   void initState() {
@@ -90,14 +92,26 @@ class _BudgetSheetState extends State<BudgetSheet> {
 
   void _save() {
     final limit = parseAmountToMinor(_limitCtrl.text, _currencyCode);
-    if (limit == null || limit <= 0) {
-      _showError('Enter a valid limit');
+    if (limit == null) {
+      setState(() => _limitError = _limitCtrl.text.trim().isEmpty
+          ? 'Enter a spending limit.'
+          : 'Use numbers only, with up to 2 decimals (e.g. 500 or 500.50).');
+      return;
+    }
+    if (limit <= 0) {
+      setState(() => _limitError = 'Limit must be greater than 0.');
       return;
     }
     final category = _categoryCtrl.text.trim();
     if (category.isEmpty) {
-      _showError('Enter a category');
+      setState(() => _categoryError = 'Choose a category for this budget.');
       return;
+    }
+    if (_limitError != null || _categoryError != null) {
+      setState(() {
+        _limitError = null;
+        _categoryError = null;
+      });
     }
     final budget = Budget(
       id: widget.budget?.id ?? generateId('b'),
@@ -110,9 +124,13 @@ class _BudgetSheetState extends State<BudgetSheet> {
     Navigator.pop(context);
   }
 
-  void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
+  Widget _inlineError(String msg) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Text(
+        msg,
+        style: TextStyle(fontSize: AppType.t12, color: context.colors.destructive),
+      ),
     );
   }
 
@@ -197,7 +215,7 @@ class _BudgetSheetState extends State<BudgetSheet> {
             ),
             const SizedBox(height: 16),
             _Field(
-              label: 'Category',
+              label: 'Category *',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -206,7 +224,10 @@ class _BudgetSheetState extends State<BudgetSheet> {
                     children: cats.map((cat) {
                       final selected = _categoryCtrl.text.trim() == cat;
                       return InkWell(
-                        onTap: () => setState(() => _categoryCtrl.text = cat),
+                        onTap: () => setState(() {
+                          _categoryCtrl.text = cat;
+                          _categoryError = null;
+                        }),
                         borderRadius: BorderRadius.circular(AppRadius.panel),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
@@ -236,30 +257,44 @@ class _BudgetSheetState extends State<BudgetSheet> {
                   const SizedBox(height: 8),
                   TextField(
                     controller: _categoryCtrl,
-                    decoration: _inputDeco('Or type your own'),
-                    onChanged: (_) => setState(() {}),
+                    decoration: _inputDeco('Or type your own',
+                        error: _categoryError != null),
+                    onChanged: (v) => setState(() {
+                      if (v.trim().isNotEmpty) _categoryError = null;
+                    }),
                     style: TextStyle(fontSize: AppType.t13_5, color: context.colors.fg),
                   ),
+                  if (_categoryError != null) _inlineError(_categoryError!),
                 ],
               ),
             ),
             const SizedBox(height: 12),
             _Field(
               label: 'Limit',
-              child: TextField(
-                controller: _limitCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: kAmountInputFormatters,
-                autofocus: !isEdit,
-                decoration: _inputDeco(
-                  widget.currencySymbol.isNotEmpty
-                      ? '${widget.currencySymbol}0.00'
-                      : '0.00',
-                ),
-                style: TextStyle(
-                  fontSize: AppType.t15, fontWeight: FontWeight.w500,
-                  color: context.colors.fg,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: _limitCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: kAmountInputFormatters,
+                    autofocus: !isEdit,
+                    decoration: _inputDeco(
+                      widget.currencySymbol.isNotEmpty
+                          ? '${widget.currencySymbol}0.00'
+                          : '0.00',
+                      error: _limitError != null,
+                    ),
+                    onChanged: (_) {
+                      if (_limitError != null) setState(() => _limitError = null);
+                    },
+                    style: TextStyle(
+                      fontSize: AppType.t15, fontWeight: FontWeight.w500,
+                      color: context.colors.fg,
+                    ),
+                  ),
+                  if (_limitError != null) _inlineError(_limitError!),
+                ],
               ),
             ),
             const SizedBox(height: 16),
@@ -298,7 +333,7 @@ class _BudgetSheetState extends State<BudgetSheet> {
     );
   }
 
-  InputDecoration _inputDeco(String hint) {
+  InputDecoration _inputDeco(String hint, {bool error = false}) {
     return InputDecoration(
       hintText: hint,
       hintStyle: TextStyle(color: context.colors.muted, fontSize: AppType.t13_5),
@@ -312,11 +347,13 @@ class _BudgetSheetState extends State<BudgetSheet> {
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadius.card),
-        borderSide: BorderSide(color: context.colors.border),
+        borderSide: BorderSide(
+            color: error ? context.colors.destructive : context.colors.border),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadius.card),
-        borderSide: BorderSide(color: context.colors.accent),
+        borderSide: BorderSide(
+            color: error ? context.colors.destructive : context.colors.accent),
       ),
     );
   }

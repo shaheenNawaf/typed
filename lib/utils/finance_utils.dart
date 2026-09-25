@@ -132,4 +132,24 @@ TextSpan currencySpan(String? code, TextStyle? style) {
   );
 }
 
+/// Renders a minor-unit amount as inline spans with the sign BEFORE the
+/// currency symbol: -50000 PHP -> "−" "₱" "500.00". Zero and positive
+/// amounts get no sign span. Digits are formatted from the absolute value
+/// so [formatNumber]'s own '-' never appears after the symbol.
+List<TextSpan> moneySpans(int minor, String? currency, TextStyle? style) {
+  final negative = minor < 0;
+  final symbolStyle = (style ?? const TextStyle()).copyWith(
+    fontFamily: 'Roboto',
+    fontFamilyFallback: const ['Noto Sans', 'sans-serif'],
+  );
+  return [
+    if (negative) TextSpan(text: '\u2212', style: symbolStyle),
+    currencySpan(currency, style),
+    TextSpan(
+      text: formatMinor(negative ? -minor : minor, currency),
+      style: style,
+    ),
+  ];
+}
+
 

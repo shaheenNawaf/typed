@@ -245,4 +245,45 @@ void main() {
     expect(find.textContaining('189.99'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('zero notes: mobile home shows empty CTA and opens the picker',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'onboarded_v1': true,
+      'onboarding_flow_complete_v1': true,
+      'shell_state_v1': '{"filter":"home","tab":"home"}',
+    });
+    await NoteStorage().save([]);
+    await pumpHome(tester, surface: const Size(390, 844));
+
+    expect(find.text('Nothing here yet'), findsOneWidget);
+    expect(find.text('Create your first note'), findsOneWidget);
+
+    await tester.tap(find.text('Create your first note'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Blank note'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('one note: empty CTA is hidden', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'onboarded_v1': true,
+      'onboarding_flow_complete_v1': true,
+      'shell_state_v1': '{"filter":"home","tab":"home"}',
+    });
+    final now = DateTime.now();
+    await NoteStorage().save([
+      Note(
+        id: 'txt1',
+        title: 'Welcome to Typed',
+        content: 'hello world',
+        tags: [],
+        updatedAt: now,
+      ),
+    ]);
+    await pumpHome(tester, surface: const Size(390, 844));
+
+    expect(find.text('Nothing here yet'), findsNothing);
+  });
 }

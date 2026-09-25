@@ -580,7 +580,7 @@ class SimpleFinanceView extends StatelessWidget {
                       fontSize: AppType.t12,
                       fontWeight: FontWeight.w600,
                       fontFamily: c.monoFontFamily,
-                      color: net >= 0 ? c.income : c.destructive,
+                      color: net > 0 ? c.income : net < 0 ? c.destructive : c.muted,
                     ),
                   ),
                 ],
@@ -1055,9 +1055,11 @@ class _ExpandableSummaryCardsState extends State<_ExpandableSummaryCards> {
     final summary = widget.summary;
     switch (_selectedStat) {
       case 'net':
-        final netColor = summary.net >= 0
+        final netColor = summary.net > 0
             ? context.colors.income
-            : context.colors.destructive;
+            : summary.net < 0
+                ? context.colors.destructive
+                : context.colors.muted;
         return _SummaryCard(
           label: 'NET',
           amount: summary.hasMixedCurrencies ? null : summary.net,
@@ -1214,12 +1216,11 @@ Widget _moneyKeptCard(BuildContext context, FinanceSummary summary) {
   return _SummaryCard(
     label: 'MONEY KEPT',
     valueText: '$pct%',
-    color: summary.net >= 0 ? c.income : c.destructive,
+    color: summary.net > 0 ? c.income : summary.net < 0 ? c.destructive : c.muted,
     footnoteSpan: TextSpan(
       style: footStyle,
       children: [
-        currencySpan(summary.dominantCurrency, footStyle),
-        TextSpan(text: formatMinor(summary.net, summary.dominantCurrency)),
+        ...moneySpans(summary.net, summary.dominantCurrency, footStyle),
         const TextSpan(text: ' of '),
         currencySpan(summary.dominantCurrency, footStyle),
         TextSpan(text: formatMinor(income, summary.dominantCurrency)),
@@ -1349,8 +1350,7 @@ class _SummaryCard extends StatelessWidget {
             TextSpan(
               style: lineStyle,
               children: [
-                currencySpan(e.key, lineStyle),
-                TextSpan(text: formatMinor(e.value, e.key)),
+                ...moneySpans(e.value, e.key, lineStyle),
               ],
             ),
             maxLines: 1,
@@ -2083,9 +2083,11 @@ class FinanceWorkspace extends StatelessWidget {
         amountsByCurrency: summary.hasMixedCurrencies
             ? _dominantFirst(summary.netByCurrency, summary.dominantCurrency)
             : null,
-        color: summary.net >= 0
+        color: summary.net > 0
             ? context.colors.income
-            : context.colors.destructive,
+            : summary.net < 0
+                ? context.colors.destructive
+                : context.colors.muted,
         currency: summary.dominantCurrency,
       );
 

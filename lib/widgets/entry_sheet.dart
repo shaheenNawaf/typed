@@ -115,6 +115,8 @@ class _EntrySheetState extends State<EntrySheet> {
   bool _showMore = false;
   bool _showAllCategories = false;
   bool _isScanning = false;
+  String? _amountError;
+  String? _recurError;
   final ImagePicker _picker = ImagePicker();
   final TextRecognizer? _textRecognizer =
       kIsWeb ? null : TextRecognizer(script: TextRecognitionScript.latin);
@@ -160,19 +162,30 @@ class _EntrySheetState extends State<EntrySheet> {
   MoneyEntry? _doSave() {
     final amount =
         parseAmountToMinor(_amountCtrl.text, _entryCurrency ?? widget.noteCurrency);
-    if (amount == null || amount <= 0) {
-      _showError('Enter a valid amount');
+    if (amount == null) {
+      setState(() => _amountError = _amountCtrl.text.trim().isEmpty
+          ? 'Enter an amount to save this entry.'
+          : 'Use numbers only, with up to 2 decimals (e.g. 250 or 250.50).');
       return null;
     }
-    final category = _categoryCtrl.text.trim();
-    if (category.isEmpty) {
-      _showError('Enter a category');
+    if (amount <= 0) {
+      setState(() => _amountError = 'Amount must be greater than 0.');
       return null;
     }
     if (_isRecurring && _recurInterval == null) {
-      _showError('Choose a repeat interval');
+      setState(() =>
+          _recurError = 'Choose a repeat interval, or turn off repeat.');
       return null;
     }
+    if (_amountError != null || _recurError != null) {
+      setState(() {
+        _amountError = null;
+        _recurError = null;
+      });
+    }
+    final category = _categoryCtrl.text.trim().isEmpty
+        ? 'Uncategorized'
+        : _categoryCtrl.text.trim();
     final noteText = _noteCtrl.text.trim();
     final entry = MoneyEntry(
       id: widget.entry?.id ?? generateId('m'),
@@ -240,12 +253,6 @@ class _EntrySheetState extends State<EntrySheet> {
     _amountFocusNode.requestFocus();
   }
 
-  void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), duration: const Duration(seconds: 2)),
-    );
-  }
-
   // ponytail: scan receipt via camera, run OCR, parse out the largest
   // currency-shaped number, pre-fill amount + note. Best-effort —
   // the user reviews everything before saving.
@@ -260,7 +267,14 @@ class _EntrySheetState extends State<EntrySheet> {
       final result = await _textRecognizer.processImage(inputImage);
       final text = result.text.trim();
       if (text.isEmpty) {
-        if (mounted) _showError('No text detected in image');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No text detected in image'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
         return;
       }
       // ponytail: match currency-shaped numbers like 1,234.56 or 1234.56,
@@ -295,7 +309,9 @@ class _EntrySheetState extends State<EntrySheet> {
             ? '${text.substring(0, 200)}...'
             : text;
       }
-      setState(() {});
+      setState(() {
+        _amountError = null;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(largest > 0
@@ -305,7 +321,14 @@ class _EntrySheetState extends State<EntrySheet> {
         ),
       );
     } catch (e) {
-      if (mounted) _showError('Scan failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Scan failed: $e'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isScanning = false);
     }
@@ -363,6 +386,16 @@ class _EntrySheetState extends State<EntrySheet> {
 
   String _capitalize(String s) =>
       s.isEmpty ? s : '${s[0].toUpperCase()}${s.substring(1)}';
+
+  Widget _inlineError(String msg) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Text(
+        msg,
+        style: TextStyle(fontSize: AppType.t12, color: context.colors.destructive),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -444,28 +477,40 @@ class _EntrySheetState extends State<EntrySheet> {
             _Field(
               label:
                   'Amount · ${_entryCurrency ?? widget.noteCurrency ?? 'PHP'}',
-              child: TextField(
-                controller: _amountCtrl,
-                focusNode: _amountFocusNode,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: kAmountInputFormatters,
-                autofocus: !isEdit,
-                decoration: _inputDeco(
-                  widget.currencySymbol.isNotEmpty
-                      ? '${widget.currencySymbol}0.00'
-                      : '0.00',
-                ),
-                style:  TextStyle(
-                  fontSize: AppType.t15, fontWeight: FontWeight.w500,
-                  color: context.colors.fg,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: _amountCtrl,
+                    focusNode: _amountFocusNode,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: kAmountInputFormatters,
+                    autofocus: !isEdit,
+                    decoration: _inputDeco(
+                      widget.currencySymbol.isNotEmpty
+                          ? '${widget.currencySymbol}0.00'
+                          : '0.00',
+                      error: _amountError != null,
+                    ),
+                    onChanged: (_) {
+                      if (_amountError != null) {
+                        setState(() => _amountError = null);
+                      }
+                    },
+                    style:  TextStyle(
+                      fontSize: AppType.t15, fontWeight: FontWeight.w500,
+                      color: context.colors.fg,
+                    ),
+                  ),
+                  if (_amountError != null) _inlineError(_amountError!),
+                ],
               ),
             ),
             const SizedBox(height: 12),
 
             // -- Category section --
             _Field(
-              label: 'Category',
+              label: 'Category · optional',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -815,8 +860,10 @@ class _EntrySheetState extends State<EntrySheet> {
                             .map((iv) {
                           final selected = _recurInterval == iv;
                           return InkWell(
-                            onTap: () => setState(() => _recurInterval =
-                                selected ? null : iv),
+                            onTap: () => setState(() {
+                              _recurInterval = selected ? null : iv;
+                              _recurError = null;
+                            }),
                             borderRadius: BorderRadius.circular(AppRadius.panel),
                             child: Container(
                               padding: const EdgeInsets.symmetric(
@@ -843,6 +890,7 @@ class _EntrySheetState extends State<EntrySheet> {
                           );
                         }).toList(),
                       ),
+                      if (_recurError != null) _inlineError(_recurError!),
                       const SizedBox(height: 8),
                       InkWell(
                         onTap: () async {
@@ -938,7 +986,7 @@ class _EntrySheetState extends State<EntrySheet> {
     );
   }
 
-  InputDecoration _inputDeco(String hint) {
+  InputDecoration _inputDeco(String hint, {bool error = false}) {
     return InputDecoration(
       hintText: hint,
       hintStyle:  TextStyle(color: context.colors.muted, fontSize: AppType.t13_5),
@@ -951,11 +999,15 @@ class _EntrySheetState extends State<EntrySheet> {
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadius.card),
-        borderSide:  BorderSide(color: context.colors.border),
+        borderSide: BorderSide(
+          color: error ? context.colors.destructive : context.colors.border,
+        ),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadius.card),
-        borderSide:  BorderSide(color: context.colors.accent),
+        borderSide: BorderSide(
+          color: error ? context.colors.destructive : context.colors.accent,
+        ),
       ),
     );
   }
