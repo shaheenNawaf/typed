@@ -43,14 +43,16 @@ class ThemeController extends ChangeNotifier {
     return c;
   }
 
-  /// Parses a stored mode string, falling back to [ThemeMode.system] when the
-  /// value is missing or not a valid [ThemeMode].
+  /// Parses a stored mode string. When no preference has been stored yet (first run)
+  /// — or the stored value is not a valid [ThemeMode] — the app defaults to dark:
+  /// cream-dark is the shipped default palette/brightness pair. A mode the user
+  /// explicitly chose in Settings is always honored, including [ThemeMode.system].
   static ThemeMode _modeFromString(String? raw) {
-    if (raw == null) return ThemeMode.system;
+    if (raw == null) return ThemeMode.dark;
     for (final mode in ThemeMode.values) {
       if (mode.name == raw) return mode;
     }
-    return ThemeMode.system;
+    return ThemeMode.dark;
   }
 
   Future<void> setPalette(String id) async {
