@@ -87,6 +87,56 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
   }
 
+  /// A second finance note in USD so `_financeCurrencyOptions` offers more than
+  /// `all` and the currency scope dropdown renders. Added for the currency-scope
+  /// tests; the shared `seededFinanceNote` fixture is left untouched.
+  Note seededUsdNote() => Note(
+        id: 'n_seed_usd',
+        title: 'US card spending',
+        content: '',
+        tags: const ['finance'],
+        type: 'expense',
+        currency: 'USD',
+        amounts: [
+          MoneyEntry(
+            id: 'e_seed_usd',
+            amount: 4200,
+            category: 'Travel',
+            date: DateTime.now(),
+            type: 'expense',
+            currency: 'USD',
+          ),
+        ],
+      );
+
+  /// Seeds the two-currency fixture with the workspace in Advanced mode, where
+  /// the currency scope actually applies (`_effectiveFinanceCurrency` is 'all'
+  /// in Simple mode). The shared `seed` helper is left untouched.
+  Future<void> seedAdvanced(List<Note> notes) async {
+    SharedPreferences.setMockInitialValues({
+      'onboarded_v1': true,
+      'onboarding_flow_complete_v1': true,
+      'shell_state_v1':
+          '{"filter":"finance","tab":"finance","financeMode":"advanced"}',
+    });
+    await NoteStorage().save(notes);
+  }
+
+  Future<void> selectCurrencyScope(WidgetTester tester, String code) async {
+    await tester.tap(find.byType(DropdownButton<String>));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text(code).last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+  }
+
+  Future<void> closeSheet(WidgetTester tester) async {
+    await tester.tap(find.text('Cancel'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 400));
+  }
+
   testWidgets('quick add from the dashboard targets the monthly finance note',
       (tester) async {
     await seed([seededFinanceNote()], tab: 'finance');
@@ -141,5 +191,38 @@ void main() {
     expect(find.byType(Editor), findsOneWidget);
     expect(find.byType(NoteList), findsOneWidget);
     expect(find.byType(FinanceWorkspace), findsNothing);
+  });
+
+  testWidgets('quick add inherits the dashboard currency scope', (tester) async {
+    await seedAdvanced([seededFinanceNote(), seededUsdNote()]);
+    await pumpHome(tester, surface: const Size(1400, 900));
+
+    // Two currencies in play: the scope dropdown renders, closed on 'all'.
+    expect(find.text('All currencies'), findsOneWidget);
+
+    await selectCurrencyScope(tester, 'USD');
+
+    await openQuickAdd(tester);
+
+    expect(find.textContaining('Amount · USD'), findsOneWidget);
+    expect(find.textContaining('Amount · PHP'), findsNothing);
+
+    await closeSheet(tester);
+  });
+
+  testWidgets('quick add falls back to the note currency when the scope is all',
+      (tester) async {
+    await seedAdvanced([seededFinanceNote(), seededUsdNote()]);
+    await pumpHome(tester, surface: const Size(1400, 900));
+
+    // Leave the scope on All currencies; the dropdown is never touched.
+    expect(find.text('All currencies'), findsOneWidget);
+
+    await openQuickAdd(tester);
+
+    expect(find.textContaining('Amount · PHP'), findsOneWidget);
+    expect(find.textContaining('Amount · USD'), findsNothing);
+
+    await closeSheet(tester);
   });
 }

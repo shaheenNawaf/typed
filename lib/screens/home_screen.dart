@@ -569,6 +569,12 @@ class _HomeScreenState extends State<HomeScreen>
 
   void _quickAddTransaction(String type) {
     var note = _findOrCreateMonthlyFinanceNote();
+    // Quick-add inherits the workspace's currency scope (05-C2): logging money while
+    // scoped to USD must not silently create a PHP entry. 'all' (and simple mode,
+    // which has no scope selector) falls back to the destination note's currency.
+    final effectiveScope = _effectiveFinanceCurrency;
+    final scopeCurrency =
+        effectiveScope != 'all' ? effectiveScope : note.currency;
     // Stay on the dashboard: the editor is deliberately NOT opened, so the
     // totals update in place behind the sheet instead of navigating away.
     setState(() {
@@ -588,8 +594,8 @@ class _HomeScreenState extends State<HomeScreen>
           HapticFeedback.lightImpact();
           _showLogLandingSnackBar(entry, note);
         },
-        currencySymbol: currencySymbol(note.currency),
-        noteCurrency: note.currency,
+        currencySymbol: currencySymbol(scopeCurrency),
+        noteCurrency: scopeCurrency,
         // Prefill the form from the button the user clicked, not from the
         // note's own type — the monthly note holds both directions.
         noteType: type,
