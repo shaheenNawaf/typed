@@ -1215,6 +1215,8 @@ class _EditorState extends State<Editor> {
     final note = widget.note;
     if (note == null) return const SizedBox.shrink();
 
+    final sortedEntries = note.amounts.toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
     final currencyCounts = <String, int>{};
     for (final entry in note.amounts) {
       final currency = entry.currency ?? note.currency ?? 'PHP';
@@ -1279,9 +1281,41 @@ class _EditorState extends State<Editor> {
                     const SizedBox(height: 4),
                     Divider(height: 1, color: context.colors.border.withAlpha(100)),
                     const SizedBox(height: 8),
-                    for (var i = 0; i < note.amounts.length; i++) ...[
-                      if (i > 0) const SizedBox(height: 8),
-                      _buildTransactionItem(note, note.amounts[i]),
+                    for (var i = 0; i < sortedEntries.length; i++) ...[
+                      if (i == 0 ||
+                          sortedEntries[i - 1].date.year !=
+                              sortedEntries[i].date.year ||
+                          sortedEntries[i - 1].date.month !=
+                              sortedEntries[i].date.month ||
+                          sortedEntries[i - 1].date.day !=
+                              sortedEntries[i].date.day)
+                        Padding(
+                          padding: EdgeInsets.only(
+                            left: 16,
+                            right: 16,
+                            top: i == 0 ? 0 : 10,
+                            bottom: 6,
+                          ),
+                          child: Text(
+                            relativeDayLabel(sortedEntries[i].date)
+                                .toUpperCase(),
+                            style: TextStyle(
+                              fontSize: AppType.t10,
+                              fontFamily: context.colors.monoFontFamily,
+                              color: context.colors.muted,
+                              letterSpacing: 1,
+                            ),
+                          ),
+                        ),
+                      if (i > 0 &&
+                          sortedEntries[i - 1].date.year ==
+                              sortedEntries[i].date.year &&
+                          sortedEntries[i - 1].date.month ==
+                              sortedEntries[i].date.month &&
+                          sortedEntries[i - 1].date.day ==
+                              sortedEntries[i].date.day)
+                        const SizedBox(height: 8),
+                      _buildTransactionItem(note, sortedEntries[i]),
                     ],
                     const SizedBox(height: 8),
                   ] else
@@ -1681,37 +1715,47 @@ class _EditorState extends State<Editor> {
               ),
             ),
             const SizedBox(width: 12),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 120),
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerRight,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text.rich(
-                      TextSpan(
-                        style: TextStyle(
-                          fontSize: AppType.t13_5,
-                          fontWeight: FontWeight.w500,
-                          color: effectiveType == 'income'
-                              ? context.colors.income
-                              : context.colors.fg,
+            // Flexible so the 44dp row actions never force an overflow at narrow
+            // widths; the FittedBox already scales the amount down gracefully.
+            Flexible(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 120),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text.rich(
+                        TextSpan(
+                          style: TextStyle(
+                            fontSize: AppType.t13_5,
+                            fontWeight: FontWeight.w500,
+                            color: effectiveType == 'income'
+                                ? context.colors.income
+                                : context.colors.expense,
+                          ),
+                          children: [
+                            // Sign is the primary cue, color secondary (05-D1 a11y).
+                            TextSpan(text: effectiveType == 'income' ? '+' : '\u2212'),
+                            ...moneySpans(e.amount, effectiveCurrency, null),
+                          ],
                         ),
-                        children: moneySpans(e.amount, effectiveCurrency, null),
+                        maxLines: 1,
                       ),
-                      maxLines: 1,
-                    ),
-                    Text(
-                      '${e.date.hour.toString().padLeft(2, '0')}:${e.date.minute.toString().padLeft(2, '0')}',
-                      style: TextStyle(
-                        fontSize: AppType.t10,
-                        fontFamily: context.colors.monoFontFamily,
-                        color: context.colors.muted,
+                      Text(
+                        e.date.year == DateTime.now().year
+                            ? dayLabel(e.date)
+                            : '${dayLabel(e.date)} ${e.date.year}',
+                        style: TextStyle(
+                          fontSize: AppType.t10,
+                          fontFamily: context.colors.monoFontFamily,
+                          color: context.colors.muted,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1732,25 +1776,35 @@ class _EditorState extends State<Editor> {
                 recentCategories: widget.recentCategories,
                 onCategoryUsed: widget.onCategoryUsed,
               ),
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: Tooltip(
-                  message: 'Edit entry',
-                  child: Icon(
-                    Icons.edit_outlined,
-                    size: 14,
-                    color: context.colors.muted,
+              child: SizedBox(
+                width: 44,
+                height: 44,
+                child: Center(
+                  child: Tooltip(
+                    message: 'Edit entry',
+                    child: Icon(
+                      Icons.edit_outlined,
+                      size: 14,
+                      color: context.colors.muted,
+                    ),
                   ),
                 ),
               ),
             ),
             InkWell(
               onTap: () => _removeEntry(e.id),
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: Tooltip(
-                  message: 'Delete entry',
-                  child: Icon(Icons.close, size: 14, color: context.colors.muted),
+              child: SizedBox(
+                width: 44,
+                height: 44,
+                child: Center(
+                  child: Tooltip(
+                    message: 'Delete entry',
+                    child: Icon(
+                      Icons.close,
+                      size: 14,
+                      color: context.colors.muted,
+                    ),
+                  ),
                 ),
               ),
             ),
