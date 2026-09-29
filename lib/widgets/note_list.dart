@@ -35,6 +35,8 @@ class NoteList extends StatefulWidget {
   final FinanceSummary? financeSummary;
   final String? financePeriod;
   final ValueChanged<String>? onFinancePeriodChanged;
+  final String? financeSimplePeriod;
+  final ValueChanged<String>? onFinanceSimplePeriodChanged;
   final String? financeCurrency;
   final List<String> financeCurrencyOptions;
   final ValueChanged<String>? onFinanceCurrencyChanged;
@@ -87,6 +89,8 @@ class NoteList extends StatefulWidget {
     this.financeSummary,
     this.financePeriod,
     this.onFinancePeriodChanged,
+    this.financeSimplePeriod,
+    this.onFinanceSimplePeriodChanged,
     this.financeCurrency,
     this.financeCurrencyOptions = const ['all'],
     this.onFinanceCurrencyChanged,
@@ -406,6 +410,8 @@ class _NoteListState extends State<NoteList> {
           summary: widget.financeSummary!,
           budgets: widget.budgets ?? const [],
           budgetActuals: widget.budgetActuals,
+          period: widget.financeSimplePeriod ?? 'month',
+          onPeriodChanged: widget.onFinanceSimplePeriodChanged,
           onAddExpense: widget.onQuickAddEntry,
           onAddIncome: widget.onQuickAddIncome,
           onSelectNote: widget.onSelectNote,

@@ -447,6 +447,14 @@ class SimpleFinanceView extends StatelessWidget {
   final void Function(String noteId, String entryId)? onSelectEntry;
   final VoidCallback? onOpenAdvanced;
 
+  /// Which period the summary reflects. The label is derived from it, so the card
+  /// never claims a scope it is not showing.
+  final String period;
+
+  /// When non-null, renders the Day / Week / Month / All filter. Callers that do not
+  /// offer a scope (desktop, tests, legacy mounts) get the previous single-scope card.
+  final ValueChanged<String>? onPeriodChanged;
+
   const SimpleFinanceView({
     super.key,
     required this.summary,
@@ -457,6 +465,8 @@ class SimpleFinanceView extends StatelessWidget {
     this.onSelectNote,
     this.onSelectEntry,
     this.onOpenAdvanced,
+    this.period = 'month',
+    this.onPeriodChanged,
   });
 
   @override
@@ -485,6 +495,14 @@ class SimpleFinanceView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (onPeriodChanged != null) ...[
+          _PeriodSelector(
+            period: period,
+            onChanged: onPeriodChanged!,
+            periods: const ['day', 'week', 'month', 'all'],
+          ),
+          const SizedBox(height: 12),
+        ],
         Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
@@ -498,7 +516,7 @@ class SimpleFinanceView extends StatelessWidget {
               Row(
                 children: [
                   Text(
-                    'THIS MONTH',
+                    periodName(period).toUpperCase(),
                     style: TextStyle(
                       fontSize: AppType.t10,
                       fontWeight: FontWeight.w600,
@@ -862,18 +880,20 @@ class _PeriodSelector extends StatelessWidget {
   final String period;
   final ValueChanged<String> onChanged;
   final double? controlHeight;
+  final List<String> periods;
   const _PeriodSelector({
     required this.period,
     required this.onChanged,
     this.controlHeight,
+    this.periods = const ['all', 'week', 'month', 'year'],
   });
 
-  static const _periods = ['all', 'week', 'month', 'year'];
   static const _labels = {
     'all': 'All',
     'week': 'Week',
     'month': 'Month',
     'year': 'Year',
+    'day': 'Day',
   };
 
   @override
@@ -896,9 +916,9 @@ class _PeriodSelector extends StatelessWidget {
             ? CrossAxisAlignment.stretch
             : CrossAxisAlignment.center,
         children: [
-          for (var i = 0; i < _periods.length; i++) ...[
+          for (var i = 0; i < periods.length; i++) ...[
             if (i > 0) const SizedBox(width: 4),
-            Expanded(child: _segment(context, c, _periods[i])),
+            Expanded(child: _segment(context, c, periods[i])),
           ],
         ],
       ),

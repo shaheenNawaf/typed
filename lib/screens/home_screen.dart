@@ -67,6 +67,9 @@ class _HomeScreenState extends State<HomeScreen>
   List<String> _recentCategories = [];
   Future<void> _categoryWrite = Future.value();
   String _financePeriod = 'all';
+  /// Simple mode's own scope. Advanced keeps [_financePeriod]; the two are
+  /// deliberately separate because their defaults differ (month vs all).
+  String _financeSimplePeriod = 'month';
   String _financeCurrency = 'all';
   // 'simple' | 'advanced' — Simple is the calm this-month default; Advanced
   // is the full dashboard. The choice is made during onboarding and lives
@@ -118,6 +121,7 @@ class _HomeScreenState extends State<HomeScreen>
           'sidebar': _sidebarState,
           'sortDesc': _sortDesc,
           'financePeriod': _financePeriod,
+          'financeSimplePeriod': _financeSimplePeriod,
           'financeCurrency': _financeCurrency,
           'financeMode': _financeMode,
           'showEditor': _showEditor,
@@ -148,6 +152,8 @@ class _HomeScreenState extends State<HomeScreen>
       _sortDesc = data['sortDesc'] as bool? ?? _sortDesc;
       final period = data['financePeriod'] as String?;
       if (period != null) _financePeriod = period;
+      final simplePeriod = data['financeSimplePeriod'] as String?;
+      if (simplePeriod != null) _financeSimplePeriod = simplePeriod;
       final currency = data['financeCurrency'] as String?;
       if (currency != null) _financeCurrency = currency;
       final financeMode = data['financeMode'] as String?;
@@ -874,16 +880,18 @@ class _HomeScreenState extends State<HomeScreen>
     return d.year == now.year && d.month == now.month && d.day == now.day;
   }
 
-  // Simple finance mode always renders a this-month, all-currencies view;
-  // the stored period/currency scope only applies to the Advanced dashboard.
+  // Simple mode has its own persisted scope (Day/Week/Month/All) and always spans
+  // all currencies; the Advanced dashboard keeps the stored period + currency scope.
   String get _effectiveFinancePeriod =>
-      _financeMode == 'simple' ? 'month' : _financePeriod;
+      _financeMode == 'simple' ? _financeSimplePeriod : _financePeriod;
   String get _effectiveFinanceCurrency =>
       _financeMode == 'simple' ? 'all' : _financeCurrency;
 
   bool _isInPeriod(DateTime d) {
     final now = DateTime.now();
     switch (_effectiveFinancePeriod) {
+      case 'day':
+        return _isToday(d);
       case 'week':
         final monday = now.subtract(Duration(days: now.weekday - 1));
         final startOfWeek = DateTime(monday.year, monday.month, monday.day);
@@ -905,6 +913,11 @@ class _HomeScreenState extends State<HomeScreen>
   bool _isInPreviousPeriod(DateTime d) {
     final now = DateTime.now();
     switch (_effectiveFinancePeriod) {
+      case 'day':
+        final yesterday = DateTime(now.year, now.month, now.day - 1);
+        return d.year == yesterday.year &&
+            d.month == yesterday.month &&
+            d.day == yesterday.day;
       case 'week':
         final monday = now.subtract(Duration(days: now.weekday - 1));
         final curStart = DateTime(monday.year, monday.month, monday.day);
@@ -926,6 +939,8 @@ class _HomeScreenState extends State<HomeScreen>
   double get _daysInCurrentPeriod {
     final now = DateTime.now();
     switch (_effectiveFinancePeriod) {
+      case 'day':
+        return 1;
       case 'week':
         final monday = now.subtract(Duration(days: now.weekday - 1));
         return now
@@ -1030,7 +1045,7 @@ class _HomeScreenState extends State<HomeScreen>
       previousPeriodExpense: prevExpenseByCurrency[dominant] ?? 0,
       previousPeriodIncome: prevIncomeByCurrency[dominant] ?? 0,
       averageDailySpend: avgDaily,
-      averageAvailable: _financePeriod != 'all',
+      averageAvailable: _effectiveFinancePeriod != 'all',
       noteIds: noteIdsInPeriod,
       entriesByNote: entriesByNote,
       hasAnyEntries: _hasAnyFinanceEntries,
@@ -2604,6 +2619,9 @@ class _HomeScreenState extends State<HomeScreen>
         financeSummary: _activeFilter == 'finance' ? _financeSummary : null,
         financePeriod: _financePeriod,
         onFinancePeriodChanged: (p) => setState(() => _financePeriod = p),
+        financeSimplePeriod: _financeSimplePeriod,
+        onFinanceSimplePeriodChanged: (p) =>
+            setState(() => _financeSimplePeriod = p),
         financeCurrency: _financeCurrency,
         financeCurrencyOptions: _financeCurrencyOptions,
         onFinanceCurrencyChanged: (currency) =>

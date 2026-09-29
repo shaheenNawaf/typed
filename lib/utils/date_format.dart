@@ -78,6 +78,8 @@ String relativeDayLabel(DateTime d, {DateTime? now}) {
 String periodName(String period, {DateTime? now}) {
   final n = now ?? DateTime.now();
   switch (period) {
+    case 'day':
+      return 'Today';
     case 'week':
       return 'This week';
     case 'month':
