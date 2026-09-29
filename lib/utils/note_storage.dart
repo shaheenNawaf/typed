@@ -7,6 +7,7 @@ import '../models/note.dart';
 import 'date_format.dart';
 import 'finance_utils.dart';
 import 'markdown_display.dart';
+import 'note_kind.dart';
 import 'streak.dart';
 
 /// Truncates without splitting a UTF-16 surrogate pair (emoji in note
@@ -156,7 +157,7 @@ class NoteStorage {
     final entries = <MoneyEntry>[];
     final typeByEntry = <String, String>{};
     for (final note in notes) {
-      if (note.isArchived || note.isDeleted || note.type == 'text') continue;
+      if (!isVisibleFinanceNote(note)) continue;
       for (final entry in note.amounts) {
         if (!entry.date.isBefore(monthStart) &&
             entry.date.isBefore(nextMonth)) {

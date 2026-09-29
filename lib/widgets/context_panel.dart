@@ -127,7 +127,7 @@ class ContextPanel extends StatelessWidget {
                             onTap: onTagFilter == null
                                 ? null
                                 : () => onTagFilter!(tag),
-                            borderRadius: BorderRadius.circular(5),
+                            borderRadius: BorderRadius.circular(AppRadius.chip),
                             child: Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 8,
@@ -135,7 +135,7 @@ class ContextPanel extends StatelessWidget {
                               ),
                               decoration: BoxDecoration(
                                 color: c.tagBg,
-                                borderRadius: BorderRadius.circular(5),
+                                borderRadius: BorderRadius.circular(AppRadius.chip),
                               ),
                               child: Text(
                                 '#$tag',

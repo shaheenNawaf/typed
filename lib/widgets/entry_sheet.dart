@@ -46,6 +46,13 @@ class EntrySheet extends StatefulWidget {
   final List<String> recentCategories;
   final void Function(String category)? onCategoryUsed;
 
+  /// Where this entry will be saved, e.g. "Finance — September 2026".
+  /// Null hides the destination row entirely (edit flows, non-finance callers).
+  final String? destinationLabel;
+
+  /// Returns the newly chosen destination label, or null if the user cancelled.
+  final Future<String?> Function()? onChangeDestination;
+
   const EntrySheet({
     super.key,
     this.entry,
@@ -56,6 +63,8 @@ class EntrySheet extends StatefulWidget {
     this.customCategories = const [],
     this.recentCategories = const [],
     this.onCategoryUsed,
+    this.destinationLabel,
+    this.onChangeDestination,
   });
 
   static Future<void> show(
@@ -68,13 +77,15 @@ class EntrySheet extends StatefulWidget {
     List<String> customCategories = const [],
     List<String> recentCategories = const [],
     void Function(String category)? onCategoryUsed,
+    String? destinationLabel,
+    Future<String?> Function()? onChangeDestination,
   }) {
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: context.colors.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.panel)),
       ),
       constraints: const BoxConstraints(maxWidth: 560),
       builder: (ctx) => Padding(
@@ -90,6 +101,8 @@ class EntrySheet extends StatefulWidget {
           customCategories: customCategories,
           recentCategories: recentCategories,
           onCategoryUsed: onCategoryUsed,
+          destinationLabel: destinationLabel,
+          onChangeDestination: onChangeDestination,
         ),
       ),
     );
@@ -112,6 +125,7 @@ class _EntrySheetState extends State<EntrySheet> {
   String? _recurInterval;
   DateTime? _recurEnd;
   String? _entryType;
+  String? _destinationLabel;
   bool _showMore = false;
   bool _showAllCategories = false;
   bool _isScanning = false;
@@ -144,6 +158,7 @@ class _EntrySheetState extends State<EntrySheet> {
     _recurInterval = e?.recurInterval;
     _recurEnd = e?.recurEnd;
     _entryType = e?.type ?? widget.noteType ?? 'expense';
+    _destinationLabel = widget.destinationLabel;
     if (e == null && _amountCtrl.text.isEmpty) {
       _amountCtrl.selection = TextSelection.collapsed(offset: 0);
     }
@@ -436,7 +451,7 @@ class _EntrySheetState extends State<EntrySheet> {
                 margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
                   color: context.colors.border,
-                  borderRadius: BorderRadius.circular(2),
+                  borderRadius: BorderRadius.circular(AppRadius.chip),
                 ),
               ),
             ),
@@ -935,6 +950,83 @@ class _EntrySheetState extends State<EntrySheet> {
 
             // -- Submit buttons --
             const SizedBox(height: 16),
+          if (_destinationLabel != null) ...[
+            Semantics(
+              label: 'Saving to ${widget.destinationLabel}',
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: context.colors.listBg,
+                  borderRadius: BorderRadius.circular(AppRadius.card),
+                  border: Border.all(color: context.colors.border),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.folder_outlined,
+                      size: 15,
+                      color: context.colors.muted,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(
+                              text: 'Saving to: ',
+                              style: TextStyle(
+                                fontSize: AppType.t12,
+                                color: context.colors.muted,
+                              ),
+                            ),
+                            TextSpan(
+                              text: _destinationLabel,
+                              style: TextStyle(
+                                fontSize: AppType.t12,
+                                color: context.colors.fg,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (widget.onChangeDestination != null) ...[
+                      const SizedBox(width: 8),
+                      Tooltip(
+                        message: 'Choose a different note',
+                        child: InkWell(
+                          onTap: () async {
+                            final picked = await widget.onChangeDestination!();
+                            if (picked != null && mounted) {
+                              setState(() => _destinationLabel = picked);
+                            }
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            child: Text(
+                              'Change',
+                              style: TextStyle(
+                                fontSize: AppType.t12,
+                                color: context.colors.accent,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
             Row(
               children: [
                 Expanded(

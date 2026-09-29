@@ -4,6 +4,7 @@ import 'package:cross_file/cross_file.dart';
 import '../models/budget.dart';
 import '../models/note.dart';
 import 'finance_utils.dart';
+import 'note_kind.dart';
 
 /// Escapes a single CSV field per RFC 4180: fields containing a comma,
 /// double-quote, or newline are wrapped in double quotes, and embedded quotes
@@ -89,7 +90,7 @@ class Backup {
     line('Date,Type,Category,Amount,Currency,Note,Payment Method');
 
     for (final note in notes) {
-      if (note.type == 'text' || note.isDeleted) continue;
+      if (!isFinanceNote(note) || note.isDeleted) continue;
       for (final entry in note.amounts) {
         final noteField = entry.note ?? '';
         final pm = entry.paymentMethod ?? '';

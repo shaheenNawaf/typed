@@ -22,6 +22,7 @@ import '../utils/id.dart';
 import '../utils/image_paths.dart';
 import '../utils/markdown_display.dart';
 import '../utils/markdown_spans.dart';
+import '../utils/note_kind.dart';
 import '../utils/slash_commands.dart';
 import 'editor_toolbar.dart';
 import 'entry_sheet.dart';
@@ -94,6 +95,11 @@ class _EditorState extends State<Editor> {
   final FocusNode _titleFocus = FocusNode();
   final FocusNode _newTagFocus = FocusNode();
   final FocusNode _contentFocus = FocusNode();
+  final FocusNode _descFocus = FocusNode();
+  late TextEditingController _descCtrl;
+  bool _editingDescription = false;
+  bool _sourceMode = false;
+  bool _descHover = false;
   bool _addingTag = false;
   final ImagePicker _picker = ImagePicker();
   List<Note> _linkSuggestions = [];
@@ -176,6 +182,7 @@ class _EditorState extends State<Editor> {
       styles: _kFallbackMdStyles,
     );
     _newTagCtrl = TextEditingController();
+    _descCtrl = TextEditingController(text: widget.note?.content ?? '');
     _contentCtrl.addListener(_onContentChange);
   }
 
@@ -186,8 +193,10 @@ class _EditorState extends State<Editor> {
     _titleFocus.dispose();
     _newTagFocus.dispose();
     _contentFocus.dispose();
+    _descFocus.dispose();
     _titleCtrl.dispose();
     _contentCtrl.dispose();
+    _descCtrl.dispose();
     _newTagCtrl.dispose();
     _checklistAddCtrl.dispose();
     _checklistEditCtrl.dispose();
@@ -207,6 +216,9 @@ class _EditorState extends State<Editor> {
       _contentCtrl.text = widget.note?.content ?? '';
       // Per-note transient UI must not bleed into the next note.
       _addingTag = false;
+      _editingDescription = false;
+      _descCtrl.text = widget.note?.content ?? '';
+      _sourceMode = false;
       _newTagCtrl.clear();
       _checklistEditIdx = null;
       _linkSuggestions = [];
@@ -301,8 +313,7 @@ class _EditorState extends State<Editor> {
     final note = widget.note;
     if (widget.previewMode ||
         note == null ||
-        note.type == 'expense' ||
-        note.type == 'income' ||
+        isFinanceNote(note) ||
         !selection.isValid ||
         !selection.isCollapsed) {
       if (_slashSuggestions.isNotEmpty || _slashToken != null) {
@@ -658,7 +669,9 @@ class _EditorState extends State<Editor> {
     // but not a widget rebuild.
     if (mounted) setState(() {});
     widget.onTitleChange(_titleCtrl.text);
-    widget.onContentChange(_contentCtrl.text);
+    widget.onContentChange(
+      _isFinanceNote ? _descCtrl.text : _contentCtrl.text,
+    );
   }
 
   Future<void> _pickFromGallery() async {
@@ -828,8 +841,7 @@ class _EditorState extends State<Editor> {
   }
 
   bool get _isFinanceNote =>
-      widget.note != null &&
-      (widget.note!.type == 'expense' || widget.note!.type == 'income');
+      widget.note != null && isFinanceNote(widget.note!);
 
   @override
   Widget build(BuildContext context) {
@@ -859,9 +871,10 @@ class _EditorState extends State<Editor> {
         child: Column(
           children: [
             _buildTitleBar(),
-            if (_isFinanceNote)
-              _buildFinanceContent()
-            else ...[
+            if (_isFinanceNote) ...[
+              _buildTagBar(),
+              if (_sourceMode) _buildFinanceSource() else _buildFinanceContent(),
+            ] else ...[
               if (widget.note != null) _buildTagBar(),
               Expanded(
                 child: widget.note != null && widget.note!.type == 'todo'
@@ -894,8 +907,7 @@ class _EditorState extends State<Editor> {
 
   Widget _buildTitleBar() {
     final note = widget.note;
-    final isFinance =
-        note != null && (note.type == 'expense' || note.type == 'income');
+    final isFinance = note != null && isFinanceNote(note);
     final isMobile = MediaQuery.of(context).size.width < 600;
     return Container(
       padding: EdgeInsets.fromLTRB(_horizontalPad, 14, _horizontalPad, 10),
@@ -959,6 +971,8 @@ class _EditorState extends State<Editor> {
                     widget.onTogglePin?.call(note);
                   case 'archive':
                     widget.onArchive?.call(note);
+                  case 'source':
+                    setState(() => _sourceMode = !_sourceMode);
                   case 'delete':
                     widget.onDelete?.call(note);
                   case 'type:text':
@@ -1015,6 +1029,21 @@ class _EditorState extends State<Editor> {
                     ),
                   ),
                 );
+                if (isFinance) {
+                  items.add(const PopupMenuDivider());
+                  items.add(
+                    PopupMenuItem(
+                      value: 'source',
+                      child: Row(
+                        children: [
+                          const Icon(Icons.code, size: 18),
+                          const SizedBox(width: 8),
+                          Text(_sourceMode ? 'View structured' : 'View source'),
+                        ],
+                      ),
+                    ),
+                  );
+                }
                 if (isMobile2) {
                   items.add(const PopupMenuDivider());
                   items.add(
@@ -1237,6 +1266,7 @@ class _EditorState extends State<Editor> {
               child: ListView(
                 padding: EdgeInsets.zero,
                 children: [
+                  _buildFinanceDescription(),
                   if (note.amounts.isNotEmpty) ...[
                     _buildSummaryCards(
                       totalExpenses,
@@ -1267,6 +1297,202 @@ class _EditorState extends State<Editor> {
                   child: _buildAddEntryButton(note),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// True when stored prose uses block-level markdown that a plain-text
+  /// description field cannot round-trip without losing formatting.
+  bool _proseIsRich(String prose) {
+    for (final raw in prose.split('\n')) {
+      final line = raw.trim();
+      if (line.isEmpty) continue;
+      if (line.startsWith('#')) return true;
+      if (RegExp(r'^([-*+]|\d+\.)\s').hasMatch(line)) return true;
+      if (line.contains('|')) return true;
+      if (line.contains('![')) return true;
+      if (line.startsWith('>')) return true;
+      if (line.startsWith('```')) return true;
+    }
+    return false;
+  }
+
+  Widget _buildFinanceDescription() {
+    final note = widget.note;
+    if (note == null) return const SizedBox.shrink();
+    final c = context.colors;
+    final prose = note.content;
+
+    if (prose.trim().isNotEmpty && _proseIsRich(prose)) {
+      final lines = plainProse(prose);
+      return Semantics(
+        label: 'Formatted description, read only',
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (lines.isNotEmpty) ...[
+                Text(
+                  lines,
+                  maxLines: 6,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppType.t13_5,
+                    color: c.muted,
+                    height: 1.45,
+                  ),
+                ),
+                const SizedBox(height: 6),
+              ],
+              Row(
+                children: [
+                  Icon(Icons.info_outline, size: 13, color: c.muted),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'This note has formatted text. Open source to edit.',
+                      style: TextStyle(fontSize: AppType.t11, color: c.muted),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (prose.trim().isEmpty && !_editingDescription) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Tooltip(
+            message: 'Add a plain-text description',
+            child: Semantics(
+              label: 'Add description',
+              button: true,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                onEnter: (_) => setState(() => _descHover = true),
+                onExit: (_) => setState(() => _descHover = false),
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    setState(() => _editingDescription = true);
+                    _descFocus.requestFocus();
+                  },
+                  child: Text(
+                    '+ Add description',
+                    style: TextStyle(
+                      fontSize: AppType.t12,
+                      color: _descHover ? c.accent : c.muted,
+                      fontWeight: FontWeight.w400,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+      child: TextField(
+        controller: _descCtrl,
+        focusNode: _descFocus,
+        maxLines: null,
+        minLines: 1,
+        keyboardType: TextInputType.multiline,
+        autocorrect: false,
+        enableSuggestions: false,
+        spellCheckConfiguration: const SpellCheckConfiguration.disabled(),
+        onChanged: (_) => _syncContent(),
+        style: TextStyle(
+          fontSize: AppType.t13_5,
+          color: c.fg,
+          fontWeight: FontWeight.w400,
+          height: 1.45,
+        ),
+        decoration: InputDecoration.collapsed(
+          hintText: 'Add a description',
+          hintStyle: TextStyle(fontSize: AppType.t13_5, color: c.muted),
+        ),
+      ),
+    );
+  }
+
+  /// Escape hatch for finance notes whose prose is rich markdown: shows
+  /// `note.content` verbatim in a monospace field. Entries are structured data
+  /// and are deliberately absent — the derived markdown table is one-way, so
+  /// exposing it here would discard edits.
+  Widget _buildFinanceSource() {
+    final c = context.colors;
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.code, size: 13, color: c.muted),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Raw markdown. Transactions are edited structurally.',
+                    style: TextStyle(fontSize: AppType.t11, color: c.muted),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => setState(() => _sourceMode = false),
+                  child: Text(
+                    'View structured',
+                    style: TextStyle(
+                      fontSize: AppType.t12,
+                      color: c.accent,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: c.listBg,
+                  borderRadius: BorderRadius.circular(AppRadius.card),
+                  border: Border.all(color: c.border),
+                ),
+                child: TextField(
+                  controller: _descCtrl,
+                  maxLines: null,
+                  minLines: null,
+                  expands: true,
+                  textAlignVertical: TextAlignVertical.top,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  spellCheckConfiguration: const SpellCheckConfiguration.disabled(),
+                  onChanged: (_) => _syncContent(),
+                  style: TextStyle(
+                    fontFamily: c.monoFontFamily,
+                    fontSize: AppType.t12,
+                    color: c.fg,
+                    height: 1.5,
+                  ),
+                  decoration: const InputDecoration.collapsed(
+                    hintText: '',
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
       ),

@@ -137,7 +137,7 @@ class _EditorToolbarState extends State<EditorToolbar> {
       child: Material(
         elevation: 4,
         shadowColor: Colors.black.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(AppRadius.panel),
          child: AnimatedSize(
            duration: AppMotion.duration(context, AppMotion.base),
            curve: AppMotion.emphasized,
@@ -148,7 +148,7 @@ class _EditorToolbarState extends State<EditorToolbar> {
              ),
              decoration: BoxDecoration(
                color: context.colors.surface,
-               borderRadius: BorderRadius.circular(24),
+               borderRadius: BorderRadius.circular(AppRadius.panel),
                border: Border.all(color: context.colors.border.withAlpha(100)),
              ),
               child: isMobile
@@ -249,7 +249,7 @@ class _EditorToolbarState extends State<EditorToolbar> {
         if (!_expanded) ...[
           InkWell(
             onTap: () => setState(() => _expanded = true),
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(AppRadius.card),
             child: Container(
               width: 32, height: 32,
               alignment: Alignment.center,
@@ -273,7 +273,7 @@ class _EditorToolbarState extends State<EditorToolbar> {
                   const SizedBox(width: 4, height: 36),
                   InkWell(
                     onTap: () => setState(() => _expanded = false),
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(AppRadius.card),
                     child: Container(
                       width: 32,
                       height: 32,

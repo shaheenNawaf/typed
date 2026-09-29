@@ -19,6 +19,13 @@ class AppColors extends ThemeExtension<AppColors> {
   final Color sidebarHover;
   final Color income;
   final Color destructive;
+  /// Money going out, negative values, and over-budget status. Distinct from
+  /// [destructive] (which is for destructive ACTIONS like delete) so a widget
+  /// can never accidentally paint a brand surface in expense red.
+  final Color expense;
+
+  /// Budget at 80-100% of its limit. Amber, never red or green.
+  final Color warning;
   final String monoFontFamily;
 
   const AppColors({
@@ -39,20 +46,33 @@ class AppColors extends ThemeExtension<AppColors> {
     required this.sidebarHover,
     required this.income,
     required this.destructive,
+    required this.expense,
+    required this.warning,
     required this.monoFontFamily,
   });
 
-  /// Readable foreground for text/icons painted on [background]. Light-accent
-  /// palettes (nord, monochrome-dark) made a hardcoded white invisible;
-  /// this keeps every CTA on-theme instead of per-call-site guesses.
+  /// Readable foreground for text/icons painted on [background].
+  ///
+  /// 0.1791 is the WCAG crossover where white and black text have equal
+  /// contrast against a background: (L + 0.05)^2 == 1.05 * 0.05. The previous
+  /// 0.30 threshold kept white text on backgrounds already too light for it,
+  /// so light-accent palettes (nord, monochrome-dark, solarized) rendered
+  /// CTAs below AA.
   static Color readableOn(Color background) =>
-      background.computeLuminance() > 0.30
+      background.computeLuminance() > 0.1791
       ? const Color(0xDE000000)
       : Colors.white;
 
   Color get onAccent => readableOn(accent);
   Color get onIncome => readableOn(income);
   Color get onDestructive => readableOn(destructive);
+
+  Color get onExpense => readableOn(expense);
+  Color get onWarning => readableOn(warning);
+
+  /// Zero amounts, "no data", and non-money stat cards. Neutral by design:
+  /// a zero balance is a fact, not an alarm.
+  Color get neutral => muted;
 
   @override
   AppColors copyWith({
@@ -73,6 +93,8 @@ class AppColors extends ThemeExtension<AppColors> {
     Color? sidebarHover,
     Color? income,
     Color? destructive,
+    Color? expense,
+    Color? warning,
     String? monoFontFamily,
   }) {
     return AppColors(
@@ -93,6 +115,8 @@ class AppColors extends ThemeExtension<AppColors> {
       sidebarHover: sidebarHover ?? this.sidebarHover,
       income: income ?? this.income,
       destructive: destructive ?? this.destructive,
+      expense: expense ?? this.expense,
+      warning: warning ?? this.warning,
       monoFontFamily: monoFontFamily ?? this.monoFontFamily,
     );
   }
@@ -118,6 +142,8 @@ class AppColors extends ThemeExtension<AppColors> {
       sidebarHover: Color.lerp(sidebarHover, other.sidebarHover, t)!,
       income: Color.lerp(income, other.income, t)!,
       destructive: Color.lerp(destructive, other.destructive, t)!,
+      expense: Color.lerp(expense, other.expense, t)!,
+      warning: Color.lerp(warning, other.warning, t)!,
       monoFontFamily: t < 0.5 ? monoFontFamily : other.monoFontFamily,
     );
   }

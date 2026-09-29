@@ -116,6 +116,29 @@ String stripInlineMarkdown(String text) {
   return out.trim();
 }
 
+/// Multi-line plain-text rendering of markdown [content] for read-only display:
+/// block markers removed per line, inline markdown stripped, line breaks kept.
+/// Horizontal rules and pipe-leading table rows are dropped whole — neither has
+/// a sensible plain-text form. Unlike [contentPreview] this never collapses
+/// newlines and never truncates, so callers cap it with `maxLines` instead.
+/// Display only: storage is never rewritten.
+String plainProse(String content) {
+  final out = <String>[];
+  for (final raw in content.split('\n')) {
+    if (RegExp(r'^\s*---+\s*$').hasMatch(raw)) continue;
+    if (RegExp(r'^\s*\|.*$').hasMatch(raw)) continue;
+    final line = stripInlineMarkdown(
+      raw
+          .replaceAll(RegExp(r'^\s*-\s+\[[ xX]\]\s*'), '')
+          .replaceAll(RegExp(r'^#{1,6}\s+'), '')
+          .replaceAll(RegExp(r'^\s*>\s+'), '')
+          .replaceAll(RegExp(r'^\s*[-+*]\s+'), ''),
+    );
+    if (line.isNotEmpty) out.add(line);
+  }
+  return out.join('\n');
+}
+
 /// One-line plain-text preview of markdown [content]: block syntax removed
 /// (checkbox markers INCLUDING the x — no stray-x artifacts), inline markdown
 /// stripped (code-span CONTENT kept), leftover brackets dropped, whitespace

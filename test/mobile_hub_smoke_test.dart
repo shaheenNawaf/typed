@@ -66,8 +66,25 @@ void main() {
       final listY = tester.getTopLeft(find.text('LIST CONTENT')).dy;
       final dockY = tester.getTopLeft(find.byIcon(Icons.home_outlined)).dy;
       expect(listY, lessThan(dockY));
-      // regression: the dock must hug the bottom, never expand over the body
-      expect(dockY, greaterThan(600));
+      // regression: the dock must hug the bottom at several pane sizes —
+      // a centered or drifted dock means the Scaffold collapsed.
+      for (final size in [
+        const Size(390, 844),
+        const Size(511, 891),
+        const Size(700, 900),
+      ]) {
+        await tester.binding.setSurfaceSize(size);
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        final dockY = tester.getTopLeft(find.byIcon(Icons.home_outlined)).dy;
+        // ignore: avoid_print
+        print('DOCKY ${size.width}x${size.height}: dockTop='
+            '${dockY.round()} expected>=${(size.height - 200).round()}');
+        expect(dockY, greaterThan(size.height - 200),
+            reason:
+                'dock drifted to the middle at ${size.width}x${size.height}');
+      }
     },
   );
 

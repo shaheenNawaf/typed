@@ -456,7 +456,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           ),
                           decoration: BoxDecoration(
                             color: c.listBg,
-                            borderRadius: BorderRadius.circular(99),
+                            borderRadius: BorderRadius.circular(AppRadius.chip),
                           ),
                           child: Text(
                             badge,
@@ -511,7 +511,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 height: 6,
                 decoration: BoxDecoration(
                   color: index == _page ? c.accent : c.border,
-                  borderRadius: BorderRadius.circular(3),
+                  borderRadius: BorderRadius.circular(AppRadius.chip),
                 ),
               );
             }),

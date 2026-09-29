@@ -5,8 +5,11 @@ import '../models/note.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_motion.dart';
+import '../utils/date_format.dart';
+import '../utils/date_grouping.dart';
 import '../utils/finance_utils.dart';
 import '../utils/markdown_display.dart';
+import '../utils/note_kind.dart';
 import 'finance_dashboard.dart';
 import 'long_press_menu.dart';
 
@@ -182,7 +185,19 @@ class _NoteListState extends State<NoteList> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (!_mergeControlsIntoList)
+        if (!_mergeControlsIntoList) ...[
+          if (widget.activeFilter == 'finance')
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+              child: Text(
+                'Finance notes',
+                style: TextStyle(
+                  fontSize: AppType.t11,
+                  fontWeight: FontWeight.w600,
+                  color: context.colors.muted,
+                ),
+              ),
+            ),
           Padding(
             // One snug control row below the workspace header: page mode
             // toggle on the left, sort/settings on the right.
@@ -201,6 +216,7 @@ class _NoteListState extends State<NoteList> {
               ],
             ),
           ),
+        ],
         if (widget.activeTag != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -243,71 +259,87 @@ class _NoteListState extends State<NoteList> {
   List<Widget> _headerControls(bool isMobilePane) {
     final isDesktopWindow = MediaQuery.of(context).size.width >= 1024;
     return [
-      Semantics(
-        label: 'Toggle sort order',
-        child: InkWell(
-          onTap: widget.onSortToggle,
-          borderRadius: BorderRadius.circular(AppRadius.chip),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-            child: isMobilePane
-                ? Icon(
-                    widget.sortDesc
-                        ? Icons.arrow_downward
-                        : Icons.sort_by_alpha,
-                    size: 16,
-                    color: context.colors.muted,
-                  )
-                : Text(
-                    widget.sortDesc ? 'Recent \u2193' : 'A\u2013Z \u2191',
-                    style: TextStyle(
-                      fontSize: AppType.t13_5,
-                      color: context.colors.muted,
-                    ),
-                  ),
-          ),
-        ),
-      ),
-      const SizedBox(width: 4),
-      if (widget.activeFilter != 'finance' && isDesktopWindow)
-        Semantics(
-          label: 'New note',
+      Builder(builder: (context) {
+        final sort = Semantics(
+          label: 'Toggle sort order',
           child: InkWell(
-            onTap: widget.onNewNote,
+            onTap: widget.onSortToggle,
             borderRadius: BorderRadius.circular(AppRadius.chip),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
               child: isMobilePane
-                  ? const Icon(Icons.add, size: 16)
-                  : Row(
-                      children: [
-                        const Icon(Icons.add, size: 16),
-                        const SizedBox(width: 2),
-                        Text(
-                          'New',
-                          style: TextStyle(
-                            fontSize: AppType.t13_5,
-                            color: context.colors.muted,
-                          ),
-                        ),
-                      ],
+                  ? Icon(
+                      widget.sortDesc
+                          ? Icons.arrow_downward
+                          : Icons.sort_by_alpha,
+                      size: 16,
+                      color: context.colors.muted,
+                    )
+                  : Text(
+                      widget.sortDesc ? 'Recent \u2193' : 'A\u2013Z \u2191',
+                      style: TextStyle(
+                        fontSize: AppType.t13_5,
+                        color: context.colors.muted,
+                      ),
                     ),
             ),
           ),
-        ),
+        );
+        if (!isMobilePane) return sort;
+        return Tooltip(
+          message: widget.sortDesc ? 'Sort: most recent first' : 'Sort: A to Z',
+          child: sort,
+        );
+      }),
+      const SizedBox(width: 4),
+      if (widget.activeFilter != 'finance' && isDesktopWindow)
+        Builder(builder: (context) {
+          final newNote = Semantics(
+            label: 'New note',
+            child: InkWell(
+              onTap: widget.onNewNote,
+              borderRadius: BorderRadius.circular(AppRadius.chip),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                child: isMobilePane
+                    ? const Icon(Icons.add, size: 16)
+                    : Row(
+                        children: [
+                          const Icon(Icons.add, size: 16),
+                          const SizedBox(width: 2),
+                          Text(
+                            'New',
+                            style: TextStyle(
+                              fontSize: AppType.t13_5,
+                              color: context.colors.muted,
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+            ),
+          );
+          if (!isMobilePane) return newNote;
+          return Tooltip(message: 'New note', child: newNote);
+        }),
       if (widget.onOpenSettings != null) ...[
         const SizedBox(width: 4),
-        Semantics(
-          label: 'Settings',
-          child: InkWell(
-            onTap: widget.onOpenSettings,
-            borderRadius: BorderRadius.circular(AppRadius.chip),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              child: Icon(
-                Icons.settings_outlined,
-                size: 16,
-                color: context.colors.muted,
+        Tooltip(
+          message: widget.activeFilter == 'finance'
+              ? 'Finance settings'
+              : 'Settings',
+          child: Semantics(
+            label: 'Settings',
+            child: InkWell(
+              onTap: widget.onOpenSettings,
+              borderRadius: BorderRadius.circular(AppRadius.chip),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                child: Icon(
+                  Icons.settings_outlined,
+                  size: 16,
+                  color: context.colors.muted,
+                ),
               ),
             ),
           ),
@@ -491,21 +523,7 @@ class _NoteListState extends State<NoteList> {
           );
           break;
         case 'finance':
-          child = _emptyState(
-            icon: Icons.account_balance_wallet_outlined,
-            title: 'No financial records yet',
-            subtitle: 'Track expenses, income and budgets.',
-            actions: [
-              TextButton.icon(
-                onPressed: widget.onQuickAddEntry,
-                icon: const Icon(Icons.add, size: 16),
-                label: const Text('Add First Transaction'),
-                style: TextButton.styleFrom(
-                  foregroundColor: context.colors.accent,
-                ),
-              ),
-            ],
-          );
+          child = const SizedBox.shrink();
           break;
         case 'today':
           child = _emptyState(
@@ -585,26 +603,16 @@ class _NoteListState extends State<NoteList> {
     );
   }
 
-  static String _dateSection(DateTime d) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final date = DateTime(d.year, d.month, d.day);
-    final diff = date.difference(today).inDays;
-    if (diff == 0) return 'Today';
-    if (diff == -1) return 'Yesterday';
-    if (diff > -7) return 'This Week';
-    return 'Older';
-  }
-
   List<dynamic> _buildSectionedItems([List<Note>? source]) {
     final notes = source ?? widget.notes;
     if (widget.activeFilter == 'archive' || widget.activeFilter == 'trash') {
       return notes.toList();
     }
+    final now = DateTime.now();
     final items = <dynamic>[];
     String? currentSection;
     for (final note in notes) {
-      final section = _dateSection(note.updatedAt);
+      final section = dateSection(note.updatedAt, now: now);
       if (section != currentSection) {
         items.add(section);
         currentSection = section;
@@ -886,7 +894,7 @@ class _NoteCardState extends State<_NoteCard> {
     // time + entry count on row 2. No content preview, no tag chips. Other
     // filters keep the full card layout.
     final isFinance =
-        widget.activeFilter == 'finance' && widget.note.type != 'text';
+        widget.activeFilter == 'finance' && isFinanceNote(widget.note);
     final isDesktop = MediaQuery.of(context).size.width >= 1024;
 
     return Semantics(
@@ -951,19 +959,22 @@ class _NoteCardState extends State<_NoteCard> {
 
   Widget _buildFinanceCardBody() {
     final amounts = widget.financeEntries ?? widget.note.amounts;
-    final incomeEntries = amounts
-        .where((e) => (e.type ?? widget.note.type) == 'income')
-        .toList();
-    final expenseEntries = amounts
-        .where((e) => (e.type ?? widget.note.type) == 'expense')
-        .toList();
-    final hasIncome = incomeEntries.isNotEmpty;
-    final hasExpense = expenseEntries.isNotEmpty;
-    final amountColor = hasIncome && !hasExpense
-        ? context.colors.income
-        : hasIncome && hasExpense
-            ? context.colors.accent
-            : context.colors.fg;
+    final net = _netMinor(amounts);
+    final mixedCurrencies = amounts
+        .map((e) => e.currency ?? widget.note.currency ?? 'PHP')
+        .toSet()
+        .length >
+        1;
+    final amountColor = mixedCurrencies || net == 0
+        ? context.colors.muted
+        : net > 0
+            ? context.colors.income
+            : context.colors.expense;
+    final amountIcon = mixedCurrencies || net == 0
+        ? Icons.remove
+        : net > 0
+            ? Icons.arrow_upward
+            : Icons.arrow_downward;
     final dominant = _dominantCategory(widget.note, amounts);
     final budget = dominant != null
         ? widget.budgets.cast<Budget?>().firstWhere(
@@ -983,15 +994,7 @@ class _NoteCardState extends State<_NoteCard> {
       children: [
         Row(
           children: [
-               Icon(
-                hasIncome && hasExpense
-                    ? Icons.swap_vert
-                    : hasIncome
-                        ? Icons.arrow_upward
-                        : Icons.arrow_downward,
-                size: 12,
-                color: amountColor,
-             ),
+            Icon(amountIcon, size: 12, color: amountColor),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
@@ -1008,22 +1011,41 @@ class _NoteCardState extends State<_NoteCard> {
             ),
             const SizedBox(width: 8),
             if (widget.note.amounts.isNotEmpty)
-              Text.rich(
-                TextSpan(
-                  style: TextStyle(
-                    fontSize: AppType.t12,
-                    fontFamily: context.colors.monoFontFamily,
-                    fontWeight: FontWeight.w600,
-                   color: amountColor,
+              // Flexible: at phone widths the amount spans overflow the card
+              // row otherwise; the title above already ellipsizes first.
+              Flexible(
+                child: Text.rich(
+                  TextSpan(
+                    style: TextStyle(
+                      fontSize: AppType.t12,
+                      fontFamily: context.colors.monoFontFamily,
+                      fontWeight: FontWeight.w600,
+                      color: amountColor,
+                    ),
+                    children: _buildCardAmountSpans(
+                      widget.note,
+                      widget.financeEntries,
+                    ),
                   ),
-                  children: _buildCardAmountSpans(
-                    widget.note,
-                    widget.financeEntries,
-                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
           ],
         ),
+        if (amounts.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(left: 18, top: 2),
+            child: Text(
+              _financeDateRange(amounts),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: AppType.t11,
+                color: context.colors.muted,
+              ),
+            ),
+          ),
         if (budget != null && widget.note.type != 'income')
           Padding(
             padding: const EdgeInsets.only(top: 6),
@@ -1031,7 +1053,7 @@ class _NoteCardState extends State<_NoteCard> {
               children: [
                 Expanded(
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(2),
+                    borderRadius: BorderRadius.circular(AppRadius.chip),
                     child: LinearProgressIndicator(
                       value: budget.limit > 0
                           ? (budgetActual / budget.limit).clamp(0.0, 1.0)
@@ -1093,11 +1115,56 @@ class _NoteCardState extends State<_NoteCard> {
     return note.updatedAt.isAfter(note.viewedAt!);
   }
 
+  int _netMinor(List<MoneyEntry> amounts) {
+    final income = amounts
+        .where((e) => (e.type ?? widget.note.type) == 'income')
+        .fold<int>(0, (sum, e) => sum + e.amount);
+    final expense = amounts
+        .where((e) => (e.type ?? widget.note.type) == 'expense')
+        .fold<int>(0, (sum, e) => sum + e.amount);
+    return income - expense;
+  }
+
+  String _financeDateRange(List<MoneyEntry> amounts) {
+    final dates = amounts.map((e) => e.date).toList()..sort();
+    final min = dates.first;
+    final max = dates.last;
+    final sameDay =
+        min.year == max.year && min.month == max.month && min.day == max.day;
+    if (sameDay) return mediumDate(min);
+    if (min.year == max.year && min.month == max.month) {
+      return '${dayLabel(min)} – ${dayLabel(max)}';
+    }
+    return '${monthShort(min.month)} ${min.day} – '
+        '${monthShort(max.month)} ${max.day}, ${max.year}';
+  }
+
   Widget _buildFullCardBody() {
     final taskItems =
         (widget.activeFilter == 'tasks' && widget.onChecklistToggle != null)
         ? parseChecklist(widget.note.content)
         : const <ChecklistItem>[];
+    final financeAmounts = widget.financeEntries ?? widget.note.amounts;
+    final financeCurrencies = financeAmounts
+        .map((e) => e.currency ?? widget.note.currency ?? 'PHP')
+        .toSet();
+    final financeNeutral =
+        financeAmounts.isEmpty || financeCurrencies.length > 1;
+    final financeNet = _netMinor(financeAmounts);
+    final financeColor = financeNeutral
+        ? context.colors.muted
+        : financeNet > 0
+            ? context.colors.income
+            : financeNet < 0
+                ? context.colors.expense
+                : context.colors.muted;
+    final financeIcon = financeNeutral
+        ? Icons.remove
+        : financeNet > 0
+            ? Icons.arrow_upward
+            : financeNet < 0
+                ? Icons.arrow_downward
+                : Icons.remove;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1135,14 +1202,20 @@ class _NoteCardState extends State<_NoteCard> {
           ],
         ),
         const SizedBox(height: 4),
-        if (taskItems.isEmpty && _contentPreview(widget.note.content).isNotEmpty)
+        if (taskItems.isEmpty &&
+            (_contentPreview(widget.note.content).isNotEmpty ||
+                !isFinanceNote(widget.note)))
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
             child: Text(
-              _contentPreview(widget.note.content),
+              _contentPreview(widget.note.content).isNotEmpty
+                  ? _contentPreview(widget.note.content)
+                  : 'Empty note',
               style: TextStyle(
                 fontSize: AppType.t12,
-                color: context.colors.muted,
+                color: _contentPreview(widget.note.content).isNotEmpty
+                    ? context.colors.muted
+                    : context.colors.muted.withValues(alpha: 0.6),
                 height: 1.4,
               ),
               maxLines: 2,
@@ -1179,21 +1252,14 @@ class _NoteCardState extends State<_NoteCard> {
                 ),
           ],
         ),
-        if (widget.note.type != 'text' && widget.note.amounts.isNotEmpty) ...[
+        if (isFinanceNote(widget.note) && widget.note.amounts.isNotEmpty) ...[
           const SizedBox(height: 4),
           Row(
             children: [
-              // Up for income, down for expense — matching the finance card
-              // and quick actions (the full card previously had these
-              // inverted).
               Icon(
-                widget.note.type == 'income'
-                    ? Icons.arrow_upward
-                    : Icons.arrow_downward,
+                financeIcon,
                 size: 10,
-                color: widget.note.type == 'income'
-                    ? context.colors.income
-                    : context.colors.fg,
+                color: financeColor,
               ),
               const SizedBox(width: 4),
               Flexible(
@@ -1203,9 +1269,7 @@ class _NoteCardState extends State<_NoteCard> {
                       fontSize: AppType.t12,
                       fontFamily: context.colors.monoFontFamily,
                       fontWeight: FontWeight.w500,
-                      color: widget.note.type == 'income'
-                          ? context.colors.income
-                          : context.colors.fg,
+                      color: financeColor,
                     ),
                     children: _buildCardAmountSpans(
                       widget.note,
@@ -1216,19 +1280,24 @@ class _NoteCardState extends State<_NoteCard> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-               if ((widget.financeEntries ?? widget.note.amounts).length > 1) ...[
-                const SizedBox(width: 4),
-                Text(
-                  '(${widget.note.amounts.length} entries)',
-                  style: TextStyle(fontSize: AppType.t10, color: context.colors.muted),
-                ),
-              ],
             ],
+          ),
+        ],
+        if (isFinanceNote(widget.note) && financeAmounts.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Text(
+            _financeDateRange(financeAmounts),
+            style: TextStyle(
+              fontSize: AppType.t11,
+              color: context.colors.muted,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ],
         const SizedBox(height: 6),
         Text(
-          _relativeTime(widget.note.updatedAt),
+          relativeTime(widget.note.updatedAt),
           style: TextStyle(
             fontSize: AppType.t11,
             fontFamily: context.colors.monoFontFamily,
@@ -1317,51 +1386,62 @@ class _NoteCardState extends State<_NoteCard> {
 
   static String _contentPreview(String content) => contentPreview(content);
 
-  static String _relativeTime(DateTime d) {
-    final now = DateTime.now();
-    final diff = now.difference(d);
-    if (diff.inMinutes < 1) return 'just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    if (diff.inDays < 7) return '${diff.inDays}d ago';
-    return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-  }
-
   static List<InlineSpan> _buildCardAmountSpans(
     Note note,
     List<MoneyEntry>? filteredAmounts,
   ) {
     final amounts = filteredAmounts ?? note.amounts;
+    if (amounts.isEmpty) {
+      return const [TextSpan(text: 'No entries yet')];
+    }
     final income = amounts
         .where((e) => (e.type ?? note.type) == 'income')
         .fold<int>(0, (sum, e) => sum + e.amount);
     final expense = amounts
         .where((e) => (e.type ?? note.type) == 'expense')
         .fold<int>(0, (sum, e) => sum + e.amount);
-    final hasIncome = amounts.any((e) => (e.type ?? note.type) == 'income');
-    final hasExpense = amounts.any((e) => (e.type ?? note.type) == 'expense');
-    final label = hasIncome && hasExpense
-        ? 'Net '
-        : hasIncome
-            ? 'Income '
-            : 'Expenses ';
-    final total = hasIncome && hasExpense
-        ? income - expense
-        : hasIncome
-            ? income
-            : expense;
+    final net = income - expense;
     final currencies = amounts
         .map((e) => e.currency ?? note.currency ?? 'PHP')
         .toSet();
     if (currencies.length > 1) {
-      return const [TextSpan(text: 'Mixed currencies')];
+      // One notation, per currency: never sum across currencies (05-B rule), and
+      // never a dead-end label. Each currency's net is shown in symbol notation,
+      // dominant-total currencies first, so the card answers instead of stalling.
+      final nets = <String, int>{};
+      for (final e in amounts) {
+        final code = e.currency ?? note.currency ?? 'PHP';
+        final signed = (e.type ?? note.type) == 'income' ? e.amount : -e.amount;
+        nets[code] = (nets[code] ?? 0) + signed;
+      }
+      final codes = nets.keys.toList()
+        ..sort((a, b) {
+          final byMagnitude =
+              (nets[b]!.abs()).compareTo(nets[a]!.abs());
+          return byMagnitude != 0 ? byMagnitude : a.compareTo(b);
+        });
+      final spans = <InlineSpan>[];
+      for (var i = 0; i < codes.length; i++) {
+        if (i > 0) spans.add(const TextSpan(text: ' · '));
+        if (i == 0) spans.add(const TextSpan(text: 'Net '));
+        spans.addAll(moneySpans(nets[codes[i]]!, codes[i], null));
+      }
+      spans.add(
+        TextSpan(
+          text:
+              ' · ${amounts.length} ${amounts.length == 1 ? 'entry' : 'entries'}',
+        ),
+      );
+      return spans;
     }
-    final currency = currencies.isEmpty
-        ? (note.currency ?? 'PHP')
-        : currencies.first;
+    final currency = currencies.first;
     return [
-      TextSpan(text: label),
-      ...moneySpans(total, currency, null),
+      const TextSpan(text: 'Net '),
+      ...moneySpans(net, currency, null),
+      TextSpan(
+        text:
+            ' · ${amounts.length} ${amounts.length == 1 ? 'entry' : 'entries'}',
+      ),
     ];
   }
 }

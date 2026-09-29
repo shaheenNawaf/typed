@@ -16,6 +16,7 @@ import '../utils/date_format.dart';
 import '../utils/finance_utils.dart';
 import '../utils/id.dart';
 import '../utils/markdown_display.dart';
+import '../utils/note_kind.dart';
 import '../utils/note_storage.dart';
 import '../utils/notifications.dart';
 import '../utils/onboarding.dart';
@@ -416,7 +417,7 @@ class _HomeScreenState extends State<HomeScreen>
     var changed = false;
 
     for (final note in notes) {
-      if (note.type == 'text') continue;
+      if (!isFinanceNote(note)) continue;
       for (final entry in note.amounts.toList()) {
         if (!entry.isRecurring || entry.recurInterval == null) continue;
         if (entry.lastGenerated == null) {
@@ -492,43 +493,33 @@ class _HomeScreenState extends State<HomeScreen>
     });
   }
 
-  // ponytail: quick-add finds or auto-creates a "Quick expenses — {today}"
-  // note and opens EntrySheet against it. One-tap flow from the Finance
-  // note list header.
-  Note _findOrCreateQuickNote(String type) {
+  /// The default destination for dashboard quick-adds: ONE note per calendar
+  /// month holding both directions, e.g. "Finance — September 2026". Created
+  /// on first use. Existing per-day "Quick …" notes are left untouched and
+  /// still count toward totals, because the dashboard aggregates across every
+  /// finance note.
+  Note _findOrCreateMonthlyFinanceNote() {
     final today = DateTime.now();
-    final dateStr = _quickDateLabel(today);
-    final label = type == 'income'
-        ? 'Quick income — $dateStr'
-        : 'Quick expenses — $dateStr';
-    final todayDate = DateTime(today.year, today.month, today.day);
-    // Look for an existing quick note for this type and date
+    final label = 'Finance — ${monthName(today.month)} ${today.year}';
     for (final n in notes) {
       if (n.isArchived || n.isDeleted) continue;
-      if (n.type != type) continue;
-      if (n.title != label) continue;
-      final nDate = DateTime(
-        n.updatedAt.year,
-        n.updatedAt.month,
-        n.updatedAt.day,
-      );
-      if (nDate == todayDate) return n;
+      if (!isFinanceNote(n)) continue;
+      if (n.title == label) return n;
     }
-    // Otherwise create one
-    final id = generateId('n');
     final note = Note(
-      id: id,
+      id: generateId('n'),
       title: label,
       content: '',
       tags: ['finance'],
-      type: type,
+      // The note holds both directions; per-entry `type` is what actually
+      // decides income vs expense. 'expense' keeps isFinanceNote true and
+      // matches the existing seed notes.
+      type: 'expense',
       currency: 'PHP',
     );
     notes.insert(0, note);
     return note;
   }
-
-  String _quickDateLabel(DateTime d) => dayLabel(d);
 
   void _quickAddEntry() => _quickAddTransaction('expense');
 
@@ -577,16 +568,14 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _quickAddTransaction(String type) {
-    final note = _findOrCreateQuickNote(type);
+    var note = _findOrCreateMonthlyFinanceNote();
+    // Stay on the dashboard: the editor is deliberately NOT opened, so the
+    // totals update in place behind the sheet instead of navigating away.
     setState(() {
-      _currentNoteId = note.id;
       _activeFilter = 'finance';
       _currentTab = 'finance';
-      _showEditor = true;
-      _previewMode = false;
     });
     _persistNow();
-    // Defer the EntrySheet open until after the editor is built
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       EntrySheet.show(
@@ -601,12 +590,87 @@ class _HomeScreenState extends State<HomeScreen>
         },
         currencySymbol: currencySymbol(note.currency),
         noteCurrency: note.currency,
-        noteType: note.type,
+        // Prefill the form from the button the user clicked, not from the
+        // note's own type — the monthly note holds both directions.
+        noteType: type,
         customCategories: _customCategories,
         recentCategories: _recentCategories,
         onCategoryUsed: _onCategoryUsed,
+        destinationLabel: note.title,
+        onChangeDestination: () async {
+          final picked = await _pickFinanceNoteDestination(note);
+          if (picked == null) return null;
+          note = picked;
+          return picked.title;
+        },
       );
     });
+  }
+
+  /// Destination picker shown from the quick-add form's "Change" affordance.
+  /// Returns the chosen finance note, or null when dismissed. Lists existing
+  /// finance notes only — it never creates one.
+  Future<Note?> _pickFinanceNoteDestination(Note current) {
+    final candidates = notes
+        .where((n) => isFinanceNote(n) && !n.isArchived && !n.isDeleted)
+        .toList();
+    final c = context.colors;
+    return showModalBottomSheet<Note>(
+      context: context,
+      backgroundColor: c.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.panel)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Text(
+                'Save to',
+                style: TextStyle(
+                  fontSize: AppType.t12,
+                  fontWeight: FontWeight.w600,
+                  color: c.muted,
+                ),
+              ),
+            ),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final n in candidates)
+                    ListTile(
+                      dense: true,
+                      leading: Icon(
+                        n.id == current.id
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_unchecked,
+                        size: 18,
+                        color: n.id == current.id ? c.accent : c.muted,
+                      ),
+                      title: Text(
+                        n.title.isEmpty ? 'Untitled' : n.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: AppType.t13_5),
+                      ),
+                      subtitle: Text(
+                        '${n.amounts.length} '
+                        '${n.amounts.length == 1 ? 'entry' : 'entries'}',
+                        style: TextStyle(fontSize: AppType.t11, color: c.muted),
+                      ),
+                      onTap: () => Navigator.pop(sheetContext, n),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// Progress-centric confirmation after a quick-add: the entry amount in its
@@ -771,9 +835,7 @@ class _HomeScreenState extends State<HomeScreen>
     'tasks': notes.where(_isTaskNote).length,
     'meeting': notes.where(_isMeetingNote).length,
     'journal': notes.where(_isJournalNote).length,
-    'finance': notes
-        .where((n) => n.type != 'text' && !n.isArchived && !n.isDeleted)
-        .length,
+    'finance': notes.where(isVisibleFinanceNote).length,
     'archive': notes.where((n) => n.isArchived && !n.isDeleted).length,
     'trash': notes.where((n) => n.isDeleted).length,
   };
@@ -866,9 +928,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   FinanceSummary get _financeSummary {
-    final financeNotes = notes.where(
-      (n) => n.type != 'text' && !n.isArchived && !n.isDeleted,
-    );
+    final financeNotes = notes.where(isVisibleFinanceNote);
 
     // Previous-period totals per currency; they can only be resolved against
     // the dominant currency after the loop, so raw ints would silently mix
@@ -959,7 +1019,51 @@ class _HomeScreenState extends State<HomeScreen>
       averageAvailable: _financePeriod != 'all',
       noteIds: noteIdsInPeriod,
       entriesByNote: entriesByNote,
+      hasAnyEntries: _hasAnyFinanceEntries,
     );
+  }
+
+  /// True when the user has ever recorded a transaction, ignoring the period and
+  /// currency filters entirely. Distinguishes "brand new to Finance" (one
+  /// centered empty state, no cards) from "nothing in this period" (full layout,
+  /// em-dash stats). Deliberately mirrors `_financeSummary`'s inclusion rules
+  /// minus the period/currency gates — including its treatment of sample data —
+  /// so the empty state can never contradict the transaction list below it.
+  /// Sample entries are only removed by the explicit Settings action
+  /// `_removeSampleData`, so until the user takes it they are real rows on
+  /// screen and must count here too.
+  bool get _hasAnyFinanceEntries {
+    for (final n in notes) {
+      if (!isVisibleFinanceNote(n)) continue;
+      for (final e in n.amounts) {
+        final t = e.type ?? n.type;
+        if (t == 'income' || t == 'expense') return true;
+      }
+    }
+    return false;
+  }
+
+  /// Desktop only: the Finance workspace takes the whole content width — the
+  /// note-list pane never renders while Finance is active, with or without
+  /// entries. The monthly ledger note stays reachable via the workspace's
+  /// ledger-note link, the sidebar, the #finance tag, the command palette and
+  /// transaction rows. An open editor always keeps the pane.
+  bool get _hideFinanceListPane => _activeFilter == 'finance' && !_showEditor;
+
+  /// Part 4.2: `E` adds an expense, `I` adds an income, but only on the Finance
+  /// tab and only when the user is not typing. `EditableText` is the shared base
+  /// of TextField/TextFormField, so one check covers every input in the app,
+  /// including the amount field of an already-open EntrySheet.
+  void _financeShortcut(String type) {
+    if (_currentTab != 'finance') return;
+    if (_commandPaletteOpen || _onboardingOpen) return;
+    final focus = FocusManager.instance.primaryFocus;
+    if (focus?.context?.widget is EditableText) return;
+    if (type == 'income') {
+      _quickAddIncome();
+    } else {
+      _quickAddEntry();
+    }
   }
 
   /// Minor-unit expense totals per day for the last 14 days (oldest -> newest,
@@ -972,7 +1076,7 @@ class _HomeScreenState extends State<HomeScreen>
     final dominant = _financeSummary.dominantCurrency;
     final totals = List<int>.filled(14, 0);
     for (final n in notes) {
-      if (n.type == 'text' || n.isArchived || n.isDeleted) continue;
+      if (!isVisibleFinanceNote(n)) continue;
       for (final e in n.amounts) {
         if ((e.type ?? n.type) != 'expense') continue;
         if ((e.currency ?? n.currency ?? 'PHP') != dominant) continue;
@@ -1005,7 +1109,7 @@ class _HomeScreenState extends State<HomeScreen>
       };
       var spent = 0;
       for (final n in notes) {
-        if (n.isArchived || n.isDeleted || n.type == 'text') continue;
+        if (!isVisibleFinanceNote(n)) continue;
         for (final e in n.amounts) {
           if ((e.type ?? n.type) != 'expense') continue;
           if (e.date.isBefore(start)) continue;
@@ -1022,7 +1126,7 @@ class _HomeScreenState extends State<HomeScreen>
   List<String> get _financeCurrencyOptions {
     final currencies = <String>{'all'};
     for (final note in notes) {
-      if (note.type == 'text' || note.isArchived || note.isDeleted) continue;
+      if (!isVisibleFinanceNote(note)) continue;
       currencies.add(note.currency ?? 'PHP');
       currencies.addAll(
         note.amounts.map((entry) => entry.currency ?? note.currency ?? 'PHP'),
@@ -1057,7 +1161,7 @@ class _HomeScreenState extends State<HomeScreen>
             .toList();
       case 'finance':
         filtered = filtered
-            .where((n) => n.type != 'text' && !n.isArchived && !n.isDeleted)
+            .where(isVisibleFinanceNote)
             .toList();
       case 'meeting':
         filtered = filtered.where(_isMeetingNote).toList();
@@ -1540,7 +1644,7 @@ class _HomeScreenState extends State<HomeScreen>
     if (note == null) return;
     note.type = type;
     note.updatedAt = DateTime.now();
-    if (type != 'text' && (note.currency == null || note.currency!.isEmpty)) {
+    if (isFinanceType(type) && (note.currency == null || note.currency!.isEmpty)) {
       note.currency = 'PHP';
     }
     _persistNow();
@@ -1773,7 +1877,7 @@ class _HomeScreenState extends State<HomeScreen>
     return candidates.take(40).map((note) {
       final icon = note.type == 'todo'
           ? Icons.check_circle_outline
-          : note.type != 'text'
+          : isFinanceNote(note)
           ? Icons.account_balance_wallet_outlined
           : Icons.article_outlined;
       final preview = note.content.trim().isEmpty
@@ -1900,6 +2004,12 @@ class _HomeScreenState extends State<HomeScreen>
         SingleActivator(LogicalKeyboardKey.keyK, meta: true):
             _openCommandPalette,
         SingleActivator(LogicalKeyboardKey.escape): _closeEditor,
+        // Part 4.2: bare E/I are finance-tab-only and self-guard against text
+        // fields, so they never swallow typing in a note.
+        SingleActivator(LogicalKeyboardKey.keyE):
+            () => _financeShortcut('expense'),
+        SingleActivator(LogicalKeyboardKey.keyI):
+            () => _financeShortcut('income'),
       },
       child: Stack(
         children: [
@@ -1981,6 +2091,36 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  /// Pane transition for the workspace/tab AnimatedSwitchers. Incoming
+  /// children are fully opaque from their first frame — an entrance that
+  /// starts at opacity 0 leaves the pane blank forever in renderers whose
+  /// animation clock can freeze (occluded preview panes, battery saver),
+  /// the same doctrine as the home _stagger translate-only entrance. The
+  /// outgoing child still dissolves; it sits underneath a fully visible
+  /// incoming page, so a freeze mid-leave can never blank the pane.
+  Widget _paneTransition(
+    Widget child,
+    Animation<double> animation, {
+    double slide = 0.02,
+  }) {
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, _) {
+        final leaving = animation.status == AnimationStatus.reverse;
+        return FadeTransition(
+          opacity: AlwaysStoppedAnimation(leaving ? animation.value : 1.0),
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: Offset(0, slide),
+              end: Offset.zero,
+            ).animate(animation),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildDesktop() {
     final screenWidth = MediaQuery.of(context).size.width;
     final sidebarOccupied = _sidebarState == 'expanded' ? 232.0 : 48.0;
@@ -1989,6 +2129,12 @@ class _HomeScreenState extends State<HomeScreen>
     final contextWidth = showContext ? 280.0 : 0.0;
     final remaining = screenWidth - sidebarOccupied - contextWidth;
     final noteListW = (remaining * 0.28).clamp(280.0, 340.0);
+
+    // The workspace's ledger-note link target: the most recently updated
+    // visible finance note (null -> link hidden, e.g. fresh install).
+    final latestFinanceNote = notes
+        .where(isVisibleFinanceNote)
+        .fold<Note?>(null, (a, n) => a == null || n.updatedAt.isAfter(a.updatedAt) ? n : a);
 
     return Scaffold(
       backgroundColor: context.colors.bg,
@@ -2018,16 +2164,8 @@ class _HomeScreenState extends State<HomeScreen>
                           duration: AppMotion.duration(context, AppMotion.slow),
                           switchInCurve: AppMotion.decelerate,
                           switchOutCurve: AppMotion.accelerate,
-                          transitionBuilder: (child, animation) => FadeTransition(
-                            opacity: animation,
-                            child: SlideTransition(
-                              position: Tween<Offset>(
-                                begin: const Offset(0, 0.02),
-                                end: Offset.zero,
-                              ).animate(animation),
-                              child: child,
-                            ),
-                          ),
+                          transitionBuilder: (child, animation) =>
+                              _paneTransition(child, animation),
                           child: KeyedSubtree(
                             key: ValueKey('workspace-$_activeFilter'),
                             child: _activeFilter == 'home'
@@ -2039,6 +2177,10 @@ class _HomeScreenState extends State<HomeScreen>
                                 : Row(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
+                                  // Plan 08: Finance always takes the full
+                                  // canvas — the pane only returns for the
+                                  // editor (any open editor wins).
+                                  if (!_hideFinanceListPane)
                                   SizedBox(
                                     width: noteListW,
                                     child: NoteList(
@@ -2144,7 +2286,16 @@ class _HomeScreenState extends State<HomeScreen>
                                             onSelectEntry: _editEntryFromDashboard,
                                             onAddExpense: _quickAddEntry,
                                             onAddIncome: _quickAddIncome,
+                                            onViewAllTime: () => setState(
+                                              () => _financePeriod = 'all',
+                                            ),
                                             dailyTotals: _last14DaySpend,
+                                            ledgerNoteLabel: latestFinanceNote?.title,
+                                            onOpenLedgerNote: latestFinanceNote == null
+                                                ? null
+                                                : () => _selectNote(
+                                                    latestFinanceNote.id,
+                                                  ),
                                           )
                                         : Container(
                                             color: context.colors.bg,
@@ -2231,16 +2382,8 @@ class _HomeScreenState extends State<HomeScreen>
           duration: AppMotion.duration(context, AppMotion.page),
           switchInCurve: AppMotion.decelerate,
           switchOutCurve: AppMotion.accelerate,
-          transitionBuilder: (child, animation) => FadeTransition(
-            opacity: animation,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, 0.04),
-                end: Offset.zero,
-              ).animate(animation),
-              child: child,
-            ),
-          ),
+          transitionBuilder: (child, animation) =>
+              _paneTransition(child, animation, slide: 0.04),
           child: _showEditor
               ? KeyedSubtree(
                   key: const ValueKey('mobile-editor'),
@@ -2348,8 +2491,7 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                 ),
-                if (!(_currentNote?.type == 'expense' ||
-                    _currentNote?.type == 'income'))
+                if (_currentNote == null || !isFinanceNote(_currentNote!))
                   Padding(
                     padding: const EdgeInsets.only(right: 12),
                     child: InkWell(
@@ -2487,16 +2629,8 @@ class _HomeScreenState extends State<HomeScreen>
       duration: AppMotion.duration(context, AppMotion.slow),
       switchInCurve: AppMotion.decelerate,
       switchOutCurve: AppMotion.accelerate,
-      transitionBuilder: (child, animation) => FadeTransition(
-        opacity: animation,
-        child: SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(0, 0.02),
-            end: Offset.zero,
-          ).animate(animation),
-          child: child,
-        ),
-      ),
+      transitionBuilder: (child, animation) =>
+          _paneTransition(child, animation),
       child: KeyedSubtree(
         key: ValueKey('mobtab-$_currentTab'),
         child: SizedBox.expand(child: content),
@@ -2750,7 +2884,7 @@ class _HomeScreenState extends State<HomeScreen>
 
     final rows = <(Note, IconData)>[];
     final financeNote = workingNotes.cast<Note?>().firstWhere(
-      (n) => n!.type != 'text' && n.type != 'todo',
+      (n) => n != null && isFinanceNote(n),
       orElse: () => null,
     );
     if (financeNote != null) {
@@ -2779,7 +2913,7 @@ class _HomeScreenState extends State<HomeScreen>
             ? Icons.push_pin_outlined
             : note.type == 'todo'
             ? Icons.check_circle_outline
-            : note.type != 'text'
+            : isFinanceNote(note)
             ? Icons.account_balance_wallet_outlined
             : Icons.article_outlined,
       ));
@@ -2896,7 +3030,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   String? _continueSubtitle(Note note) {
-    if (note.type != 'text' && note.type != 'todo' && note.amounts.isNotEmpty) {
+    if (isFinanceNote(note) && note.amounts.isNotEmpty) {
       final counts = <String, int>{};
       for (final e in note.amounts) {
         final cur = e.currency ?? note.currency ?? 'PHP';
@@ -2992,7 +3126,7 @@ class _HomeScreenState extends State<HomeScreen>
     final incomeBy = <String, int>{};
     final expenseBy = <String, int>{};
     for (final n in notes) {
-      if (n.type == 'text' || n.isArchived || n.isDeleted) continue;
+      if (!isVisibleFinanceNote(n)) continue;
       for (final e in n.amounts) {
         if (e.date.isBefore(start) || !e.date.isBefore(end)) continue;
         final cur = e.currency ?? n.currency ?? 'PHP';

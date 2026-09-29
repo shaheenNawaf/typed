@@ -78,23 +78,26 @@ class MobileNav extends StatelessWidget {
     required String semanticsLabel,
   }) {
     final active = currentTab == filter;
-    return Semantics(
-      button: true,
-      selected: active,
-      label: semanticsLabel,
-      child: InkWell(
-        onTap: () {
-          HapticFeedback.selectionClick();
-          onTabChanged(filter);
-        },
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        child: Container(
-          constraints: const BoxConstraints(minWidth: 56, minHeight: 48),
-          alignment: Alignment.center,
-          child: Icon(
-            icon,
-            size: 24,
-            color: active ? context.colors.accent : context.colors.muted,
+    return Tooltip(
+      message: semanticsLabel,
+      child: Semantics(
+        button: true,
+        selected: active,
+        label: semanticsLabel,
+        child: InkWell(
+          onTap: () {
+            HapticFeedback.selectionClick();
+            onTabChanged(filter);
+          },
+          borderRadius: BorderRadius.circular(AppRadius.card),
+          child: Container(
+            constraints: const BoxConstraints(minWidth: 56, minHeight: 48),
+            alignment: Alignment.center,
+            child: Icon(
+              icon,
+              size: 24,
+              color: active ? context.colors.accent : context.colors.muted,
+            ),
           ),
         ),
       ),
@@ -102,36 +105,39 @@ class MobileNav extends StatelessWidget {
   }
 
   Widget _capture(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: 'Create',
-      child: InkWell(
-        onTap: () {
-          HapticFeedback.mediumImpact();
-          onCreate();
-        },
-        borderRadius: BorderRadius.circular(24),
-        child: Container(
-          constraints: const BoxConstraints(minWidth: 56, minHeight: 48),
-          alignment: Alignment.center,
+    return Tooltip(
+      message: 'New note',
+      child: Semantics(
+        button: true,
+        label: 'Create',
+        child: InkWell(
+          onTap: () {
+            HapticFeedback.mediumImpact();
+            onCreate();
+          },
+          borderRadius: BorderRadius.circular(24),
           child: Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: context.colors.accent,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: context.colors.accent.withValues(alpha: 0.35),
-                  blurRadius: 16,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-            child: Icon(
-              Icons.add,
-              size: 26,
-              color: context.colors.onAccent,
+            constraints: const BoxConstraints(minWidth: 56, minHeight: 48),
+            alignment: Alignment.center,
+            child: Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: context.colors.accent,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: context.colors.accent.withValues(alpha: 0.35),
+                    blurRadius: 16,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Icon(
+                Icons.add,
+                size: 26,
+                color: context.colors.onAccent,
+              ),
             ),
           ),
         ),

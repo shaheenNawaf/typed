@@ -91,6 +91,9 @@ Files: finance_dashboard.dart, editor.dart, note_list.dart. Risk: low.
 then **D** (row-level polish compounds with A), then **C** (capture flow is a separate loop and
 can ship independently). Slices are disjoint enough to spec/verify one at a time.
 
+2026-09-29 — Option A of the desktop proposal shipped (slice A completed:
+full-canvas workspace, F2/F3 residue from this plan); remaining slices B/C/D unchanged.
+
 ## Validation plan (per slice)
 
 - `flutter analyze` clean + `flutter test` green (8 existing test files; add widget tests for

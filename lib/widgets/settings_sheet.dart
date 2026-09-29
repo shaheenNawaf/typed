@@ -41,7 +41,7 @@ class SettingsSheet extends StatelessWidget {
       context: context,
       backgroundColor: context.colors.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.panel)),
       ),
       constraints: const BoxConstraints(maxWidth: 560),
       builder: (_) => ListenableBuilder(

@@ -17,7 +17,7 @@ class TablePickerSheet extends StatefulWidget {
       context: context,
       backgroundColor: context.colors.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.panel)),
       ),
       constraints: const BoxConstraints(maxWidth: 560),
       builder: (_) => TablePickerSheet(onInsert: onInsert),
@@ -71,7 +71,7 @@ class _TablePickerSheetState extends State<TablePickerSheet> {
               margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(
                 color: context.colors.border,
-                borderRadius: BorderRadius.circular(2),
+                borderRadius: BorderRadius.circular(AppRadius.chip),
               ),
             ),
             Text('Insert table',

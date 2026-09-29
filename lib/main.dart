@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'screens/home_screen.dart';
 import 'theme/app_colors.dart';
+import 'theme/app_metrics.dart';
 import 'theme/fonts.dart';
 import 'theme/theme_controller.dart';
 import 'utils/notifications.dart';
@@ -81,7 +82,46 @@ class MainApp extends StatelessWidget {
       scaffoldBackgroundColor: colors.bg,
     );
     final textTheme = _buildTextTheme(base.textTheme, colors, font);
-    return base.copyWith(textTheme: textTheme, extensions: [colors]);
+    // AppRadius is the single radius scale (theme/app_metrics.dart): buttons are
+    // card-class controls, sheets and dialogs are panels. Material 3's pill
+    // buttons and 28px sheet corners are off-scale, so they are overridden here.
+    final controlShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(AppRadius.card),
+    );
+    final panelShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(AppRadius.panel),
+    );
+    final chipShape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(AppRadius.chip),
+    );
+    return base.copyWith(
+      textTheme: textTheme,
+      extensions: [colors],
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(shape: controlShape),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(shape: controlShape),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(shape: controlShape),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(shape: controlShape),
+      ),
+      bottomSheetTheme: base.bottomSheetTheme.copyWith(shape: panelShape),
+      dialogTheme: base.dialogTheme.copyWith(shape: panelShape),
+      chipTheme: base.chipTheme.copyWith(shape: chipShape),
+      snackBarTheme: base.snackBarTheme.copyWith(shape: controlShape),
+      tooltipTheme: base.tooltipTheme.copyWith(
+        decoration: BoxDecoration(
+          color: (base.tooltipTheme.decoration as BoxDecoration?)?.color ??
+              base.colorScheme.inverseSurface,
+          borderRadius: BorderRadius.circular(AppRadius.card),
+        ),
+      ),
+      popupMenuTheme: base.popupMenuTheme.copyWith(shape: controlShape),
+    );
   }
 
   TextTheme _buildTextTheme(TextTheme base, AppColors colors, FontOption font) {

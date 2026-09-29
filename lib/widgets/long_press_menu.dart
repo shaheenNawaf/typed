@@ -29,7 +29,7 @@ class LongPressMenu {
         context: context,
         backgroundColor: context.colors.surface,
         shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.panel)),
         ),
         builder: (ctx) => SafeArea(
           child: SingleChildScrollView(
@@ -41,7 +41,7 @@ class LongPressMenu {
                 margin: const EdgeInsets.only(top: 12, bottom: 8),
                 decoration: BoxDecoration(
                   color: context.colors.border,
-                  borderRadius: BorderRadius.circular(2),
+                  borderRadius: BorderRadius.circular(AppRadius.chip),
                 ),
               ),
               ...actions.map((a) => InkWell(

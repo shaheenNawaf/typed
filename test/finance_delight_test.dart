@@ -253,13 +253,13 @@ void main() {
       await tester.tap(find.text('Money Kept'));
       await tester.pumpAndSettle();
 
-      expect(find.text('MONEY KEPT'), findsOneWidget);
+      expect(find.text('Saved'), findsOneWidget);
       expect(find.text('77%'), findsOneWidget);
       expect(find.textContaining('31,359.75 of'), findsOneWidget);
       expect(find.textContaining('40,500.00 income'), findsOneWidget);
     });
 
-    testWidgets('Money Kept shows Not available without income', (tester) async {
+    testWidgets('Saved shows an em dash without income', (tester) async {
       await tester.pumpWidget(wrap(FinanceStickyHeader(
         summary: summary(
           incomeByCurrency: const {'PHP': 0},
@@ -279,7 +279,7 @@ void main() {
       await tester.tap(find.text('Money Kept'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Not available'), findsOneWidget);
+      expect(find.text('\u2014'), findsOneWidget);
       expect(find.text('77%'), findsNothing);
     });
 

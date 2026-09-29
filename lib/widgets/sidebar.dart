@@ -138,17 +138,20 @@ class _SidebarState extends State<Sidebar> {
   Widget _buildHeader(bool collapsed, bool isMobile) {
     final logo = isMobile
         ? BrandMark(size: 22, fg: context.colors.sidebarFg)
-        : Semantics(
-            label: collapsed ? 'Expand sidebar' : 'Collapse sidebar',
-            button: true,
-            child: InkWell(
-              onTap: widget.onCollapse,
-              borderRadius: BorderRadius.circular(AppRadius.chip),
-              child: SizedBox(
-                width: 36,
-                height: 36,
-                child: Center(
-                  child: BrandMark(size: 18, fg: context.colors.sidebarFg),
+        : Tooltip(
+            message: collapsed ? 'Expand sidebar' : 'Collapse sidebar',
+            child: Semantics(
+              label: collapsed ? 'Expand sidebar' : 'Collapse sidebar',
+              button: true,
+              child: InkWell(
+                onTap: widget.onCollapse,
+                borderRadius: BorderRadius.circular(AppRadius.chip),
+                child: SizedBox(
+                  width: 36,
+                  height: 36,
+                  child: Center(
+                    child: BrandMark(size: 18, fg: context.colors.sidebarFg),
+                  ),
                 ),
               ),
             ),
@@ -157,9 +160,9 @@ class _SidebarState extends State<Sidebar> {
       padding: isMobile
           ? const EdgeInsets.fromLTRB(16, 20, 16, 16)
           : EdgeInsets.fromLTRB(
-              collapsed ? 10 : 18,
+              collapsed ? 6 : 18,
               16,
-              collapsed ? 10 : 18,
+              collapsed ? 6 : 18,
               12,
             ),
       decoration: BoxDecoration(
@@ -182,37 +185,45 @@ class _SidebarState extends State<Sidebar> {
           ],
           if (!collapsed) const Spacer(),
           if (!collapsed && widget.onSettings != null)
-            Semantics(
-              label: 'Settings',
-              child: InkWell(
-                onTap: widget.onSettings,
-                borderRadius: BorderRadius.circular(AppRadius.chip),
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  alignment: Alignment.center,
-                  child: Icon(
-                    Icons.settings_outlined,
-                    size: 20,
-                    color: context.colors.sidebarMuted,
+            Tooltip(
+              message: 'Settings',
+              child: Semantics(
+                label: 'Settings',
+                button: true,
+                child: InkWell(
+                  onTap: widget.onSettings,
+                  borderRadius: BorderRadius.circular(AppRadius.chip),
+                  child: Container(
+                    width: 36,
+                    height: 36,
+                    alignment: Alignment.center,
+                    child: Icon(
+                      Icons.settings_outlined,
+                      size: 20,
+                      color: context.colors.sidebarMuted,
+                    ),
                   ),
                 ),
               ),
             ),
           if (isMobile)
-            Semantics(
-              label: 'Toggle sidebar',
-              child: InkWell(
-                onTap: widget.onCollapse,
-                borderRadius: BorderRadius.circular(AppRadius.chip),
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  alignment: Alignment.center,
-                  child: Icon(
-                    collapsed ? Icons.menu_open : Icons.chevron_left,
-                    size: 20,
-                    color: context.colors.sidebarMuted,
+            Tooltip(
+              message: collapsed ? 'Expand sidebar' : 'Collapse sidebar',
+              child: Semantics(
+                label: collapsed ? 'Expand sidebar' : 'Collapse sidebar',
+                button: true,
+                child: InkWell(
+                  onTap: widget.onCollapse,
+                  borderRadius: BorderRadius.circular(AppRadius.chip),
+                  child: Container(
+                    width: 36,
+                    height: 36,
+                    alignment: Alignment.center,
+                    child: Icon(
+                      collapsed ? Icons.menu_open : Icons.chevron_left,
+                      size: 20,
+                      color: context.colors.sidebarMuted,
+                    ),
                   ),
                 ),
               ),
@@ -452,7 +463,7 @@ class _SidebarState extends State<Sidebar> {
     required bool isMobile,
   }) {
     final active = widget.activeFilter == view;
-    return Semantics(
+    final tile = Semantics(
       label: collapsed ? label : '$label, $count items',
       child: InkWell(
         onTap: () => widget.onFilterChanged(view),
@@ -523,7 +534,7 @@ class _SidebarState extends State<Sidebar> {
                     height: 14,
                     decoration: BoxDecoration(
                       color: context.colors.accent,
-                      borderRadius: BorderRadius.circular(2),
+                      borderRadius: BorderRadius.circular(AppRadius.chip),
                     ),
                   ),
                 ),
@@ -532,6 +543,8 @@ class _SidebarState extends State<Sidebar> {
         ),
       ),
     );
+    if (!collapsed) return tile;
+    return Tooltip(message: label, child: tile);
   }
 
   // ponytail: derive tag groups from the actual note tags. Tags with a
@@ -623,17 +636,24 @@ class _SidebarState extends State<Sidebar> {
       decoration: BoxDecoration(
         border: Border(top: BorderSide(color: context.colors.sidebarFg.withValues(alpha: 0.06))),
       ),
-      child: InkWell(
-        onTap: widget.onCollapse,
-        borderRadius: BorderRadius.circular(AppRadius.chip),
-        child: SizedBox(
-          width: double.infinity,
-          height: 36,
-          child: Center(
-            child: Icon(
-              collapsed ? Icons.chevron_right : Icons.chevron_left,
-              size: isMobile ? 18 : 16,
-              color: context.colors.sidebarMuted,
+      child: Tooltip(
+        message: collapsed ? 'Expand sidebar' : 'Collapse sidebar',
+        child: Semantics(
+          label: collapsed ? 'Expand sidebar' : 'Collapse sidebar',
+          button: true,
+          child: InkWell(
+            onTap: widget.onCollapse,
+            borderRadius: BorderRadius.circular(AppRadius.chip),
+            child: SizedBox(
+              width: double.infinity,
+              height: 36,
+              child: Center(
+                child: Icon(
+                  collapsed ? Icons.chevron_right : Icons.chevron_left,
+                  size: isMobile ? 18 : 16,
+                  color: context.colors.sidebarMuted,
+                ),
+              ),
             ),
           ),
         ),

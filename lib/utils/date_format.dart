@@ -69,3 +69,22 @@ String relativeDayLabel(DateTime d, {DateTime? now}) {
   if (diff < 0 && diff >= -6) return kWeekdayNamesShort[day.weekday - 1];
   return '${d.month}/${d.day}';
 }
+
+/// Human name for a finance period window anchored at [now].
+///
+/// 'week' -> "This week", 'month' -> "September 2026", 'year' -> "2026",
+/// anything else (including 'all') -> "All time". [now] is injectable so the
+/// label can be asserted without waiting for a real month boundary.
+String periodName(String period, {DateTime? now}) {
+  final n = now ?? DateTime.now();
+  switch (period) {
+    case 'week':
+      return 'This week';
+    case 'month':
+      return '${monthName(n.month)} ${n.year}';
+    case 'year':
+      return '${n.year}';
+    default:
+      return 'All time';
+  }
+}
