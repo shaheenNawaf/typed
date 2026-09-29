@@ -1769,6 +1769,7 @@ class _EditorState extends State<Editor> {
                 context,
                 entry: e,
                 onSave: _addOrUpdateEntry,
+                onDelete: () => _removeEntry(e.id),
                 currencySymbol: currencySymbol(effectiveCurrency),
                 noteCurrency: note.currency,
                 noteType: note.type,

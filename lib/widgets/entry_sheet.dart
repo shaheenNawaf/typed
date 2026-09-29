@@ -53,6 +53,10 @@ class EntrySheet extends StatefulWidget {
   /// Returns the newly chosen destination label, or null if the user cancelled.
   final Future<String?> Function()? onChangeDestination;
 
+  /// Edit mode only: deletes this entry. When null the sheet shows no Delete
+  /// action, so callers without a delete path keep the two-button layout.
+  final VoidCallback? onDelete;
+
   const EntrySheet({
     super.key,
     this.entry,
@@ -65,6 +69,7 @@ class EntrySheet extends StatefulWidget {
     this.onCategoryUsed,
     this.destinationLabel,
     this.onChangeDestination,
+    this.onDelete,
   });
 
   static Future<void> show(
@@ -79,6 +84,7 @@ class EntrySheet extends StatefulWidget {
     void Function(String category)? onCategoryUsed,
     String? destinationLabel,
     Future<String?> Function()? onChangeDestination,
+    VoidCallback? onDelete,
   }) {
     return showModalBottomSheet(
       context: context,
@@ -103,6 +109,7 @@ class EntrySheet extends StatefulWidget {
           onCategoryUsed: onCategoryUsed,
           destinationLabel: destinationLabel,
           onChangeDestination: onChangeDestination,
+          onDelete: onDelete,
         ),
       ),
     );
@@ -596,6 +603,45 @@ class _EntrySheetState extends State<EntrySheet> {
             ),
             const SizedBox(height: 12),
 
+            // Date
+            _Field(
+              label: 'Date',
+              child: InkWell(
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: _date,
+                    firstDate: DateTime(2000),
+                    lastDate: DateTime(2100),
+                  );
+                  if (picked != null) {
+                    setState(() => _date = picked);
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: context.colors.listBg,
+                    borderRadius: BorderRadius.circular(AppRadius.card),
+                    border: Border.all(color: context.colors.border),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.calendar_today_outlined,
+                          size: 14, color: context.colors.muted),
+                      const SizedBox(width: 8),
+                      Text(_formatDate(_date),
+                          style:  TextStyle(
+                            fontSize: AppType.t13_5, color: context.colors.fg,
+                          )),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+
             // -- More options toggle --
             InkWell(
               onTap: () => setState(() => _showMore = !_showMore),
@@ -716,45 +762,6 @@ class _EntrySheetState extends State<EntrySheet> {
                         ),
                       ),
                   ],
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              // Date
-              _Field(
-                label: 'Date',
-                child: InkWell(
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: _date,
-                      firstDate: DateTime(2000),
-                      lastDate: DateTime(2100),
-                    );
-                    if (picked != null) {
-                      setState(() => _date = picked);
-                    }
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 14),
-                    decoration: BoxDecoration(
-                      color: context.colors.listBg,
-                      borderRadius: BorderRadius.circular(AppRadius.card),
-                      border: Border.all(color: context.colors.border),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.calendar_today_outlined,
-                            size: 14, color: context.colors.muted),
-                        const SizedBox(width: 8),
-                        Text(_formatDate(_date),
-                            style:  TextStyle(
-                              fontSize: AppType.t13_5, color: context.colors.fg,
-                            )),
-                      ],
-                    ),
-                  ),
                 ),
               ),
               const SizedBox(height: 12),
@@ -1042,20 +1049,39 @@ class _EntrySheetState extends State<EntrySheet> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Expanded(
-                  flex: 3,
-                  child: OutlinedButton.icon(
-                    onPressed: isEdit ? null : _saveAndNext,
-                    icon: const Icon(Icons.add_circle_outline, size: 16),
-                    label: Text(isEdit ? '' : 'Add & Next',
-                        style: const TextStyle(fontSize: AppType.t12)),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: context.colors.accent),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      foregroundColor: context.colors.accent,
+                if (!isEdit)
+                  Expanded(
+                    flex: 3,
+                    child: OutlinedButton.icon(
+                      onPressed: _saveAndNext,
+                      icon: const Icon(Icons.add_circle_outline, size: 16),
+                      label: const Text('Add & Next',
+                          style: TextStyle(fontSize: AppType.t12)),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: context.colors.accent),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        foregroundColor: context.colors.accent,
+                      ),
                     ),
                   ),
-                ),
+                if (isEdit && widget.onDelete != null)
+                  Expanded(
+                    flex: 3,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        widget.onDelete!();
+                        Navigator.pop(context);
+                      },
+                      icon: const Icon(Icons.delete_outline, size: 16),
+                      label: const Text('Delete',
+                          style: TextStyle(fontSize: AppType.t12)),
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: context.colors.destructive),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        foregroundColor: context.colors.destructive,
+                      ),
+                    ),
+                  ),
                 const SizedBox(width: 8),
                 Expanded(
                   flex: 2,

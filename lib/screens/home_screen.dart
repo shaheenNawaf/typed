@@ -713,6 +713,14 @@ class _HomeScreenState extends State<HomeScreen>
         _persistNow();
         setState(() {});
       },
+      onDelete: () {
+        // Id-based, mirroring editor.dart _removeEntry: the captured index can go
+        // stale between opening the sheet and tapping Delete.
+        note.amounts.removeWhere((e) => e.id == entryId);
+        note.updatedAt = DateTime.now();
+        _persistNow();
+        setState(() {});
+      },
       currencySymbol: currencySymbol(entry.currency ?? note.currency),
       noteCurrency: note.currency,
       noteType: note.type,
