@@ -20,7 +20,7 @@
             android:layout_width="16dp"
             android:layout_height="16dp"
             android:src="@drawable/ic_typed"
-            android:contentDescription="Typed" />
+            android:contentDescription="@string/widget_app_name" />
 
         <TextView
             android:layout_width="0dp"
@@ -56,7 +56,7 @@
         android:layout_weight="1"
         android:gravity="center"
         android:fontFamily="sans-serif"
-         android:text="@string/widget_empty"
+         android:text="@string/widget_todo_empty"
          android:textColor="@color/widget_muted"
         android:textSize="13sp"
         android:visibility="gone" />

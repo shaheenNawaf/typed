@@ -81,7 +81,13 @@ class MainApp extends StatelessWidget {
       colorSchemeSeed: colors.accent,
       scaffoldBackgroundColor: colors.bg,
     );
-    final textTheme = _buildTextTheme(base.textTheme, colors, font);
+    // DM Sans / Outfit / JetBrains Mono have no glyph for ₱ (U+20B1): any
+    // plain string with a peso amount ("Net ₱14,820.00 · 2 entries", the
+    // amount placeholder) drew a tofu box. A fallback on every theme style
+    // reaches each Text that inherits from it; the money spans in
+    // finance_utils already do this per span.
+    final textTheme = _buildTextTheme(base.textTheme, colors, font)
+        .apply(fontFamilyFallback: const ['Roboto', 'Noto Sans', 'sans-serif']);
     // AppRadius is the single radius scale (theme/app_metrics.dart): buttons are
     // card-class controls, sheets and dialogs are panels. Material 3's pill
     // buttons and 28px sheet corners are off-scale, so they are overridden here.
@@ -112,7 +118,15 @@ class MainApp extends StatelessWidget {
       bottomSheetTheme: base.bottomSheetTheme.copyWith(shape: panelShape),
       dialogTheme: base.dialogTheme.copyWith(shape: panelShape),
       chipTheme: base.chipTheme.copyWith(shape: chipShape),
-      snackBarTheme: base.snackBarTheme.copyWith(shape: controlShape),
+      // Floating, rounded: sits above the mobile dock as a sibling of it
+      // instead of a full-width slab underneath.
+      snackBarTheme: base.snackBarTheme.copyWith(
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.panel),
+        ),
+        insetPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      ),
       tooltipTheme: base.tooltipTheme.copyWith(
         decoration: BoxDecoration(
           color: (base.tooltipTheme.decoration as BoxDecoration?)?.color ??

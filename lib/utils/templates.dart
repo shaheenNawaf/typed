@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'date_format.dart';
+
 class NoteTemplate {
   final String name;
   final IconData icon;
@@ -24,7 +26,8 @@ class NoteTemplate {
 
 List<NoteTemplate> getNoteTemplates() {
   final now = DateTime.now();
-  final today = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+  // Reads like a date, not a database key ("Oct 16, 2026", not 2026-10-16).
+  final today = '${monthShort(now.month)} ${now.day}, ${now.year}';
   return [
     NoteTemplate(
       name: 'Blank note',
@@ -72,8 +75,10 @@ List<NoteTemplate> getNoteTemplates() {
     NoteTemplate(
       name: 'To-do list',
       icon: Icons.checklist_outlined,
-      title: 'Todo — $today',
-      content: '- [ ] \n',
+      title: 'To-do — $today',
+      // Empty on purpose: a blank `- [ ] ` line rendered as an untypeable
+      // phantom row and hid the checklist's "Add your first to-do" state.
+      content: '',
       preview: 'Build a checklist and track progress.',
       tags: ['todo'],
       type: 'todo',

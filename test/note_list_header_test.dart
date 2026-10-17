@@ -27,8 +27,10 @@ void main() {
 
   final now = DateTime(2026, 9, 15, 12);
 
-  FinanceSummary summary(
-          {Map<String, List<MoneyEntry>> entriesByNote = const {}}) =>
+  FinanceSummary summary({
+    Map<String, List<MoneyEntry>> entriesByNote = const {},
+    Set<String> noteIds = const {},
+  }) =>
       FinanceSummary(
         totalIncome: 0,
         totalExpense: 0,
@@ -40,6 +42,7 @@ void main() {
         expenseByCurrency: const {},
         hasMixedCurrencies: false,
         entriesByNote: entriesByNote,
+        noteIds: noteIds,
       );
 
   Future<void> pumpList(
@@ -50,6 +53,7 @@ void main() {
     bool showFinanceDashboard = false,
     VoidCallback? onOpenSettings,
     double width = 800,
+    bool sortDesc = true,
   }) async {
     tester.view.physicalSize = Size(width, 800);
     tester.view.devicePixelRatio = 1.0;
@@ -63,7 +67,7 @@ void main() {
             notes: notes,
             currentNoteId: null,
             onSelectNote: (_) {},
-            sortDesc: true,
+            sortDesc: sortDesc,
             onSortToggle: () {},
             onNewNote: () {},
             searchQuery: '',
@@ -92,7 +96,8 @@ void main() {
       .whereType<String>()
       .toList();
 
-  testWidgets('the finance column header has a title', (tester) async {
+  testWidgets('the finance pane skips the redundant column title',
+      (tester) async {
     await pumpList(
       tester,
       const [],
@@ -101,7 +106,30 @@ void main() {
       showFinanceDashboard: true,
     );
 
-    expect(find.text('Finance notes'), findsOneWidget);
+    // The workspace header already says "Finance"; the dashboard's own
+    // section labels carry the structure below it.
+    expect(find.text('Finance notes'), findsNothing);
+  });
+
+  testWidgets('finance ledgers sit in one labelled section, not date buckets',
+      (tester) async {
+    final note = Note(
+      id: 'f1',
+      title: 'Finance — October',
+      content: '',
+      tags: const ['finance'],
+      updatedAt: now,
+    );
+    await pumpList(
+      tester,
+      [note],
+      activeFilter: 'finance',
+      financeSummary: summary(noteIds: const {'f1'}),
+      showFinanceDashboard: true,
+    );
+
+    expect(find.text('LEDGER'), findsOneWidget);
+    expect(find.text('Today'), findsNothing);
   });
 
   testWidgets('the notes column header has no finance title', (tester) async {
@@ -148,5 +176,42 @@ void main() {
 
     expect(find.text('Recent \u2193'), findsOneWidget);
     expect(tooltipMessages(tester).any((m) => m.startsWith('Sort')), isFalse);
+  });
+
+  group('section headers', () {
+    final today = DateTime.now();
+    final older = today.subtract(const Duration(days: 40));
+    Note note(String id, DateTime at, {bool pinned = false}) => Note(
+          id: id,
+          title: id,
+          content: 'body',
+          tags: const [],
+          updatedAt: at,
+          isPinned: pinned,
+        );
+
+    testWidgets('A–Z order is not split into repeating date buckets',
+        (tester) async {
+      await pumpList(
+        tester,
+        [note('Apple', today), note('Banana', older), note('Cherry', today)],
+        sortDesc: false,
+      );
+      expect(find.text('A–Z'), findsOneWidget);
+      expect(find.text('Today'), findsNothing);
+      expect(find.text('Older'), findsNothing);
+      // The sort toggle rides on the first header and must survive A–Z.
+      expect(find.textContaining('A–Z'), findsWidgets);
+    });
+
+    testWidgets('pinned notes get their own section', (tester) async {
+      await pumpList(tester, [
+        note('Old pin', older, pinned: true),
+        note('Fresh', today),
+      ]);
+      expect(find.text('Pinned'), findsOneWidget);
+      expect(find.text('Today'), findsOneWidget);
+      expect(find.text('Older'), findsNothing);
+    });
   });
 }

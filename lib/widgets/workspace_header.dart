@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_metrics.dart';
+import 'brand_mark.dart';
 
 class WorkspaceHeader extends StatelessWidget {
   final String sectionLabel;
@@ -48,18 +49,22 @@ class WorkspaceHeader extends StatelessWidget {
               IconButton(
                 onPressed: onMenu,
                 tooltip: 'Open navigation',
-                icon: Icon(Icons.menu, size: 20, color: c.muted),
+                icon: Icon(Icons.menu_rounded, size: 22, color: c.fg),
                 visualDensity: VisualDensity.compact,
+              )
+            else
+              // Navigation lives at the bottom (swipe up on the dock); the
+              // corner just carries the mark.
+              Padding(
+                padding: const EdgeInsets.only(left: 12),
+                child: ExcludeSemantics(child: BrandMark(size: 20, fg: c.fg)),
               ),
             const Spacer(),
             InkWell(
               onTap: onSearchTap,
               borderRadius: BorderRadius.circular(AppRadius.card),
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 7,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
                 decoration: BoxDecoration(
                   color: c.surface,
                   border: Border.all(color: c.border),
@@ -70,7 +75,10 @@ class WorkspaceHeader extends StatelessWidget {
                   children: [
                     Icon(Icons.search, size: 16, color: c.muted),
                     const SizedBox(width: 6),
-                    Text('Search', style: TextStyle(fontSize: AppType.t12, color: c.muted)),
+                    Text(
+                      'Search',
+                      style: TextStyle(fontSize: AppType.t12, color: c.muted),
+                    ),
                   ],
                 ),
               ),
@@ -82,7 +90,9 @@ class WorkspaceHeader extends StatelessWidget {
 
     return Container(
       height: isMobile ? 50 : 54,
-      padding: EdgeInsets.symmetric(horizontal: isMobile ? 8 : 18),
+      padding: EdgeInsets.symmetric(
+        horizontal: isMobile ? (onMenu != null ? 8 : 20) : 18,
+      ),
       decoration: BoxDecoration(
         color: c.bg,
         border: Border(bottom: BorderSide(color: c.border)),
@@ -93,7 +103,7 @@ class WorkspaceHeader extends StatelessWidget {
             IconButton(
               onPressed: onMenu,
               tooltip: 'Open navigation',
-              icon: Icon(Icons.menu, size: 20, color: c.muted),
+              icon: Icon(Icons.menu_rounded, size: 22, color: c.fg),
               visualDensity: VisualDensity.compact,
             ),
           Expanded(

@@ -29,9 +29,21 @@
                  let any app deep-link into arbitrary notes. -->
         </activity>
 
+        <!-- Target of the collection widgets' tap template: ticks a to-do in
+             place on the home screen, forwards everything else to
+             MainActivity. Never shows UI. -->
+        <activity
+            android:name=".WidgetActionActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="com.z4yed.typed.widgetaction"
+            android:theme="@android:style/Theme.NoDisplay" />
+
         <receiver
             android:name=".QuickCaptureWidget"
-            android:exported="true">
+            android:exported="true"
+            android:label="@string/widget_label_quick">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
             </intent-filter>
@@ -42,7 +54,8 @@
 
         <receiver
             android:name=".RecentNotesWidget"
-            android:exported="true">
+            android:exported="true"
+            android:label="@string/widget_label_recent">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
             </intent-filter>
@@ -53,7 +66,8 @@
 
         <receiver
             android:name=".TodoListWidget"
-            android:exported="true">
+            android:exported="true"
+            android:label="@string/widget_label_todo">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
             </intent-filter>
@@ -64,7 +78,8 @@
 
         <receiver
             android:name=".FinanceWidget"
-            android:exported="true">
+            android:exported="true"
+            android:label="@string/widget_label_finance">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
             </intent-filter>
@@ -75,7 +90,8 @@
 
         <receiver
             android:name=".StreakWidget"
-            android:exported="true">
+            android:exported="true"
+            android:label="@string/widget_label_streak">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
             </intent-filter>

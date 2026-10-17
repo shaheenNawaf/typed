@@ -3,7 +3,9 @@
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
+    <!-- Round outline, matching the app's task check. -->
     <path
         android:fillColor="@color/widget_muted"
-        android:pathData="M5,5 L19,5 L19,19 L5,19 Z M7,7 L7,17 L17,17 L17,7 Z" />
+        android:pathData="M12,3.5a8.5,8.5 0,1 0,0.01 0z M12,5.1a6.9,6.9 0,1 1,-0.01 0z"
+        android:fillType="evenOdd" />
 </vector>

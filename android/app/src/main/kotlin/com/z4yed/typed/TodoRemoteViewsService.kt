@@ -2,6 +2,7 @@ package com.z4yed.typed
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Paint
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
 import org.json.JSONArray
@@ -50,7 +51,12 @@ private class TodoFactory(
             return RemoteViews(context.packageName, R.layout.widget_todo_progress_row).apply {
                 setTextViewText(
                     R.id.widget_todo_progress_text,
-                    context.getString(R.string.widget_todo_progress, done, items.size),
+                    context.getString(
+                        if (done == items.size) R.string.widget_todo_all_done
+                        else R.string.widget_todo_progress,
+                        done,
+                        items.size,
+                    ),
                 )
             }
         }
@@ -58,6 +64,21 @@ private class TodoFactory(
             ?: return RemoteViews(context.packageName, R.layout.widget_todo_item)
         return RemoteViews(context.packageName, R.layout.widget_todo_item).apply {
             setTextViewText(R.id.todo_item_text, item.text)
+            // Done rows recede (muted, struck through) so the open ones carry
+            // the list. Always set both ways: rows are recycled.
+            setInt(
+                R.id.todo_item_text,
+                "setPaintFlags",
+                if (item.done) Paint.STRIKE_THRU_TEXT_FLAG or Paint.ANTI_ALIAS_FLAG
+                else Paint.ANTI_ALIAS_FLAG,
+            )
+            setTextColor(
+                R.id.todo_item_text,
+                androidx.core.content.ContextCompat.getColor(
+                    context,
+                    if (item.done) R.color.widget_muted else R.color.widget_fg,
+                ),
+            )
             setImageViewResource(
                 R.id.todo_item_check,
                 if (item.done) R.drawable.ic_check_filled else R.drawable.ic_check_empty,
@@ -89,7 +110,11 @@ private class TodoFactory(
     override fun getItemId(position: Int): Long {
         if (position == 0) return -1L
         val item = items.getOrNull(position - 1) ?: return position.toLong()
-        return "${item.id}:${item.text}".hashCode().toLong()
+        // Identical lines in one list need distinct ids: count how many
+        // same id+text rows come before this one.
+        val occurrence = items.subList(0, position - 1)
+            .count { it.id == item.id && it.text == item.text }
+        return "${item.id}:${item.text}:$occurrence".hashCode().toLong()
     }
 
     override fun hasStableIds(): Boolean = true

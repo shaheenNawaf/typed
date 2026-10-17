@@ -134,7 +134,10 @@ SlashToken? activeSlashToken(String text, int cursor) {
   // A whitespace-only query ("/ ") means the user is writing prose after a
   // slash, not searching commands — without this the menu would match all
   // commands and hijack Enter.
+  // Same for a space straight after the slash ("tea and / or", "1 / 2"):
+  // commands are typed flush against the slash.
   if (query.isNotEmpty && query.trim().isEmpty) return null;
+  if (query.startsWith(' ')) return null;
   return SlashToken(start: slash, end: cursor, query: query);
 }
 

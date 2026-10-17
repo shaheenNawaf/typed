@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import '../models/budget.dart';
 import '../models/money_entry.dart';
@@ -11,6 +13,7 @@ import '../utils/finance_utils.dart';
 import '../utils/markdown_display.dart';
 import '../utils/note_kind.dart';
 import 'finance_dashboard.dart';
+import 'home_modules.dart';
 import 'long_press_menu.dart';
 
 class NoteList extends StatefulWidget {
@@ -56,13 +59,15 @@ class NoteList extends StatefulWidget {
   final String? financeMode;
   final ValueChanged<String>? onFinanceModeChanged;
   final void Function(Note note, int lineIndex, bool checked)?
-      onChecklistToggle;
+  onChecklistToggle;
 
   /// When false the finance pane renders notes only (desktop shows the
   /// dashboard in the wide FinanceWorkspace pane instead).
   final bool showFinanceDashboard;
+
   /// Tap a transaction row -> edit that entry (noteId, entryId).
   final void Function(String noteId, String entryId)? onSelectEntry;
+
   /// Minor-unit expense buckets, oldest -> newest, length 14 (sparkline).
   final List<int> financeDailyTotals;
 
@@ -190,18 +195,6 @@ class _NoteListState extends State<NoteList> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (!_mergeControlsIntoList) ...[
-          if (widget.activeFilter == 'finance')
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-              child: Text(
-                'Finance notes',
-                style: TextStyle(
-                  fontSize: AppType.t11,
-                  fontWeight: FontWeight.w600,
-                  color: context.colors.muted,
-                ),
-              ),
-            ),
           Padding(
             // One snug control row below the workspace header: page mode
             // toggle on the left, sort/settings on the right.
@@ -239,12 +232,16 @@ class _NoteListState extends State<NoteList> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      '#${widget.activeTag}',
-                      style: TextStyle(
-                        fontSize: AppType.t12,
-                        fontWeight: FontWeight.w500,
-                        color: context.colors.tagFg,
+                    Flexible(
+                      child: Text(
+                        '#${widget.activeTag}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: AppType.t12,
+                          fontWeight: FontWeight.w500,
+                          color: context.colors.tagFg,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 4),
@@ -263,69 +260,78 @@ class _NoteListState extends State<NoteList> {
   List<Widget> _headerControls(bool isMobilePane) {
     final isDesktopWindow = MediaQuery.of(context).size.width >= 1024;
     return [
-      Builder(builder: (context) {
-        final sort = Semantics(
-          label: 'Toggle sort order',
-          child: InkWell(
-            onTap: widget.onSortToggle,
-            borderRadius: BorderRadius.circular(AppRadius.chip),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-              child: isMobilePane
-                  ? Icon(
-                      widget.sortDesc
-                          ? Icons.arrow_downward
-                          : Icons.sort_by_alpha,
-                      size: 16,
-                      color: context.colors.muted,
-                    )
-                  : Text(
-                      widget.sortDesc ? 'Recent \u2193' : 'A\u2013Z \u2191',
-                      style: TextStyle(
-                        fontSize: AppType.t13_5,
-                        color: context.colors.muted,
-                      ),
-                    ),
-            ),
-          ),
-        );
-        if (!isMobilePane) return sort;
-        return Tooltip(
-          message: widget.sortDesc ? 'Sort: most recent first' : 'Sort: A to Z',
-          child: sort,
-        );
-      }),
-      const SizedBox(width: 4),
-      if (widget.activeFilter != 'finance' && isDesktopWindow)
-        Builder(builder: (context) {
-          final newNote = Semantics(
-            label: 'New note',
+      Builder(
+        builder: (context) {
+          final sort = Semantics(
+            label: 'Toggle sort order',
             child: InkWell(
-              onTap: widget.onNewNote,
+              onTap: widget.onSortToggle,
               borderRadius: BorderRadius.circular(AppRadius.chip),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                 child: isMobilePane
-                    ? const Icon(Icons.add, size: 16)
-                    : Row(
-                        children: [
-                          const Icon(Icons.add, size: 16),
-                          const SizedBox(width: 2),
-                          Text(
-                            'New',
-                            style: TextStyle(
-                              fontSize: AppType.t13_5,
-                              color: context.colors.muted,
-                            ),
-                          ),
-                        ],
+                    ? Icon(
+                        widget.sortDesc
+                            ? Icons.arrow_downward
+                            : Icons.sort_by_alpha,
+                        size: 16,
+                        color: context.colors.muted,
+                      )
+                    : Text(
+                        widget.sortDesc ? 'Recent \u2193' : 'A\u2013Z \u2191',
+                        style: TextStyle(
+                          fontSize: AppType.t13_5,
+                          color: context.colors.muted,
+                        ),
                       ),
               ),
             ),
           );
-          if (!isMobilePane) return newNote;
-          return Tooltip(message: 'New note', child: newNote);
-        }),
+          if (!isMobilePane) return sort;
+          return Tooltip(
+            message: widget.sortDesc
+                ? 'Sort: most recent first'
+                : 'Sort: A to Z',
+            child: sort,
+          );
+        },
+      ),
+      const SizedBox(width: 4),
+      if (widget.activeFilter != 'finance' && isDesktopWindow)
+        Builder(
+          builder: (context) {
+            final newNote = Semantics(
+              label: 'New note',
+              child: InkWell(
+                onTap: widget.onNewNote,
+                borderRadius: BorderRadius.circular(AppRadius.chip),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  child: isMobilePane
+                      ? const Icon(Icons.add, size: 16)
+                      : Row(
+                          children: [
+                            const Icon(Icons.add, size: 16),
+                            const SizedBox(width: 2),
+                            Text(
+                              'New',
+                              style: TextStyle(
+                                fontSize: AppType.t13_5,
+                                color: context.colors.muted,
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
+              ),
+            );
+            if (!isMobilePane) return newNote;
+            return Tooltip(message: 'New note', child: newNote);
+          },
+        ),
       if (widget.onOpenSettings != null) ...[
         const SizedBox(width: 4),
         Tooltip(
@@ -439,18 +445,25 @@ class _NoteListState extends State<NoteList> {
       }
 
       if (displayNotes.isEmpty) {
-        child = ListView(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
-          children: [body],
-        );
+        child = ListView(padding: _listPadding(context), children: [body]);
       } else {
-        final sectioned = _buildSectionedItems(displayNotes);
+        // The ledgers are one quiet section under the dashboard, not a
+        // second date-bucketed list competing with "Recent".
         child = ListView.builder(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
-          itemCount: sectioned.length + 1,
+          padding: _listPadding(context),
+          itemCount: displayNotes.length + 1,
           itemBuilder: (context, index) {
-            if (index == 0) return body;
-            return _buildCardItem(sectioned[index - 1]);
+            if (index == 0) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  body,
+                  const SizedBox(height: 22),
+                  HomeLabel(displayNotes.length == 1 ? 'LEDGER' : 'LEDGERS'),
+                ],
+              );
+            }
+            return _buildCardItem(displayNotes[index - 1]);
           },
         );
       }
@@ -583,23 +596,22 @@ class _NoteListState extends State<NoteList> {
     } else {
       final sectioned = _buildSectionedItems(displayNotes);
       child = ListView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
+        padding: _listPadding(context),
         itemCount: sectioned.length,
         itemBuilder: (context, index) {
           return _buildCardItem(
             sectioned[index],
             isMobilePane: isMobilePane,
-            withControls: _mergeControlsIntoList &&
-                index == 0 &&
-                sectioned[0] is String,
+            withControls:
+                _mergeControlsIntoList && index == 0 && sectioned[0] is String,
           );
         },
       );
     }
     final switchKey = displayNotes.isEmpty
         ? (widget.searchQuery.isNotEmpty
-            ? 'empty-search'
-            : 'empty-${widget.activeFilter}')
+              ? 'empty-search'
+              : 'empty-${widget.activeFilter}')
         : 'list';
     return AnimatedSwitcher(
       duration: AppMotion.duration(context, AppMotion.base),
@@ -609,6 +621,15 @@ class _NoteListState extends State<NoteList> {
     );
   }
 
+  /// List padding; the bottom clears the mobile dock the list scrolls under
+  /// (reported by the Scaffold as bottom padding).
+  EdgeInsets _listPadding(BuildContext context) => EdgeInsets.fromLTRB(
+    16,
+    4,
+    16,
+    math.max(80.0, MediaQuery.paddingOf(context).bottom + 24),
+  );
+
   List<dynamic> _buildSectionedItems([List<Note>? source]) {
     final notes = source ?? widget.notes;
     if (widget.activeFilter == 'archive' || widget.activeFilter == 'trash') {
@@ -616,8 +637,25 @@ class _NoteListState extends State<NoteList> {
     }
     final now = DateTime.now();
     final items = <dynamic>[];
+    // Pinned notes sort first whatever their date, and A–Z order is not
+    // chronological: bucketing either by date repeated headers
+    // ("Today / Older / Today"). Pinned get their own section and A–Z gets
+    // none.
+    final pinned = notes.where((n) => n.isPinned).toList();
+    final rest = notes.where((n) => !n.isPinned).toList();
+    if (pinned.isNotEmpty) {
+      items.add('Pinned');
+      items.addAll(pinned);
+    }
+    if (!widget.sortDesc) {
+      // Always a header first: the list controls (incl. the sort toggle
+      // back to Recent) ride on the first header row.
+      if (rest.isNotEmpty) items.add('A–Z');
+      items.addAll(rest);
+      return items;
+    }
     String? currentSection;
-    for (final note in notes) {
+    for (final note in rest) {
       final section = dateSection(note.updatedAt, now: now);
       if (section != currentSection) {
         items.add(section);
@@ -757,7 +795,7 @@ class _NoteCard extends StatefulWidget {
   final Map<String, int> budgetActuals;
   final List<MoneyEntry>? financeEntries;
   final void Function(Note note, int lineIndex, bool checked)?
-      onChecklistToggle;
+  onChecklistToggle;
 
   const _NoteCard({
     required this.note,
@@ -821,78 +859,78 @@ class _NoteCardState extends State<_NoteCard> {
         onPointerUp: (_) => setState(() => _pressed = false),
         onPointerCancel: (_) => setState(() => _pressed = false),
         child: Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Stack(
-        children: [
-          if (_dragOffset < 0)
-            Positioned(
-              right: 0,
-              top: 0,
-              bottom: 0,
-              width: _kActionZoneWidth,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: context.colors.destructive,
-                  borderRadius: BorderRadius.circular(AppRadius.card),
-                ),
-                child: Center(
-                  child: Icon(
-                    Icons.delete_outline,
-                    color: context.colors.onDestructive,
-                    size: 26,
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Stack(
+            children: [
+              if (_dragOffset < 0)
+                Positioned(
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: _kActionZoneWidth,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: context.colors.destructive,
+                      borderRadius: BorderRadius.circular(AppRadius.card),
+                    ),
+                    child: Center(
+                      child: Icon(
+                        Icons.delete_outline,
+                        color: context.colors.onDestructive,
+                        size: 26,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-          if (_dragOffset > 0)
-            Positioned(
-              left: 0,
-              top: 0,
-              bottom: 0,
-              width: _kActionZoneWidth,
-              child: Container(
-                decoration: BoxDecoration(
-                  // Neutral reveal — income green implied a money meaning
-                  // for what is an archive action.
-                  color: context.colors.muted,
-                  borderRadius: BorderRadius.circular(AppRadius.card),
-                ),
-                child: Center(
-                  child: Icon(
-                    Icons.archive_outlined,
-                    color: AppColors.readableOn(context.colors.muted),
-                    size: 26,
+              if (_dragOffset > 0)
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: _kActionZoneWidth,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      // Neutral reveal — income green implied a money meaning
+                      // for what is an archive action.
+                      color: context.colors.muted,
+                      borderRadius: BorderRadius.circular(AppRadius.card),
+                    ),
+                    child: Center(
+                      child: Icon(
+                        Icons.archive_outlined,
+                        color: AppColors.readableOn(context.colors.muted),
+                        size: 26,
+                      ),
+                    ),
                   ),
                 ),
+              AnimatedContainer(
+                duration: _isSnapping
+                    ? AppMotion.duration(context, AppMotion.base)
+                    : Duration.zero,
+                curve: AppMotion.decelerate,
+                transform: Matrix4.translationValues(_dragOffset, 0, 0),
+                child: GestureDetector(
+                  behavior: HitTestBehavior.translucent,
+                  onHorizontalDragStart: isDesktop ? null : _onDragStart,
+                  onHorizontalDragUpdate: isDesktop ? null : _onDragUpdate,
+                  onHorizontalDragEnd: isDesktop ? null : _onDragEnd,
+                  onLongPressStart: (details) {
+                    if (widget.longPressActions.isEmpty) return;
+                    LongPressMenu.show(
+                      context,
+                      actions: widget.longPressActions,
+                      tapPosition: details.globalPosition,
+                    );
+                  },
+                  child: _buildCard(),
+                ),
               ),
-            ),
-          AnimatedContainer(
-            duration: _isSnapping
-                ? AppMotion.duration(context, AppMotion.base)
-                : Duration.zero,
-            curve: AppMotion.decelerate,
-            transform: Matrix4.translationValues(_dragOffset, 0, 0),
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onHorizontalDragStart: isDesktop ? null : _onDragStart,
-              onHorizontalDragUpdate: isDesktop ? null : _onDragUpdate,
-              onHorizontalDragEnd: isDesktop ? null : _onDragEnd,
-              onLongPressStart: (details) {
-                if (widget.longPressActions.isEmpty) return;
-                LongPressMenu.show(
-                  context,
-                  actions: widget.longPressActions,
-                  tapPosition: details.globalPosition,
-                );
-              },
-              child: _buildCard(),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
-    ),
-  ),
-);
+    );
   }
 
   Widget _buildCard() {
@@ -907,58 +945,63 @@ class _NoteCardState extends State<_NoteCard> {
       button: true,
       label: widget.note.title.isEmpty ? 'Untitled' : widget.note.title,
       child: InkWell(
-      onTap: widget.onTap,
-      borderRadius: BorderRadius.circular(isDesktop ? AppRadius.chip : AppRadius.card),
-      child: AnimatedContainer(
-        duration: AppMotion.duration(context, AppMotion.base),
-        curve: AppMotion.emphasized,
-        padding: isFinance
-            ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10)
-            : EdgeInsets.symmetric(
-                horizontal: isDesktop ? 12 : 14,
-                vertical: isDesktop ? 11 : 14,
-              ),
-        decoration: BoxDecoration(
-          color: isDesktop && !widget.selected
-              ? Colors.transparent
-              : context.colors.surface,
-          // Desktop pairs a non-uniform border (accent rail + hairline) with
-          // this decoration; a borderRadius on non-uniform border colors
-          // throws in debug paints, and release already ignores the radius
-          // for the border — so desktop drops it (release pixels unchanged).
-          borderRadius: isDesktop ? null : BorderRadius.circular(AppRadius.card),
-          border: isDesktop
-              ? Border(
-                  left: BorderSide(
-                    color: widget.selected || _hovered
+        onTap: widget.onTap,
+        borderRadius: BorderRadius.circular(
+          isDesktop ? AppRadius.chip : AppRadius.card,
+        ),
+        child: AnimatedContainer(
+          duration: AppMotion.duration(context, AppMotion.base),
+          curve: AppMotion.emphasized,
+          padding: isFinance
+              ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10)
+              : EdgeInsets.symmetric(
+                  horizontal: isDesktop ? 12 : 14,
+                  vertical: isDesktop ? 11 : 14,
+                ),
+          decoration: BoxDecoration(
+            color: isDesktop && !widget.selected
+                ? Colors.transparent
+                : context.colors.surface,
+            // Desktop pairs a non-uniform border (accent rail + hairline) with
+            // this decoration; a borderRadius on non-uniform border colors
+            // throws in debug paints, and release already ignores the radius
+            // for the border — so desktop drops it (release pixels unchanged).
+            borderRadius: isDesktop
+                ? null
+                : BorderRadius.circular(AppRadius.card),
+            border: isDesktop
+                ? Border(
+                    left: BorderSide(
+                      color: widget.selected || _hovered
+                          ? context.colors.accent
+                          : Colors.transparent,
+                      width: 2,
+                    ),
+                    bottom: BorderSide(
+                      color: context.colors.border.withValues(alpha: 0.7),
+                    ),
+                  )
+                : Border.all(
+                    color: widget.selected
                         ? context.colors.accent
                         : Colors.transparent,
-                    width: 2,
+                    width: widget.selected ? 1 : 0,
                   ),
-                  bottom: BorderSide(
-                    color: context.colors.border.withValues(alpha: 0.7),
-                  ),
-                )
-              : Border.all(
-                  color: widget.selected
-                      ? context.colors.accent
-                      : Colors.transparent,
-                  width: widget.selected ? 1 : 0,
-                ),
-          boxShadow: null,
+            boxShadow: null,
+          ),
+          transform:
+              Matrix4.translationValues(
+                0,
+                _hovered && isDesktop && !_pressed ? -2 : 0,
+                0,
+              )..scaleByDouble(
+                _pressed ? 0.985 : 1.0,
+                _pressed ? 0.985 : 1.0,
+                1.0,
+                1.0,
+              ),
+          child: isFinance ? _buildFinanceCardBody() : _buildFullCardBody(),
         ),
-        transform: Matrix4.translationValues(
-          0,
-          _hovered && isDesktop && !_pressed ? -2 : 0,
-          0,
-        )..scaleByDouble(
-          _pressed ? 0.985 : 1.0,
-          _pressed ? 0.985 : 1.0,
-          1.0,
-          1.0,
-        ),
-        child: isFinance ? _buildFinanceCardBody() : _buildFullCardBody(),
-      ),
       ),
     );
   }
@@ -966,21 +1009,22 @@ class _NoteCardState extends State<_NoteCard> {
   Widget _buildFinanceCardBody() {
     final amounts = widget.financeEntries ?? widget.note.amounts;
     final net = _netMinor(amounts);
-    final mixedCurrencies = amounts
-        .map((e) => e.currency ?? widget.note.currency ?? 'PHP')
-        .toSet()
-        .length >
+    final mixedCurrencies =
+        amounts
+            .map((e) => e.currency ?? widget.note.currency ?? 'PHP')
+            .toSet()
+            .length >
         1;
     final amountColor = mixedCurrencies || net == 0
         ? context.colors.muted
         : net > 0
-            ? context.colors.income
-            : context.colors.expense;
+        ? context.colors.income
+        : context.colors.expense;
     final amountIcon = mixedCurrencies || net == 0
         ? Icons.remove
         : net > 0
-            ? Icons.arrow_upward
-            : Icons.arrow_downward;
+        ? Icons.arrow_upward
+        : Icons.arrow_downward;
     final dominant = _dominantCategory(widget.note, amounts);
     final budget = dominant != null
         ? widget.budgets.cast<Budget?>().firstWhere(
@@ -1025,8 +1069,10 @@ class _NoteCardState extends State<_NoteCard> {
                     style: TextStyle(
                       fontSize: AppType.t12,
                       fontFamily: context.colors.monoFontFamily,
-                      fontWeight: FontWeight.w600,
-                      color: amountColor,
+                      fontWeight: FontWeight.w500,
+                      // The arrow carries the direction; the figures stay
+                      // quiet so a list of ledgers is not a wall of red.
+                      color: context.colors.muted,
                     ),
                     children: _buildCardAmountSpans(
                       widget.note,
@@ -1160,17 +1206,17 @@ class _NoteCardState extends State<_NoteCard> {
     final financeColor = financeNeutral
         ? context.colors.muted
         : financeNet > 0
-            ? context.colors.income
-            : financeNet < 0
-                ? context.colors.expense
-                : context.colors.muted;
+        ? context.colors.income
+        : financeNet < 0
+        ? context.colors.expense
+        : context.colors.muted;
     final financeIcon = financeNeutral
         ? Icons.remove
         : financeNet > 0
-            ? Icons.arrow_upward
-            : financeNet < 0
-                ? Icons.arrow_downward
-                : Icons.remove;
+        ? Icons.arrow_upward
+        : financeNet < 0
+        ? Icons.arrow_downward
+        : Icons.remove;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1234,23 +1280,29 @@ class _NoteCardState extends State<_NoteCard> {
             ...widget.note.tags
                 .take(3)
                 .map(
-                  (t) => Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 5,
-                        vertical: 1,
-                      ),
-                      decoration: BoxDecoration(
-                        color: context.colors.tagBg,
-                        borderRadius: BorderRadius.circular(AppRadius.chip),
-                      ),
-                      child: Text(
-                        '#$t',
-                        style: TextStyle(
-                          fontSize: AppType.t12,
-                          fontWeight: FontWeight.w500,
-                          color: context.colors.tagFg,
+                  // Flexible + ellipsis: three long tags (or one at large
+                  // text scale) overflowed the card on a 360dp phone.
+                  (t) => Flexible(
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 5,
+                          vertical: 1,
+                        ),
+                        decoration: BoxDecoration(
+                          color: context.colors.tagBg,
+                          borderRadius: BorderRadius.circular(AppRadius.chip),
+                        ),
+                        child: Text(
+                          '#$t',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: AppType.t12,
+                            fontWeight: FontWeight.w500,
+                            color: context.colors.tagFg,
+                          ),
                         ),
                       ),
                     ),
@@ -1262,11 +1314,7 @@ class _NoteCardState extends State<_NoteCard> {
           const SizedBox(height: 4),
           Row(
             children: [
-              Icon(
-                financeIcon,
-                size: 10,
-                color: financeColor,
-              ),
+              Icon(financeIcon, size: 10, color: financeColor),
               const SizedBox(width: 4),
               Flexible(
                 child: Text.rich(
@@ -1275,7 +1323,9 @@ class _NoteCardState extends State<_NoteCard> {
                       fontSize: AppType.t12,
                       fontFamily: context.colors.monoFontFamily,
                       fontWeight: FontWeight.w500,
-                      color: financeColor,
+                      // The arrow carries the direction; the figures stay
+                      // quiet so a list of ledgers is not a wall of red.
+                      color: context.colors.muted,
                     ),
                     children: _buildCardAmountSpans(
                       widget.note,
@@ -1342,12 +1392,11 @@ class _NoteCardState extends State<_NoteCard> {
                           !item.done,
                         ),
                         activeColor: c.accent,
-                        materialTapTargetSize:
-                            MaterialTapTargetSize.shrinkWrap,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         visualDensity: VisualDensity.compact,
                       ),
-                      ),
                     ),
+                  ),
                   const SizedBox(width: 2),
                   Expanded(
                     child: InkWell(
@@ -1422,8 +1471,7 @@ class _NoteCardState extends State<_NoteCard> {
       }
       final codes = nets.keys.toList()
         ..sort((a, b) {
-          final byMagnitude =
-              (nets[b]!.abs()).compareTo(nets[a]!.abs());
+          final byMagnitude = (nets[b]!.abs()).compareTo(nets[a]!.abs());
           return byMagnitude != 0 ? byMagnitude : a.compareTo(b);
         });
       final spans = <InlineSpan>[];

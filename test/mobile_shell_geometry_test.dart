@@ -82,7 +82,7 @@ void main() {
         findsOneWidget,
       );
 
-      final dockTop = tester.getTopLeft(find.byIcon(Icons.home_outlined)).dy;
+      final dockTop = tester.getTopLeft(find.byTooltip('Home')).dy;
       expect(
         dockTop,
         greaterThan(size.height - 200),

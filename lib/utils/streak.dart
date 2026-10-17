@@ -5,16 +5,21 @@ class WritingStreak {
   final bool writtenToday;
   final int activeDays;
 
+  /// Whether each of the last 7 days had writing, oldest first, today last.
+  final List<bool> lastSevenDays;
+
   const WritingStreak({
     required this.days,
     required this.writtenToday,
     required this.activeDays,
+    this.lastSevenDays = const [],
   });
 
   Map<String, dynamic> toJson() => {
     'streak': days,
     'writtenToday': writtenToday,
     'total': activeDays,
+    'week': lastSevenDays,
   };
 }
 
@@ -27,17 +32,22 @@ WritingStreak computeWritingStreak(List<Note> notes, {DateTime? now}) {
   }
 
   final writtenToday = days.contains(today);
-  var cursor = writtenToday ? today : today.subtract(const Duration(days: 1));
+  // Calendar steps, not 24h ones: across a DST change `subtract(1 day)` from
+  // midnight lands at 23:00/01:00, misses the date set and breaks the streak.
+  DateTime back(DateTime day, int n) =>
+      DateTime(day.year, day.month, day.day - n);
+  var cursor = writtenToday ? today : back(today, 1);
   var streak = 0;
   while (days.contains(cursor)) {
     streak++;
-    cursor = cursor.subtract(const Duration(days: 1));
+    cursor = back(cursor, 1);
   }
 
   return WritingStreak(
     days: streak,
     writtenToday: writtenToday,
     activeDays: days.length,
+    lastSevenDays: [for (var i = 6; i >= 0; i--) days.contains(back(today, i))],
   );
 }
 

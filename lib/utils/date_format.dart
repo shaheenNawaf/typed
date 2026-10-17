@@ -34,6 +34,19 @@ String monthName(int month) => kMonthNamesLong[month - 1];
 
 String monthShort(int month) => kMonthNamesShort[month - 1];
 
+const List<String> kWeekdayNames = [
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday',
+];
+
+/// [DateTime.weekday] (1 = Monday) to its English name.
+String weekdayName(int weekday) => kWeekdayNames[weekday - 1];
+
 String _two(int n) => n.toString().padLeft(2, '0');
 
 /// ISO-style label used in money tables: 2026-09-06.

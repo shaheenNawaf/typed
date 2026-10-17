@@ -1,5 +1,13 @@
 import '../utils/finance_utils.dart';
 
+/// The only periods a budget can have. The dashboard's own filter also has
+/// "day" and "all", which leaked into budgets created under them: an "All"
+/// budget was tracked as monthly but never alerted.
+const kBudgetPeriods = ['week', 'month', 'year'];
+
+String normalizeBudgetPeriod(String? period) =>
+    kBudgetPeriods.contains(period) ? period! : 'month';
+
 class Budget {
   String id;
   String category;
@@ -38,7 +46,7 @@ class Budget {
           (json['currency'] as String?) ?? 'PHP',
         ),
         currency: (json['currency'] as String?) ?? 'PHP',
-        period: (json['period'] as String?) ?? 'month',
+        period: normalizeBudgetPeriod(json['period'] as String?),
         isDemo: (json['isDemo'] as bool?) ?? false,
       );
 }

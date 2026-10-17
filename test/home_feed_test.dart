@@ -13,6 +13,13 @@ import 'package:typed/widgets/editor.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  // Midday: time-of-day features (evening prompt, greeting) stay fixed.
+  setUp(() {
+    final today = DateTime.now();
+    HomeScreen.clock =
+        () => DateTime(today.year, today.month, today.day, 12);
+  });
+  tearDown(() => HomeScreen.clock = DateTime.now);
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .setMockMethodCallHandler(
     const MethodChannel('com.z4yed.typed/widget'),
@@ -99,106 +106,197 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
   }
 
-  testWidgets('mobile home shows quiet index layers and no old sections',
+  testWidgets('mobile home: one thing per block, nothing extra',
       (tester) async {
     await seedHome();
     await pumpHome(tester, surface: const Size(390, 844));
 
     expect(find.textContaining('Good '), findsOneWidget);
-    expect(find.textContaining('180 spent'), findsOneWidget);
-    expect(find.textContaining('1 open task'), findsOneWidget);
-    expect(find.text('PINNED'), findsOneWidget);
-    expect(find.text('JUMP BACK IN'), findsOneWidget);
-    expect(find.text('New page'), findsNothing);
-    expect(find.text('QUICK ACTIONS'), findsNothing);
-    expect(find.text('CONTINUE'), findsNothing);
-    expect(find.text('RECENT'), findsNothing);
-    expect(find.text('TODAY'), findsNothing);
-    expect(find.text('THIS MONTH'), findsNothing);
-    expect(find.text('New note'), findsNothing);
-    expect(find.text('Travel budget'), findsOneWidget);
-    expect(find.text('Todo list'), findsOneWidget);
-    expect(find.text('Welcome to Typed'), findsWidgets);
+    expect(find.text('What’s on your mind?'), findsOneWidget);
+    // One task, not a list.
+    expect(find.text('NEXT UP'), findsOneWidget);
+    expect(find.text('buy milk'), findsOneWidget);
+    expect(find.text('in Todo list'), findsOneWidget);
+    expect(find.text('write spec'), findsNothing);
+    // One page to return to: the last written, not a task list or ledger.
+    expect(find.text('PICK UP WHERE YOU LEFT OFF'), findsOneWidget);
+    expect(find.text('Welcome to Typed'), findsOneWidget);
+    expect(find.text('Travel budget'), findsNothing);
+    // Money as one line.
+    expect(find.textContaining('180.00 spent in', findRichText: true),
+        findsOneWidget);
+    // The old busy sections stay gone.
+    for (final gone in [
+      'PINNED',
+      'JUMP BACK IN',
+      'UP NEXT',
+      'WRITING',
+      'QUICK ACTIONS',
+      'TODAY',
+      'THIS MONTH',
+    ]) {
+      expect(find.text(gone), findsNothing, reason: gone);
+    }
     expect(find.byType(MobileNav), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('pinned section is absent when nothing is pinned', (tester) async {
-    await seedHome(withPin: false);
-    await pumpHome(tester, surface: const Size(390, 844));
-
-    expect(find.text('PINNED'), findsNothing);
-    expect(find.text('JUMP BACK IN'), findsOneWidget);
-    expect(find.textContaining('Good '), findsOneWidget);
-  });
-
-  testWidgets('desktop home renders the same quiet feed inside the desktop shell',
+  testWidgets('desktop home is the same single focused column',
       (tester) async {
     await seedHome();
     await pumpHome(tester, surface: const Size(1440, 900));
 
     expect(find.byType(Sidebar), findsOneWidget);
     expect(find.byType(MobileNav), findsNothing);
-    expect(find.text('JUMP BACK IN'), findsOneWidget);
-    // Desktop renders two legitimate "PINNED" texts: the Sidebar's section
-    // label and the home feed's section title.
-    expect(find.text('PINNED'), findsWidgets);
-    expect(find.textContaining('180 spent'), findsOneWidget);
-    expect(find.text('New page'), findsNothing);
-    expect(find.text('QUICK ACTIONS'), findsNothing);
+    expect(find.text('NEXT UP'), findsOneWidget);
+    expect(find.textContaining('180.00 spent in', findRichText: true),
+        findsOneWidget);
+    // "New page" lives in the sidebar; Home adds no second create control.
+    expect(
+      find.descendant(
+        of: find.byType(Sidebar),
+        matching: find.text('New page'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('New page'), findsOneWidget);
+    // One column: next up and continue share a left edge.
+    final nextUpX = tester.getTopLeft(find.text('NEXT UP')).dx;
+    final continueX =
+        tester.getTopLeft(find.text('PICK UP WHERE YOU LEFT OFF')).dx;
+    expect((nextUpX - continueX).abs(), lessThan(1));
   });
 
-  testWidgets('tapping a jump-back-in row opens the editor', (tester) async {
+  testWidgets('next up: Done ticks it in place, Later sets it aside',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'onboarded_v1': true,
+      'onboarding_flow_complete_v1': true,
+      'shell_state_v1': '{"filter":"home","tab":"home"}',
+    });
+    await NoteStorage().save([
+      Note(
+        id: 'todo1',
+        title: 'Errands',
+        content: '- [ ] first thing\n- [ ] second thing\n- [ ] third thing\n',
+        tags: ['todo'],
+        type: 'todo',
+      ),
+    ]);
+    await pumpHome(tester, surface: const Size(390, 844));
+
+    expect(find.text('first thing'), findsOneWidget);
+    expect(find.text('second thing'), findsNothing);
+    expect(find.text('1 of 3'), findsOneWidget);
+
+    await tester.tap(find.text('Later'));
+    // First frame starts the swap; the timed pump runs it to the end.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    expect(find.text('second thing'), findsOneWidget);
+    expect(find.text('first thing'), findsNothing);
+
+    await tester.tap(find.text('Done'));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(find.text('third thing'), findsOneWidget);
+    expect(find.text('1 of 2'), findsOneWidget);
+    expect(find.textContaining('Done: second thing'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 2));
+    final saved = await tester.runAsync(() => NoteStorage().loadResult());
+    final todo = saved!.items.singleWhere((n) => n.id == 'todo1');
+    expect(todo.content, contains('- [x] second thing'));
+    expect(todo.content, contains('- [ ] first thing'));
+  });
+
+  testWidgets('next up says so when nothing is waiting', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'onboarded_v1': true,
+      'onboarding_flow_complete_v1': true,
+      'shell_state_v1': '{"filter":"home","tab":"home"}',
+    });
+    await NoteStorage().save([
+      Note(id: 'n', title: 'Plain', content: 'words', tags: const []),
+    ]);
+    await pumpHome(tester, surface: const Size(390, 844));
+    expect(find.text('Nothing waiting on you.'), findsOneWidget);
+    expect(find.text('Done'), findsNothing);
+  });
+
+  testWidgets('capture saves a note, or files a task into Inbox',
+      (tester) async {
+    await seedHome();
+    await pumpHome(tester, surface: const Size(390, 844));
+
+    final field = find.widgetWithText(TextField, 'What’s on your mind?');
+    await tester.enterText(field, 'Call the landlord');
+    // The task / save keys scale in once there is text.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.byTooltip('Add as task'));
+    await tester.pump(const Duration(milliseconds: 600));
+    // Inbox is now the freshest list, so its task is the one shown.
+    expect(find.text('Call the landlord'), findsOneWidget);
+    expect(find.textContaining('Added to Inbox'), findsOneWidget);
+
+    await tester.enterText(field, 'Gift idea: a good fountain pen');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.byTooltip('Save note'));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    await tester.pump(const Duration(seconds: 2));
+    final saved = await tester.runAsync(() => NoteStorage().loadResult());
+    final notes = saved!.items;
+    final inbox = notes.singleWhere((n) => n.title == 'Inbox');
+    expect(inbox.type, 'todo');
+    expect(inbox.content, '- [ ] Call the landlord\n');
+    expect(
+      notes.where((n) => n.title == 'Gift idea: a good fountain pen'),
+      hasLength(1),
+    );
+  });
+
+  testWidgets('tapping the continue card opens the editor', (tester) async {
     await seedHome();
     await pumpHome(tester, surface: const Size(390, 844));
     await tester.pump();
 
-    // Tap the TEXT note's row (tree order: the PINNED chip comes first, the
-    // JUMP BACK IN row last). Finance notes are avoided: the finance editor's
-    // fixed-height summary card overflows under synthetic Ahem test fonts.
-    final row = find.text('Welcome to Typed').last;
-    await tester.ensureVisible(row);
+    final card = find.text('Welcome to Typed');
+    await tester.ensureVisible(card);
     await tester.pump();
-    await tester.tap(row);
+    await tester.tap(card);
     await tester.pump(const Duration(milliseconds: 100));
     await tester.pump(const Duration(seconds: 1));
 
-    expect(find.text('JUMP BACK IN'), findsNothing);
+    expect(find.text('PICK UP WHERE YOU LEFT OFF'), findsNothing);
     expect(find.byType(MobileNav), findsNothing);
   });
 
-  testWidgets('desktop home row tap opens the note in the three-pane editor',
+  testWidgets('desktop continue tap opens the note in the three-pane editor',
       (tester) async {
     await seedHome();
     // 1100px: desktop shell (>=1024) but below the 1200px context-panel
     // threshold, keeping the assertion surface to list + editor.
     await pumpHome(tester, surface: const Size(1100, 900));
 
-    final row = find.text('Welcome to Typed').last;
-    await tester.ensureVisible(row);
+    final card = find.text('Welcome to Typed').last;
+    await tester.ensureVisible(card);
     await tester.pump();
-    await tester.tap(row);
+    await tester.tap(card);
     await tester.pump(const Duration(milliseconds: 100));
     await tester.pump(const Duration(seconds: 1));
     // One more frame: the AnimatedSwitcher prunes the outgoing home child
     // in a status-listener setState that lands on the next pump.
     await tester.pump();
 
-    expect(find.text('JUMP BACK IN'), findsNothing);
+    expect(find.text('PICK UP WHERE YOU LEFT OFF'), findsNothing);
     expect(find.byType(Editor), findsOneWidget);
   });
 
-  testWidgets('todo row subtitle shows the next open item', (tester) async {
-    await seedHome();
-    await pumpHome(tester, surface: const Size(390, 844));
-
-    // fixture todo1 content: '- [ ] buy milk\n- [x] write spec\n'
-    expect(find.textContaining('buy milk · 1 of 2 done'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('mixed-currency finance row stays in the dominant currency',
-      (tester) async {
+  testWidgets('money line stays in the dominant currency', (tester) async {
     SharedPreferences.setMockInitialValues({
       'onboarded_v1': true,
       'onboarding_flow_complete_v1': true,
@@ -236,13 +334,33 @@ void main() {
     ]);
     await pumpHome(tester, surface: const Size(390, 844));
 
-    // ₱180.00 dominant-currency sum, 1 dominant entry, USD excluded — the
-    // old code summed 18000 + 999 minors across currencies into '₱189.99'.
-    expect(
-      find.textContaining('180.00 · 1 entry · excl. USD'),
-      findsOneWidget,
-    );
-    expect(find.textContaining('189.99'), findsNothing);
+    // ₱180.00 in the dominant currency; USD is never summed in (the old
+    // code produced '₱189.99').
+    expect(find.textContaining('180.00 spent in', findRichText: true),
+        findsOneWidget);
+    expect(find.textContaining('189.99', findRichText: true), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('home fits a 320px phone without overflow', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'onboarded_v1': true,
+      'onboarding_flow_complete_v1': true,
+      'shell_state_v1': '{"filter":"home","tab":"home"}',
+    });
+    await NoteStorage().save([
+      Note(
+        id: 'todo1',
+        title: 'A list with a rather long name that will not fit',
+        content: '- [ ] A long task that goes on well past one line of text\n'
+            '- [ ] another\n',
+        tags: ['todo'],
+        type: 'todo',
+      ),
+    ]);
+    await pumpHome(tester, surface: const Size(320, 640));
+    expect(find.text('Done'), findsOneWidget);
+    expect(find.text('Later'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

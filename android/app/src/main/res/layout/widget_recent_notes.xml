@@ -20,7 +20,7 @@
             android:layout_width="16dp"
             android:layout_height="16dp"
             android:src="@drawable/ic_typed"
-            android:contentDescription="Typed" />
+            android:contentDescription="@string/widget_app_name" />
 
         <TextView
             android:layout_width="0dp"

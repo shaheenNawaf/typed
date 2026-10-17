@@ -127,11 +127,19 @@ void main() {
     expect(find.text('New page'), findsNothing);
   });
 
-  testWidgets('desktop home: Create square is kept, no dock', (tester) async {
+  testWidgets('desktop home: one create path, in the sidebar; no dock',
+      (tester) async {
     await seed(tab: 'home');
     await pumpHome(tester, surface: const Size(1440, 900));
 
-    expect(bySemanticsLabel('Create'), findsOneWidget);
+    // Home itself leads with the capture field; the redundant accent "+"
+    // square is gone and New page lives in the sidebar.
+    expect(bySemanticsLabel('Create'), findsNothing);
+    expect(find.text('New page'), findsOneWidget);
+    await tester.tap(find.text('New page'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Blank note'), findsOneWidget);
   });
 
   testWidgets(

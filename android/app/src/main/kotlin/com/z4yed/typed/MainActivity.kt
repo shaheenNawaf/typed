@@ -49,9 +49,20 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /// Recreated (config change, process death) or reopened from Recents:
+    /// the launch intent is the original widget tap, and replaying it would
+    /// reopen the expense sheet / note a second time.
+    private var replayedLaunch = false
+
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        replayedLaunch = savedInstanceState != null ||
+            ((intent?.flags ?: 0) and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
+        super.onCreate(savedInstanceState)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        handleIntent(intent)
+        if (!replayedLaunch) handleIntent(intent)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
