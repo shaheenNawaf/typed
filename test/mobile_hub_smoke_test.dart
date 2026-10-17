@@ -51,8 +51,10 @@ void main() {
       // the dock itself: five icon slots, no visible labels
       expect(find.byType(MobileNav), findsOneWidget);
       expect(find.byIcon(Icons.home_outlined), findsOneWidget);
-      expect(find.byIcon(Icons.article_outlined), findsOneWidget);
-      expect(find.byIcon(Icons.add), findsOneWidget);
+      // The active tab (notes) wears the filled glyph; the rest are outlines.
+      expect(find.byIcon(Icons.article), findsOneWidget);
+      expect(find.byIcon(Icons.article_outlined), findsNothing);
+      expect(find.byIcon(Icons.add_rounded), findsOneWidget);
       expect(find.byIcon(Icons.check_circle_outline), findsOneWidget);
       expect(find.text('Home'), findsNothing);
       expect(find.text('Notes'), findsNothing);
@@ -114,9 +116,45 @@ void main() {
     await tester.pump();
     expect(lastTab, 'home');
 
-    await tester.tap(find.byIcon(Icons.add));
+    await tester.tap(find.byIcon(Icons.add_rounded));
     await tester.pump();
     expect(created, isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('capsule and Create key share one height; grabber has room',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: testTheme(),
+        home: Scaffold(
+          body: const SizedBox.expand(),
+          bottomNavigationBar: MobileNav(
+            currentTab: 'home',
+            onTabChanged: (_) {},
+            onCreate: () {},
+            onOpenNavigation: () {},
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 400));
+
+    final capsule = tester.getRect(find.byType(AnimatedContainer).first);
+    final create = tester.getRect(find.bySemanticsLabel('Create'));
+    expect(capsule.height, create.height);
+    expect(capsule.top, create.top);
+
+    // The grabber line floats above the capsule, never inside it.
+    final grabber = tester.getRect(find.byWidgetPredicate(
+      (w) => w is Container && w.constraints?.maxWidth == 28,
+    ));
+    expect(grabber.bottom, lessThanOrEqualTo(capsule.top - 4));
+    // Symmetric capsule: the active icon sits on the capsule's centre line.
+    final homeIcon = tester.getRect(find.byIcon(Icons.home_rounded));
+    expect((homeIcon.center.dy - capsule.center.dy).abs(), lessThan(1));
     expect(tester.takeException(), isNull);
   });
 }

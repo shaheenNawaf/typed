@@ -67,6 +67,10 @@ int? parseAmountToMinor(String input, String? currency) {
       : '^([0-9]+)(?:\\.([0-9]{1,$decimals}))?\$';
   final match = RegExp(pattern).firstMatch(normalized);
   if (match == null) return null;
+  // 13 whole digits (a trillion) is far beyond any real entry and keeps
+  // `whole * scale` inside 64-bit ints; longer input threw in int.parse or
+  // wrapped negative.
+  if (match.group(1)!.length > 13) return null;
   final whole = int.parse(match.group(1)!);
   final fraction = match.groupCount > 1 ? match.group(2) : null;
   final scale = _pow10(decimals);
@@ -74,6 +78,17 @@ int? parseAmountToMinor(String input, String? currency) {
       ? 0
       : int.parse(fraction.padRight(decimals, '0'));
   return whole * scale + fracValue;
+}
+
+/// Inline error for an amount [parseAmountToMinor] rejected, worded for
+/// the currency's real rule (yen has no decimals).
+String amountFormatError(String? currency, {required String example}) {
+  if (currencyDecimals(currency) == 0) {
+    return 'Use whole numbers only — ${currency ?? 'this currency'} has no '
+        'decimals (e.g. $example).';
+  }
+  return 'Use numbers only, with up to 2 decimals (e.g. $example or '
+      '$example.50).';
 }
 
 /// Integer minor units -> major units as a double, for display helpers.
@@ -97,8 +112,12 @@ String formatMinor(int minor, String? currency) {
 }
 
 /// Formats an integer minor-unit amount for display.
+/// Negatives put a true minus before the symbol ("−₱500.00", matching
+/// [CountUpAmount]) — never "₱-500.00".
 String formatMinorAmount(int minor, String? currency) {
-  return '${currencySymbol(currency)}${formatMinor(minor, currency)}';
+  final body = formatMinor(minor.abs(), currency);
+  final sign = minor < 0 && body != formatMinor(0, currency) ? '−' : '';
+  return '$sign${currencySymbol(currency)}$body';
 }
 
 // ponytail: strict numeric input — digits plus at most one '.' or ',' and at

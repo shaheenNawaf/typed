@@ -151,7 +151,7 @@ class SpendSparkline extends StatelessWidget {
   DateTime _labelDay(int i) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    return today.subtract(Duration(days: 13 - i));
+    return DateTime(today.year, today.month, today.day - (13 - i));
   }
 }
 
@@ -214,8 +214,7 @@ class _SparklinePainter extends CustomPainter {
         topLeft: const Radius.circular(AppRadius.chip),
         topRight: const Radius.circular(AppRadius.chip),
       );
-      final paint = Paint()
-        ..color = i == n - 1 ? todayColor : barColor;
+      final paint = Paint()..color = i == n - 1 ? todayColor : barColor;
       canvas.drawRRect(rect, paint);
     }
     if (avgMinor != null && avgLabel != null && avgMinor! > 0) {
@@ -248,7 +247,10 @@ class _SparklinePainter extends CustomPainter {
         ),
         textDirection: TextDirection.ltr,
       )..layout();
-      final cy = (y - caption.height - 2).clamp(0.0, size.height - caption.height);
+      final cy = (y - caption.height - 2).clamp(
+        0.0,
+        size.height - caption.height,
+      );
       caption.paint(canvas, Offset(size.width - caption.width, cy));
     }
   }

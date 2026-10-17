@@ -1,5 +1,6 @@
 package com.z4yed.typed
 
+import android.app.AlarmManager
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
@@ -7,6 +8,8 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import java.util.Calendar
+import java.util.TimeZone
 
 object WidgetHelper {
     const val ACTION_NEW = "com.z4yed.typed.ACTION_NEW"
@@ -14,6 +17,7 @@ object WidgetHelper {
     const val ACTION_INCOME = "com.z4yed.typed.ACTION_INCOME"
     const val ACTION_FINANCE = "com.z4yed.typed.ACTION_FINANCE"
     const val ACTION_TOGGLE = "com.z4yed.typed.ACTION_TOGGLE"
+    const val ACTION_DAY_ROLLOVER = "com.z4yed.typed.ACTION_DAY_ROLLOVER"
 
     /**
      * Collection rows cannot carry their own PendingIntent (setOnClickPendingIntent
@@ -78,10 +82,11 @@ object WidgetHelper {
      * The PendingIntent *template* for both collection widgets (recent notes,
      * todo list). Must stay FLAG_MUTABLE so per-row fill-in intents can merge
      * their extras into it, and its action must be the generic dispatch action
-     * so MainActivity can route on the verb extra.
+     * so WidgetActionActivity can route on the verb extra (toggles stay on the
+     * home screen, opens forward to MainActivity).
      */
     fun widgetDispatchTemplateIntent(context: Context): PendingIntent {
-        val intent = Intent(context, MainActivity::class.java).apply {
+        val intent = Intent(context, WidgetActionActivity::class.java).apply {
             action = ACTION_WIDGET_DISPATCH
         }
         return PendingIntent.getActivity(
@@ -126,6 +131,7 @@ object WidgetHelper {
      * activity.
      */
     fun refreshAll(context: Context) {
+        scheduleDayRollover(context)
         updateNonCollectionWidgets(context)
         updateCollectionWidgetHeaders(context)
         notifyCollectionDataChanged(context, RecentNotesWidget::class.java, R.id.widget_recent_list)
@@ -145,6 +151,54 @@ object WidgetHelper {
         updateNonCollectionWidgets(context)
         notifyCollectionDataChanged(context, RecentNotesWidget::class.java, R.id.widget_recent_list)
         notifyCollectionDataChanged(context, TodoListWidget::class.java, R.id.widget_todo_list)
+    }
+
+    /**
+     * The widget's current height in dp, or null before the host reports it.
+     * Portrait cells use the MAX height (MIN is the landscape one).
+     */
+    fun heightDp(context: Context, manager: AppWidgetManager, id: Int): Int? {
+        val options = manager.getAppWidgetOptions(id)
+        val landscape = context.resources.configuration.orientation ==
+            android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        val height = options.getInt(
+            if (landscape) AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT
+            else AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT,
+        )
+        return height.takeIf { it > 0 }
+    }
+
+    /**
+     * Days since 1970-01-01 of today's LOCAL calendar date; mirrors Dart's
+     * localEpochDay so payload stamps compare exactly.
+     */
+    fun localEpochDay(now: Calendar = Calendar.getInstance()): Long {
+        val utc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+            clear()
+            set(now.get(Calendar.YEAR), now.get(Calendar.MONTH), now.get(Calendar.DAY_OF_MONTH))
+        }
+        return utc.timeInMillis / 86_400_000L
+    }
+
+    /**
+     * Wakes the date-sensitive widgets (streak, finance month) just after
+     * local midnight. ACTION_DATE_CHANGED is no longer delivered to manifest
+     * receivers (Android 8+), so without this the streak kept saying "you
+     * wrote today" until the 30-minute periodic update, or the next app open.
+     * Inexact and non-waking: it lands when the device is next awake.
+     */
+    fun scheduleDayRollover(context: Context) {
+        val alarms = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+        val next = Calendar.getInstance().apply {
+            add(Calendar.DAY_OF_YEAR, 1)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 1)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        val intent = Intent(context, WidgetBootReceiver::class.java).setAction(ACTION_DAY_ROLLOVER)
+        val pending = PendingIntent.getBroadcast(context, 6, intent, PENDING_INTENT_FLAGS)
+        alarms.set(AlarmManager.RTC, next.timeInMillis, pending)
     }
 
     private fun updateNonCollectionWidgets(context: Context) {

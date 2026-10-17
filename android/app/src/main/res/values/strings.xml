@@ -1,17 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Widget picker names: without these every widget was listed as "typed". -->
+    <string name="widget_label_quick">Quick note</string>
+    <string name="widget_label_recent">Recent notes</string>
+    <string name="widget_label_todo">To-do list</string>
+    <string name="widget_label_finance">Finance</string>
+    <string name="widget_label_streak">Writing streak</string>
     <string name="widget_quick_label">Quick note</string>
     <string name="widget_quick_title">Capture a thought</string>
-    <string name="widget_quick_sub">Tap below to start a note</string>
+    <string name="widget_quick_sub">Tap here to start writing</string>
     <string name="widget_new_note">New note</string>
     <string name="widget_recent_title">Recent</string>
     <string name="widget_todo_title">To-do</string>
-    <string name="widget_empty">Tap to start writing</string>
+    <string name="widget_empty">No notes yet. Tap to start writing.</string>
+    <string name="widget_todo_empty">No tasks yet. Tap to start a checklist.</string>
+    <string name="widget_todo_all_done">All done · %1$d/%2$d</string>
+    <string name="widget_app_name">Typed</string>
+    <string name="widget_add">Add</string>
     <string name="widget_untitled">Untitled</string>
     <string name="widget_completed">Completed</string>
     <string name="widget_incomplete">Incomplete</string>
     <string name="widget_todo_progress">%1$d/%2$d done</string>
-    <string name="widget_finance_title">Spend</string>
+    <string name="widget_finance_title">Finance</string>
+    <string name="widget_finance_month_net">Net · %1$s</string>
+    <string name="widget_finance_month_currency">Net · %1$s · %2$s</string>
+    <string name="widget_finance_new_month">New month. Add an entry to start it.</string>
+    <string name="widget_budget_amount">%1$s of %2$s</string>
     <string name="widget_add_expense">+ Expense</string>
     <string name="widget_add_income">+ Income</string>
     <string name="widget_streak_title">Writing streak</string>
@@ -27,9 +41,10 @@
     <string name="widget_streak_description">Keep your writing habit visible</string>
     <string name="widget_streak_written">Nice work. You wrote today.</string>
     <string name="widget_budget_default">Budget</string>
-    <string name="widget_budget_over">%1$s — over budget</string>
-    <plurals name="widget_streak_days_count">
-        <item quantity="one">%1$d day</item>
-        <item quantity="other">%1$d days</item>
+    <string name="widget_budget_over">%1$s · over budget</string>
+    <plurals name="widget_streak_unit">
+        <item quantity="one">day</item>
+        <item quantity="other">days</item>
     </plurals>
+    <string name="widget_streak_description_a11y">%1$d-day writing streak</string>
 </resources>

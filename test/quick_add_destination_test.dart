@@ -11,6 +11,7 @@ import 'package:typed/utils/note_storage.dart';
 import 'package:typed/widgets/finance_dashboard.dart';
 import 'package:typed/widgets/note_list.dart';
 import 'package:typed/widgets/editor.dart';
+import 'package:typed/widgets/entry_sheet.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -224,5 +225,57 @@ void main() {
     expect(find.textContaining('Amount · USD'), findsNothing);
 
     await closeSheet(tester);
+  });
+
+  Future<List<Note>> storedNotes(WidgetTester tester) async {
+    // Let the debounced/queued write land before reading storage back.
+    await tester.pump(const Duration(seconds: 2));
+    final result = await tester.runAsync(() => NoteStorage().loadResult());
+    return result!.items;
+  }
+
+  String monthlyTitle() {
+    final now = DateTime.now();
+    return 'Finance — ${monthName(now.month)} ${now.year}';
+  }
+
+  testWidgets('cancelling quick add leaves no empty monthly note behind',
+      (tester) async {
+    await seed([seededFinanceNote()], tab: 'finance');
+    await pumpHome(tester, surface: const Size(1400, 900));
+
+    await openQuickAdd(tester);
+    await closeSheet(tester);
+
+    final notes = await storedNotes(tester);
+    expect(notes.where((n) => n.title == monthlyTitle()), isEmpty);
+  });
+
+  testWidgets('a USD-scoped quick add is saved as USD', (tester) async {
+    await seedAdvanced([seededFinanceNote(), seededUsdNote()]);
+    await pumpHome(tester, surface: const Size(1400, 900));
+    await selectCurrencyScope(tester, 'USD');
+    await openQuickAdd(tester);
+
+    await tester.enterText(
+      find
+          .descendant(
+            of: find.byType(EntrySheet),
+            matching: find.byType(TextField),
+          )
+          .first,
+      '50',
+    );
+    await tester.tap(find.text('Add Entry'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    final notes = await storedNotes(tester);
+    final monthly = notes.singleWhere((n) => n.title == monthlyTitle());
+    expect(monthly.currency, 'PHP');
+    expect(monthly.amounts, hasLength(1));
+    expect(monthly.amounts.single.amount, 5000);
+    // Without the explicit currency the entry inherited the note's PHP.
+    expect(monthly.amounts.single.currency, 'USD');
   });
 }

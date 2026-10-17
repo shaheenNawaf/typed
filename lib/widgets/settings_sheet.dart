@@ -16,6 +16,10 @@ class SettingsSheet extends StatelessWidget {
   final Future<void> Function()? onNotificationsChanged;
   final VoidCallback? onRemoveSamples;
 
+  /// The name Home greets you by; null when unset.
+  final String? displayName;
+  final VoidCallback? onEditName;
+
   const SettingsSheet({
     super.key,
     required this.onExport,
@@ -25,6 +29,8 @@ class SettingsSheet extends StatelessWidget {
     this.onReplayIntro,
     this.onNotificationsChanged,
     this.onRemoveSamples,
+    this.displayName,
+    this.onEditName,
   });
 
   static Future<void> show(
@@ -36,12 +42,16 @@ class SettingsSheet extends StatelessWidget {
     VoidCallback? onReplayIntro,
     Future<void> Function()? onNotificationsChanged,
     VoidCallback? onRemoveSamples,
+    String? displayName,
+    VoidCallback? onEditName,
   }) {
     return showModalBottomSheet(
       context: context,
       backgroundColor: context.colors.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.panel)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppRadius.panel),
+        ),
       ),
       constraints: const BoxConstraints(maxWidth: 560),
       builder: (_) => ListenableBuilder(
@@ -54,6 +64,8 @@ class SettingsSheet extends StatelessWidget {
           onReplayIntro: onReplayIntro,
           onNotificationsChanged: onNotificationsChanged,
           onRemoveSamples: onRemoveSamples,
+          displayName: displayName,
+          onEditName: onEditName,
         ),
       ),
     );
@@ -86,6 +98,17 @@ class SettingsSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
+            if (onEditName != null)
+              _Option(
+                icon: Icons.person_outline,
+                label: displayName == null
+                    ? 'Add your name'
+                    : 'Name: $displayName',
+                onTap: () {
+                  Navigator.pop(context);
+                  onEditName!();
+                },
+              ),
             _Option(
               icon: Icons.ios_share_outlined,
               label: 'Export notes (JSON)',
@@ -98,7 +121,10 @@ class SettingsSheet extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
               child: Text(
                 'Text only — images are not included.',
-                style: TextStyle(fontSize: AppType.t11, color: context.colors.muted),
+                style: TextStyle(
+                  fontSize: AppType.t11,
+                  color: context.colors.muted,
+                ),
               ),
             ),
             _Option(
@@ -444,7 +470,10 @@ class _ReminderRow extends StatelessWidget {
                   children: [
                     Text(
                       label,
-                      style: TextStyle(fontSize: AppType.t13_5, color: context.colors.fg),
+                      style: TextStyle(
+                        fontSize: AppType.t13_5,
+                        color: context.colors.fg,
+                      ),
                     ),
                     Text(
                       detail,
@@ -620,7 +649,10 @@ class _Option extends StatelessWidget {
             Expanded(
               child: Text(
                 label,
-                style: TextStyle(fontSize: AppType.t13_5, color: context.colors.fg),
+                style: TextStyle(
+                  fontSize: AppType.t13_5,
+                  color: context.colors.fg,
+                ),
               ),
             ),
             Icon(Icons.chevron_right, size: 18, color: context.colors.muted),

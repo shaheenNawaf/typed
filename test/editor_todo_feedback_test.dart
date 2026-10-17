@@ -83,36 +83,93 @@ void main() {
         updatedAt: DateTime.now(),
       );
 
-  testWidgets('empty todo add shows a hint', (tester) async {
-    await seed([todoNote()], tab: 'notes');
-    await pumpHome(tester, surface: const Size(390, 844));
+  TextField addField(WidgetTester tester, String hint) =>
+      tester.widget<TextField>(find.byWidgetPredicate(
+        (w) => w is TextField && (w.decoration?.hintText ?? '') == hint,
+      ));
 
+  testWidgets('Enter adds a task and keeps the add field focused',
+      (tester) async {
+    await seed([todoNote(content: '- [ ] Buy milk\n')], tab: 'notes');
+    await pumpHome(tester, surface: const Size(390, 844));
     await openNote(tester, 'Shopping list');
 
-    await tester.tap(find.text('Add'));
+    final field = find.byWidgetPredicate(
+      (w) => w is TextField && (w.decoration?.hintText ?? '') == 'Add a task',
+    );
+    await tester.tap(field);
+    await tester.enterText(field, 'Eggs');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pump();
 
-    expect(find.text('Type something to add.'), findsOneWidget);
+    expect(find.text('Eggs'), findsOneWidget);
+    expect(addField(tester, 'Add a task').focusNode!.hasFocus, isTrue);
+    // Empty Enter is a no-op, not an error.
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(find.text('Type something to add.'), findsNothing);
     expectNoFlexOverflow(drainExceptions(tester));
   });
 
-  testWidgets('todo delete offers undo and restores the item', (tester) async {
-    await seed([todoNote(content: '- [ ] Buy milk\n')], tab: 'notes');
+  testWidgets('adding keeps lines separate when content lacks a newline',
+      (tester) async {
+    await seed([todoNote(content: '- [ ] Buy milk')], tab: 'notes');
     await pumpHome(tester, surface: const Size(390, 844));
-
     await openNote(tester, 'Shopping list');
 
-    await tester.tap(find.byIcon(Icons.close));
+    final field = find.byWidgetPredicate(
+      (w) => w is TextField && (w.decoration?.hintText ?? '') == 'Add a task',
+    );
+    await tester.enterText(field, 'Eggs');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump(const Duration(seconds: 2));
+
+    final saved = await tester.runAsync(() => NoteStorage().loadResult());
+    final note = saved!.items.singleWhere((n) => n.id == 'todo1');
+    expect(note.content, '- [ ] Buy milk\n- [ ] Eggs\n');
+  });
+
+  testWidgets('swipe deletes a task, with undo', (tester) async {
+    await seed([todoNote(content: '- [ ] Buy milk\n')], tab: 'notes');
+    await pumpHome(tester, surface: const Size(390, 844));
+    await openNote(tester, 'Shopping list');
+
+    // No delete button on every row any more.
+    expect(find.byIcon(Icons.close), findsNothing);
+    await tester.drag(find.text('Buy milk'), const Offset(-600, 0));
+    // Swipe-away, then the row collapses, then the snackbar slides in.
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
 
     expect(find.text('Task deleted'), findsOneWidget);
+    expect(find.text('Buy milk'), findsNothing);
 
     await tester.tap(find.text('Undo'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.text('Buy milk'), findsOneWidget);
+    expectNoFlexOverflow(drainExceptions(tester));
+  });
+
+  testWidgets('done tasks fold under Completed', (tester) async {
+    await seed(
+      [todoNote(content: '- [ ] Open one\n- [x] Done one\n- [x] Done two\n')],
+      tab: 'notes',
+    );
+    await pumpHome(tester, surface: const Size(390, 844));
+    await openNote(tester, 'Shopping list');
+
+    expect(find.text('Open one'), findsOneWidget);
+    expect(find.text('Done one'), findsNothing);
+    expect(find.text('Completed · 2'), findsOneWidget);
+
+    await tester.tap(find.text('Show'));
+    await tester.pump();
+    expect(find.text('Done one'), findsOneWidget);
+    expect(find.text('Done two'), findsOneWidget);
+    expect(find.text('Hide'), findsOneWidget);
     expectNoFlexOverflow(drainExceptions(tester));
   });
 
@@ -160,20 +217,32 @@ void main() {
     expectNoFlexOverflow(drainExceptions(tester));
   });
 
-  testWidgets('empty checklist shows a CTA that focuses the add field', (tester) async {
+  testWidgets('an empty list opens straight into adding the first task',
+      (tester) async {
     await seed([todoNote()], tab: 'notes');
     await pumpHome(tester, surface: const Size(390, 844));
 
     await openNote(tester, 'Shopping list');
 
-    expect(find.text('Add your first to-do'), findsOneWidget);
-    expect(find.text('Add your first to-do item below.'), findsNothing);
-    await tester.tap(find.text('Add your first to-do'));
-    await tester.pump();
-    final addField = tester.widget<TextField>(find.byWidgetPredicate(
-      (w) => w is TextField && (w.decoration?.hintText ?? '') == 'Add an item...',
-    ));
-    expect(addField.focusNode!.hasFocus, isTrue);
+    // No accent CTA button: the add line itself is the invitation.
+    expect(find.text('Add your first to-do'), findsNothing);
+    expect(
+      addField(tester, 'Add your first task').focusNode!.hasFocus,
+      isTrue,
+    );
     expectNoFlexOverflow(drainExceptions(tester));
+  });
+
+  testWidgets('raw Markdown lives in the ••• menu, not on the page',
+      (tester) async {
+    await seed([todoNote(content: '- [ ] Buy milk\n')], tab: 'notes');
+    await pumpHome(tester, surface: const Size(390, 844));
+    await openNote(tester, 'Shopping list');
+
+    expect(find.text('Edit raw'), findsNothing);
+    await tester.tap(find.byIcon(Icons.more_horiz).last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Edit as Markdown'), findsOneWidget);
   });
 }

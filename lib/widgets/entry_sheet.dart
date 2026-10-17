@@ -91,13 +91,13 @@ class EntrySheet extends StatefulWidget {
       isScrollControlled: true,
       backgroundColor: context.colors.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.panel)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppRadius.panel),
+        ),
       ),
       constraints: const BoxConstraints(maxWidth: 560),
       builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(ctx).viewInsets.bottom,
-        ),
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
         child: EntrySheet(
           entry: entry,
           onSave: onSave,
@@ -139,8 +139,9 @@ class _EntrySheetState extends State<EntrySheet> {
   String? _amountError;
   String? _recurError;
   final ImagePicker _picker = ImagePicker();
-  final TextRecognizer? _textRecognizer =
-      kIsWeb ? null : TextRecognizer(script: TextRecognitionScript.latin);
+  final TextRecognizer? _textRecognizer = kIsWeb
+      ? null
+      : TextRecognizer(script: TextRecognitionScript.latin);
 
   @override
   void initState() {
@@ -148,14 +149,15 @@ class _EntrySheetState extends State<EntrySheet> {
     final e = widget.entry;
     _amountFocusNode = FocusNode();
     _amountCtrl = TextEditingController(
-        text: e != null
-            ? minorToMajor(
-                e.amount,
-                e.currency ?? widget.noteCurrency,
-              ).toStringAsFixed(
-                currencyDecimals(e.currency ?? widget.noteCurrency),
-              )
-            : '');
+      text: e != null
+          ? minorToMajor(
+              e.amount,
+              e.currency ?? widget.noteCurrency,
+            ).toStringAsFixed(
+              currencyDecimals(e.currency ?? widget.noteCurrency),
+            )
+          : '',
+    );
     _categoryCtrl = TextEditingController(text: e?.category ?? '');
     _noteCtrl = TextEditingController(text: e?.note ?? '');
     _date = e?.date ?? DateTime.now();
@@ -173,7 +175,9 @@ class _EntrySheetState extends State<EntrySheet> {
 
   @override
   void dispose() {
-    try { _textRecognizer?.close(); } catch (_) {}
+    try {
+      _textRecognizer?.close();
+    } catch (_) {}
     _amountFocusNode.dispose();
     _amountCtrl.dispose();
     _categoryCtrl.dispose();
@@ -182,12 +186,19 @@ class _EntrySheetState extends State<EntrySheet> {
   }
 
   MoneyEntry? _doSave() {
-    final amount =
-        parseAmountToMinor(_amountCtrl.text, _entryCurrency ?? widget.noteCurrency);
+    final amount = parseAmountToMinor(
+      _amountCtrl.text,
+      _entryCurrency ?? widget.noteCurrency,
+    );
     if (amount == null) {
-      setState(() => _amountError = _amountCtrl.text.trim().isEmpty
-          ? 'Enter an amount to save this entry.'
-          : 'Use numbers only, with up to 2 decimals (e.g. 250 or 250.50).');
+      setState(
+        () => _amountError = _amountCtrl.text.trim().isEmpty
+            ? 'Enter an amount to save this entry.'
+            : amountFormatError(
+                _entryCurrency ?? widget.noteCurrency,
+                example: '250',
+              ),
+      );
       return null;
     }
     if (amount <= 0) {
@@ -195,8 +206,9 @@ class _EntrySheetState extends State<EntrySheet> {
       return null;
     }
     if (_isRecurring && _recurInterval == null) {
-      setState(() =>
-          _recurError = 'Choose a repeat interval, or turn off repeat.');
+      setState(
+        () => _recurError = 'Choose a repeat interval, or turn off repeat.',
+      );
       return null;
     }
     if (_amountError != null || _recurError != null) {
@@ -225,12 +237,25 @@ class _EntrySheetState extends State<EntrySheet> {
       // dropping it re-anchors to the master date on re-enable and
       // duplicates the whole series.
       lastGenerated: _isRecurring
-          ? (widget.entry?.lastGenerated ?? _date)
+          ? _lastGeneratedFor(widget.entry)
           : widget.entry?.lastGenerated,
     );
     widget.onSave(entry);
     widget.onCategoryUsed?.call(category);
     return entry;
+  }
+
+  /// The series' generation cursor after this save. Moving a series' date
+  /// while no copies exist yet (cursor still on the old date) moves the
+  /// cursor with it; otherwise moving it earlier skipped occurrences — Oct 16
+  /// moved to Sep 16 never produced October's copy. Once copies exist the
+  /// cursor stays put so they are not generated twice.
+  DateTime _lastGeneratedFor(MoneyEntry? previous) {
+    final last = previous?.lastGenerated;
+    if (previous == null || last == null) return _date;
+    final untouched = DateUtils.isSameDay(last, previous.date);
+    if (untouched && !DateUtils.isSameDay(_date, previous.date)) return _date;
+    return last;
   }
 
   void _save() {
@@ -336,9 +361,11 @@ class _EntrySheetState extends State<EntrySheet> {
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(largest > 0
-              ? 'Scanned — found ${widget.currencySymbol}${largest.toStringAsFixed(2)}'
-              : 'Scanned — no amount detected, text added to note'),
+          content: Text(
+            largest > 0
+                ? 'Scanned — found ${widget.currencySymbol}${largest.toStringAsFixed(2)}'
+                : 'Scanned — no amount detected, text added to note',
+          ),
           duration: const Duration(seconds: 3),
         ),
       );
@@ -414,7 +441,10 @@ class _EntrySheetState extends State<EntrySheet> {
       padding: const EdgeInsets.only(top: 6),
       child: Text(
         msg,
-        style: TextStyle(fontSize: AppType.t12, color: context.colors.destructive),
+        style: TextStyle(
+          fontSize: AppType.t12,
+          color: context.colors.destructive,
+        ),
       ),
     );
   }
@@ -437,12 +467,11 @@ class _EntrySheetState extends State<EntrySheet> {
 
     final recent = widget.recentCategories.isNotEmpty
         ? widget.recentCategories
-            .where((c) => allCats.contains(c))
-            .take(6)
-            .toList()
+              .where((c) => allCats.contains(c))
+              .take(6)
+              .toList()
         : kDefaultCategories.take(6).toList();
-    final displayCats =
-        _showAllCategories ? allCats : recent;
+    final displayCats = _showAllCategories ? allCats : recent;
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -454,7 +483,8 @@ class _EntrySheetState extends State<EntrySheet> {
             // -- Drag handle --
             Center(
               child: Container(
-                width: 36, height: 4,
+                width: 36,
+                height: 4,
                 margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
                   color: context.colors.border,
@@ -464,11 +494,15 @@ class _EntrySheetState extends State<EntrySheet> {
             ),
 
             // -- Title --
-            Text(isEdit ? 'Edit entry' : 'Add entry',
-                style:  TextStyle(
-                  fontSize: AppType.t15, fontWeight: FontWeight.w600,
-                  color: context.colors.fg, letterSpacing: 0.01,
-                )),
+            Text(
+              isEdit ? 'Edit entry' : 'Add entry',
+              style: TextStyle(
+                fontSize: AppType.t15,
+                fontWeight: FontWeight.w600,
+                color: context.colors.fg,
+                letterSpacing: 0.01,
+              ),
+            ),
             const SizedBox(height: 16),
 
             // -- Expense / Income Toggle --
@@ -480,16 +514,14 @@ class _EntrySheetState extends State<EntrySheet> {
                     label: 'Expense',
                     active: _entryType == 'expense',
                     activeColor: context.colors.destructive,
-                    onTap: () =>
-                        setState(() => _entryType = 'expense'),
+                    onTap: () => setState(() => _entryType = 'expense'),
                   ),
                   const SizedBox(width: 8),
                   _TypeToggleChip(
                     label: 'Income',
                     active: _entryType == 'income',
                     activeColor: context.colors.income,
-                    onTap: () =>
-                        setState(() => _entryType = 'income'),
+                    onTap: () => setState(() => _entryType = 'income'),
                   ),
                 ],
               ),
@@ -505,7 +537,9 @@ class _EntrySheetState extends State<EntrySheet> {
                   TextField(
                     controller: _amountCtrl,
                     focusNode: _amountFocusNode,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                     inputFormatters: kAmountInputFormatters,
                     autofocus: !isEdit,
                     decoration: _inputDeco(
@@ -519,8 +553,9 @@ class _EntrySheetState extends State<EntrySheet> {
                         setState(() => _amountError = null);
                       }
                     },
-                    style:  TextStyle(
-                      fontSize: AppType.t15, fontWeight: FontWeight.w500,
+                    style: TextStyle(
+                      fontSize: AppType.t15,
+                      fontWeight: FontWeight.w500,
                       color: context.colors.fg,
                     ),
                   ),
@@ -537,7 +572,8 @@ class _EntrySheetState extends State<EntrySheet> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Wrap(
-                    spacing: 6, runSpacing: 6,
+                    spacing: 6,
+                    runSpacing: 6,
                     children: displayCats.map((cat) {
                       final selected = _categoryCtrl.text.trim() == cat;
                       return InkWell(
@@ -547,25 +583,31 @@ class _EntrySheetState extends State<EntrySheet> {
                         borderRadius: BorderRadius.circular(AppRadius.panel),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 4),
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
                           decoration: BoxDecoration(
                             color: selected
                                 ? context.colors.accentDim
                                 : context.colors.listBg,
-                            borderRadius: BorderRadius.circular(AppRadius.panel),
+                            borderRadius: BorderRadius.circular(
+                              AppRadius.panel,
+                            ),
                             border: Border.all(
                               color: selected
                                   ? context.colors.accent
                                   : context.colors.border,
                             ),
                           ),
-                          child: Text(cat,
-                              style: TextStyle(
-                                fontSize: AppType.t12,
-                                color: selected
-                                    ? context.colors.accent
-                                    : context.colors.fg,
-                              )),
+                          child: Text(
+                            cat,
+                            style: TextStyle(
+                              fontSize: AppType.t12,
+                              color: selected
+                                  ? context.colors.accent
+                                  : context.colors.fg,
+                            ),
+                          ),
                         ),
                       );
                     }).toList(),
@@ -574,12 +616,13 @@ class _EntrySheetState extends State<EntrySheet> {
                     Padding(
                       padding: const EdgeInsets.only(top: 6),
                       child: InkWell(
-                        onTap: () =>
-                            setState(() => _showAllCategories = true),
+                        onTap: () => setState(() => _showAllCategories = true),
                         borderRadius: BorderRadius.circular(AppRadius.chip),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 4, vertical: 4),
+                            horizontal: 4,
+                            vertical: 4,
+                          ),
                           child: Text(
                             'More Categories',
                             style: TextStyle(
@@ -596,7 +639,10 @@ class _EntrySheetState extends State<EntrySheet> {
                     controller: _categoryCtrl,
                     decoration: _inputDeco('Or type your own'),
                     onChanged: (_) => setState(() {}),
-                    style: TextStyle(fontSize: AppType.t13_5, color: context.colors.fg),
+                    style: TextStyle(
+                      fontSize: AppType.t13_5,
+                      color: context.colors.fg,
+                    ),
                   ),
                 ],
               ),
@@ -615,12 +661,21 @@ class _EntrySheetState extends State<EntrySheet> {
                     lastDate: DateTime(2100),
                   );
                   if (picked != null) {
-                    setState(() => _date = picked);
+                    setState(() {
+                      _date = picked;
+                      // An end date before the start would save a series
+                      // that never generates; drop it rather than keep it.
+                      if (_recurEnd != null && _recurEnd!.isBefore(picked)) {
+                        _recurEnd = null;
+                      }
+                    });
                   }
                 },
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 14),
+                    horizontal: 12,
+                    vertical: 14,
+                  ),
                   decoration: BoxDecoration(
                     color: context.colors.listBg,
                     borderRadius: BorderRadius.circular(AppRadius.card),
@@ -628,13 +683,19 @@ class _EntrySheetState extends State<EntrySheet> {
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.calendar_today_outlined,
-                          size: 14, color: context.colors.muted),
+                      Icon(
+                        Icons.calendar_today_outlined,
+                        size: 14,
+                        color: context.colors.muted,
+                      ),
                       const SizedBox(width: 8),
-                      Text(_formatDate(_date),
-                          style:  TextStyle(
-                            fontSize: AppType.t13_5, color: context.colors.fg,
-                          )),
+                      Text(
+                        _formatDate(_date),
+                        style: TextStyle(
+                          fontSize: AppType.t13_5,
+                          color: context.colors.fg,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -653,13 +714,15 @@ class _EntrySheetState extends State<EntrySheet> {
                   children: [
                     Icon(
                       _showMore ? Icons.expand_less : Icons.expand_more,
-                      size: 16, color: context.colors.muted,
+                      size: 16,
+                      color: context.colors.muted,
                     ),
                     const SizedBox(width: 4),
                     Text(
-                     _showMore ? 'Hide details' : 'Show details',
+                      _showMore ? 'Hide details' : 'Show details',
                       style: TextStyle(
-                        fontSize: AppType.t12, color: context.colors.muted,
+                        fontSize: AppType.t12,
+                        color: context.colors.muted,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -680,37 +743,47 @@ class _EntrySheetState extends State<EntrySheet> {
                   children: [
                     InkWell(
                       onTap: () => setState(
-                          () => _showCurrencyPicker = !_showCurrencyPicker),
+                        () => _showCurrencyPicker = !_showCurrencyPicker,
+                      ),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 14),
+                          horizontal: 12,
+                          vertical: 14,
+                        ),
                         decoration: BoxDecoration(
                           color: context.colors.listBg,
                           borderRadius: BorderRadius.circular(AppRadius.card),
                           border: Border.all(color: context.colors.border),
                         ),
-                        child: Row(children: [
-                          Text.rich(
-                            TextSpan(
-                              style: TextStyle(
-                                  fontSize: AppType.t13_5, color: context.colors.fg),
-                              children: [
-                                currencySpan(
-                                  _entryCurrency ?? widget.noteCurrency,
-                                  null,
+                        child: Row(
+                          children: [
+                            Text.rich(
+                              TextSpan(
+                                style: TextStyle(
+                                  fontSize: AppType.t13_5,
+                                  color: context.colors.fg,
                                 ),
-                                TextSpan(
-                                  text: _entryCurrency != null
-                                      ? ' $_entryCurrency'
-                                      : ' (note default)',
-                                ),
-                              ],
+                                children: [
+                                  currencySpan(
+                                    _entryCurrency ?? widget.noteCurrency,
+                                    null,
+                                  ),
+                                  TextSpan(
+                                    text: _entryCurrency != null
+                                        ? ' $_entryCurrency'
+                                        : ' (note default)',
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                          const Spacer(),
-                          Icon(Icons.arrow_drop_down,
-                              size: 16, color: context.colors.muted),
-                        ]),
+                            const Spacer(),
+                            Icon(
+                              Icons.arrow_drop_down,
+                              size: 16,
+                              color: context.colors.muted,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                     if (_showCurrencyPicker)
@@ -726,15 +799,21 @@ class _EntrySheetState extends State<EntrySheet> {
                                 _entryCurrency = selected ? null : code;
                                 _showCurrencyPicker = false;
                               }),
-                              borderRadius: BorderRadius.circular(AppRadius.panel),
+                              borderRadius: BorderRadius.circular(
+                                AppRadius.panel,
+                              ),
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 4),
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
                                 decoration: BoxDecoration(
                                   color: selected
                                       ? context.colors.accentDim
                                       : context.colors.listBg,
-                                  borderRadius: BorderRadius.circular(AppRadius.panel),
+                                  borderRadius: BorderRadius.circular(
+                                    AppRadius.panel,
+                                  ),
                                   border: Border.all(
                                     color: selected
                                         ? context.colors.accent
@@ -772,7 +851,10 @@ class _EntrySheetState extends State<EntrySheet> {
                 child: TextField(
                   controller: _noteCtrl,
                   decoration: _inputDeco(''),
-                  style:  TextStyle(fontSize: AppType.t13_5, color: context.colors.fg),
+                  style: TextStyle(
+                    fontSize: AppType.t13_5,
+                    color: context.colors.fg,
+                  ),
                   maxLines: 2,
                 ),
               ),
@@ -782,16 +864,19 @@ class _EntrySheetState extends State<EntrySheet> {
               _Field(
                 label: 'Payment method',
                 child: Wrap(
-                  spacing: 6, runSpacing: 6,
+                  spacing: 6,
+                  runSpacing: 6,
                   children: kDefaultPaymentMethods.map((pm) {
                     final selected = _paymentMethod == pm;
                     return InkWell(
-                      onTap: () => setState(
-                          () => _paymentMethod = selected ? null : pm),
+                      onTap: () =>
+                          setState(() => _paymentMethod = selected ? null : pm),
                       borderRadius: BorderRadius.circular(AppRadius.panel),
                       child: Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           color: selected
                               ? context.colors.accentDim
@@ -803,13 +888,15 @@ class _EntrySheetState extends State<EntrySheet> {
                                 : context.colors.border,
                           ),
                         ),
-                        child: Text(pm,
-                            style: TextStyle(
-                              fontSize: AppType.t12,
-                              color: selected
-                                  ? context.colors.accent
-                                  : context.colors.fg,
-                            )),
+                        child: Text(
+                          pm,
+                          style: TextStyle(
+                            fontSize: AppType.t12,
+                            color: selected
+                                ? context.colors.accent
+                                : context.colors.fg,
+                          ),
+                        ),
                       ),
                     );
                   }).toList(),
@@ -826,28 +913,39 @@ class _EntrySheetState extends State<EntrySheet> {
                     borderRadius: BorderRadius.circular(AppRadius.card),
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 14),
+                        horizontal: 12,
+                        vertical: 14,
+                      ),
                       decoration: BoxDecoration(
                         color: context.colors.listBg,
                         borderRadius: BorderRadius.circular(AppRadius.card),
                         border: Border.all(color: context.colors.border),
                       ),
-                      child: Row(children: [
-                        _isScanning
-                            ? const SizedBox(
-                                width: 16, height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : Icon(Icons.document_scanner_outlined,
-                                size: 18, color: context.colors.muted),
-                        const SizedBox(width: 8),
-                        Text(
-                          _isScanning ? 'Scanning...' : 'Scan Receipt',
-                          style: TextStyle(
-                            fontSize: AppType.t13_5, color: context.colors.fg,
+                      child: Row(
+                        children: [
+                          _isScanning
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : Icon(
+                                  Icons.document_scanner_outlined,
+                                  size: 18,
+                                  color: context.colors.muted,
+                                ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _isScanning ? 'Scanning...' : 'Scan Receipt',
+                            style: TextStyle(
+                              fontSize: AppType.t13_5,
+                              color: context.colors.fg,
+                            ),
                           ),
-                        ),
-                      ]),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -861,14 +959,17 @@ class _EntrySheetState extends State<EntrySheet> {
                   children: [
                     Row(
                       children: [
-                        Text('Repeat this entry',
-                            style: TextStyle(
-                                fontSize: AppType.t13_5, color: context.colors.fg)),
+                        Text(
+                          'Repeat this entry',
+                          style: TextStyle(
+                            fontSize: AppType.t13_5,
+                            color: context.colors.fg,
+                          ),
+                        ),
                         const Spacer(),
                         Switch(
                           value: _isRecurring,
-                          onChanged: (v) =>
-                              setState(() => _isRecurring = v),
+                          onChanged: (v) => setState(() => _isRecurring = v),
                           activeThumbColor: context.colors.accent,
                         ),
                       ],
@@ -880,74 +981,106 @@ class _EntrySheetState extends State<EntrySheet> {
                         runSpacing: 6,
                         children: const ['daily', 'weekly', 'monthly', 'yearly']
                             .map((iv) {
-                          final selected = _recurInterval == iv;
-                          return InkWell(
-                            onTap: () => setState(() {
-                              _recurInterval = selected ? null : iv;
-                              _recurError = null;
-                            }),
-                            borderRadius: BorderRadius.circular(AppRadius.panel),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: selected
-                                    ? context.colors.accentDim
-                                    : context.colors.listBg,
-                                borderRadius: BorderRadius.circular(AppRadius.panel),
-                                border: Border.all(
-                                  color: selected
-                                      ? context.colors.accent
-                                      : context.colors.border,
+                              final selected = _recurInterval == iv;
+                              return InkWell(
+                                onTap: () => setState(() {
+                                  _recurInterval = selected ? null : iv;
+                                  _recurError = null;
+                                }),
+                                borderRadius: BorderRadius.circular(
+                                  AppRadius.panel,
                                 ),
-                              ),
-                              child: Text(_capitalize(iv),
-                                  style: TextStyle(
-                                    fontSize: AppType.t12,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
                                     color: selected
-                                        ? context.colors.accent
-                                        : context.colors.fg,
-                                  )),
-                            ),
-                          );
-                        }).toList(),
+                                        ? context.colors.accentDim
+                                        : context.colors.listBg,
+                                    borderRadius: BorderRadius.circular(
+                                      AppRadius.panel,
+                                    ),
+                                    border: Border.all(
+                                      color: selected
+                                          ? context.colors.accent
+                                          : context.colors.border,
+                                    ),
+                                  ),
+                                  child: Text(
+                                    _capitalize(iv),
+                                    style: TextStyle(
+                                      fontSize: AppType.t12,
+                                      color: selected
+                                          ? context.colors.accent
+                                          : context.colors.fg,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            })
+                            .toList(),
                       ),
                       if (_recurError != null) _inlineError(_recurError!),
                       const SizedBox(height: 8),
                       InkWell(
                         onTap: () async {
+                          // initialDate must not precede firstDate (an
+                          // assertion): clamp both the stored end date and
+                          // the one-year default to the entry's own date.
+                          final first = DateTime(
+                            _date.year,
+                            _date.month,
+                            _date.day,
+                          );
+                          final fallback = DateTime(
+                            first.year + 1,
+                            first.month,
+                            first.day,
+                          );
+                          var initial = _recurEnd ?? fallback;
+                          if (initial.isBefore(first)) initial = fallback;
                           final picked = await showDatePicker(
                             context: context,
-                            initialDate: _recurEnd ??
-                                DateTime.now()
-                                    .add(const Duration(days: 365)),
-                            firstDate: _date,
+                            initialDate: initial,
+                            firstDate: first,
                             lastDate: DateTime(2100),
                           );
                           if (picked != null) {
                             setState(() => _recurEnd = picked);
                           }
                         },
-                        child: Row(children: [
-                          Icon(Icons.event_outlined,
-                              size: 14, color: context.colors.muted),
-                          const SizedBox(width: 6),
-                          Text(
-                            _recurEnd != null
-                                ? 'Ends ${_formatDate(_recurEnd!)}'
-                                : 'No end date',
-                            style: TextStyle(
-                                fontSize: AppType.t13_5, color: context.colors.fg),
-                          ),
-                          if (_recurEnd != null) ...[
-                            const SizedBox(width: 6),
-                            InkWell(
-                              onTap: () => setState(() => _recurEnd = null),
-                              child: Icon(Icons.close,
-                                  size: 14, color: context.colors.muted),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.event_outlined,
+                              size: 14,
+                              color: context.colors.muted,
                             ),
+                            const SizedBox(width: 6),
+                            Text(
+                              _recurEnd != null
+                                  ? 'Ends ${_formatDate(_recurEnd!)}'
+                                  : 'No end date',
+                              style: TextStyle(
+                                fontSize: AppType.t13_5,
+                                color: context.colors.fg,
+                              ),
+                            ),
+                            if (_recurEnd != null) ...[
+                              const SizedBox(width: 6),
+                              InkWell(
+                                onTap: () => setState(() => _recurEnd = null),
+                                child: Icon(
+                                  Icons.close,
+                                  size: 14,
+                                  color: context.colors.muted,
+                                ),
+                              ),
+                            ],
                           ],
-                        ]),
+                        ),
                       ),
                     ],
                   ],
@@ -957,83 +1090,87 @@ class _EntrySheetState extends State<EntrySheet> {
 
             // -- Submit buttons --
             const SizedBox(height: 16),
-          if (_destinationLabel != null) ...[
-            Semantics(
-              label: 'Saving to ${widget.destinationLabel}',
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: context.colors.listBg,
-                  borderRadius: BorderRadius.circular(AppRadius.card),
-                  border: Border.all(color: context.colors.border),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.folder_outlined,
-                      size: 15,
-                      color: context.colors.muted,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text.rich(
-                        TextSpan(
-                          children: [
-                            TextSpan(
-                              text: 'Saving to: ',
-                              style: TextStyle(
-                                fontSize: AppType.t12,
-                                color: context.colors.muted,
-                              ),
-                            ),
-                            TextSpan(
-                              text: _destinationLabel,
-                              style: TextStyle(
-                                fontSize: AppType.t12,
-                                color: context.colors.fg,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+            if (_destinationLabel != null) ...[
+              Semantics(
+                label: 'Saving to $_destinationLabel',
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: context.colors.listBg,
+                    borderRadius: BorderRadius.circular(AppRadius.card),
+                    border: Border.all(color: context.colors.border),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.folder_outlined,
+                        size: 15,
+                        color: context.colors.muted,
                       ),
-                    ),
-                    if (widget.onChangeDestination != null) ...[
                       const SizedBox(width: 8),
-                      Tooltip(
-                        message: 'Choose a different note',
-                        child: InkWell(
-                          onTap: () async {
-                            final picked = await widget.onChangeDestination!();
-                            if (picked != null && mounted) {
-                              setState(() => _destinationLabel = picked);
-                            }
-                          },
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 6,
-                              vertical: 2,
-                            ),
-                            child: Text(
-                              'Change',
-                              style: TextStyle(
-                                fontSize: AppType.t12,
-                                color: context.colors.accent,
-                                fontWeight: FontWeight.w600,
+                      Expanded(
+                        child: Text.rich(
+                          TextSpan(
+                            children: [
+                              TextSpan(
+                                text: 'Saving to: ',
+                                style: TextStyle(
+                                  fontSize: AppType.t12,
+                                  color: context.colors.muted,
+                                ),
+                              ),
+                              TextSpan(
+                                text: _destinationLabel,
+                                style: TextStyle(
+                                  fontSize: AppType.t12,
+                                  color: context.colors.fg,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (widget.onChangeDestination != null) ...[
+                        const SizedBox(width: 8),
+                        Tooltip(
+                          message: 'Choose a different note',
+                          child: InkWell(
+                            onTap: () async {
+                              final picked =
+                                  await widget.onChangeDestination!();
+                              if (picked != null && mounted) {
+                                setState(() => _destinationLabel = picked);
+                              }
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              child: Text(
+                                'Change',
+                                style: TextStyle(
+                                  fontSize: AppType.t12,
+                                  color: context.colors.accent,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ),
                           ),
                         ),
-                      ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 12),
-          ],
+              const SizedBox(height: 12),
+            ],
             Row(
               children: [
                 Expanded(
@@ -1044,8 +1181,13 @@ class _EntrySheetState extends State<EntrySheet> {
                       side: BorderSide(color: context.colors.border),
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
-                    child: Text('Cancel',
-                        style: TextStyle(color: context.colors.fg, fontSize: AppType.t13_5)),
+                    child: Text(
+                      'Cancel',
+                      style: TextStyle(
+                        color: context.colors.fg,
+                        fontSize: AppType.t13_5,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1055,8 +1197,10 @@ class _EntrySheetState extends State<EntrySheet> {
                     child: OutlinedButton.icon(
                       onPressed: _saveAndNext,
                       icon: const Icon(Icons.add_circle_outline, size: 16),
-                      label: const Text('Add & Next',
-                          style: TextStyle(fontSize: AppType.t12)),
+                      label: const Text(
+                        'Add & Next',
+                        style: TextStyle(fontSize: AppType.t12),
+                      ),
                       style: OutlinedButton.styleFrom(
                         side: BorderSide(color: context.colors.accent),
                         padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1073,8 +1217,10 @@ class _EntrySheetState extends State<EntrySheet> {
                         Navigator.pop(context);
                       },
                       icon: const Icon(Icons.delete_outline, size: 16),
-                      label: const Text('Delete',
-                          style: TextStyle(fontSize: AppType.t12)),
+                      label: const Text(
+                        'Delete',
+                        style: TextStyle(fontSize: AppType.t12),
+                      ),
                       style: OutlinedButton.styleFrom(
                         side: BorderSide(color: context.colors.destructive),
                         padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1091,9 +1237,13 @@ class _EntrySheetState extends State<EntrySheet> {
                       backgroundColor: context.colors.accent,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
-                    child: Text(isEdit ? 'Update' : 'Add Entry',
-                        style: TextStyle(
-                            color: context.colors.onAccent, fontSize: AppType.t13_5)),
+                    child: Text(
+                      isEdit ? 'Update' : 'Add Entry',
+                      style: TextStyle(
+                        color: context.colors.onAccent,
+                        fontSize: AppType.t13_5,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -1107,13 +1257,19 @@ class _EntrySheetState extends State<EntrySheet> {
   InputDecoration _inputDeco(String hint, {bool error = false}) {
     return InputDecoration(
       hintText: hint,
-      hintStyle:  TextStyle(color: context.colors.muted, fontSize: AppType.t13_5),
+      hintStyle: TextStyle(
+        color: context.colors.muted,
+        fontSize: AppType.t13_5,
+        // The UI fonts have no ₱ glyph; without an explicit fallback the
+        // "₱0.00" placeholder drew a tofu box.
+        fontFamilyFallback: const ['Roboto', 'Noto Sans', 'sans-serif'],
+      ),
       filled: true,
       fillColor: context.colors.listBg,
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadius.card),
-        borderSide:  BorderSide(color: context.colors.border),
+        borderSide: BorderSide(color: context.colors.border),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadius.card),
@@ -1143,11 +1299,15 @@ class _Field extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style:  TextStyle(
-              fontSize: AppType.t12, fontWeight: FontWeight.w500,
-              color: context.colors.muted, letterSpacing: 0.04,
-            )),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: AppType.t12,
+            fontWeight: FontWeight.w500,
+            color: context.colors.muted,
+            letterSpacing: 0.04,
+          ),
+        ),
         const SizedBox(height: 6),
         child,
       ],
@@ -1175,9 +1335,7 @@ class _TypeToggleChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
-          color: active
-              ? activeColor.withAlpha(30)
-              : context.colors.listBg,
+          color: active ? activeColor.withAlpha(30) : context.colors.listBg,
           borderRadius: BorderRadius.circular(AppRadius.panel),
           border: Border.all(
             color: active ? activeColor : context.colors.border,

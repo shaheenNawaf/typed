@@ -20,6 +20,25 @@ String truncateSafe(String value, int max) {
   return '${value.substring(0, cut)}...';
 }
 
+/// Days since 1970-01-01 of [when]'s LOCAL calendar date — DST-proof, and
+/// computed identically by the Android widgets (see StreakWidget.kt).
+int localEpochDay(DateTime when) =>
+    DateTime.utc(when.year, when.month, when.day).millisecondsSinceEpoch ~/
+    Duration.millisecondsPerDay;
+
+/// Second line of a Recent-widget row. Notes with no prose (a fresh finance
+/// note, an empty page) get a meaningful summary instead of a blank line.
+String widgetPreview(Note note) {
+  final line = firstPreviewLine(note.content);
+  if (line.isNotEmpty) return truncateSafe(line, 80);
+  if (isFinanceNote(note)) {
+    final count = note.amounts.length;
+    if (count == 0) return 'No entries yet';
+    return '$count ${count == 1 ? 'entry' : 'entries'}';
+  }
+  return '';
+}
+
 /// Thrown when stored data exists but cannot be decoded.
 ///
 /// This is a distinct signal from "no data saved yet", so callers can decide
@@ -95,6 +114,19 @@ class NoteStorage {
     });
   }
 
+  /// Rewrites only the home-screen widget payloads from [notes] — on launch
+  /// and resume, so a new day (streak, finance month) or an app update that
+  /// changed the payload shape reaches the widgets without waiting for an edit.
+  Future<void> refreshWidgets(List<Note> notes) {
+    return _writeQueue.run(() async {
+      final prefs = await SharedPreferences.getInstance();
+      await _writeWidgetPayload(prefs, notes);
+      try {
+        await _channel.invokeMethod('refreshWidgets');
+      } catch (_) {}
+    });
+  }
+
   Future<void> _writeWidgetPayload(
     SharedPreferences prefs,
     List<Note> notes,
@@ -102,11 +134,10 @@ class NoteStorage {
     final visible = notes.where((n) => !n.isArchived && !n.isDeleted).toList()
       ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
     final recent = visible.take(5).map((n) {
-      final previewLine = firstPreviewLine(n.content);
       return <String, dynamic>{
         'id': n.id,
         'title': n.title.isEmpty ? 'Untitled' : n.title,
-        'preview': truncateSafe(previewLine, 80),
+        'preview': widgetPreview(n),
       };
     }).toList();
     await prefs.setString(_widgetRecentKey, jsonEncode(recent));
@@ -128,9 +159,15 @@ class NoteStorage {
     await prefs.setString(_widgetTodoKey, jsonEncode(todo));
 
     final budgets = _budgetsFromPrefs(prefs);
+    final now = DateTime.now();
     await prefs.setString(
       'widget_streak_v1',
-      jsonEncode(computeWritingStreak(notes).toJson()),
+      jsonEncode({
+        ...computeWritingStreak(notes, now: now).toJson(),
+        // The widget re-derives the streak once this day is over, so a
+        // home screen left alone overnight never claims "you wrote today".
+        'asOfDay': localEpochDay(now),
+      }),
     );
     await prefs.setString(
       'widget_finance_v1',
@@ -159,6 +196,9 @@ class NoteStorage {
     for (final note in notes) {
       if (!isVisibleFinanceNote(note)) continue;
       for (final entry in note.amounts) {
+        // First-run sample data never reaches the widget (see
+        // MoneyEntry.isDemo / Budget.isDemo).
+        if (entry.isDemo) continue;
         if (!entry.date.isBefore(monthStart) &&
             entry.date.isBefore(nextMonth)) {
           entries.add(entry);
@@ -196,7 +236,9 @@ class NoteStorage {
     var selectedSpent = 0;
     var selectedRatio = 0.0;
     for (final budget in budgets) {
-      if (budget.period != 'month' || budget.currency != currency) {
+      if (budget.isDemo ||
+          budget.period != 'month' ||
+          budget.currency != currency) {
         continue;
       }
       final spent = categorySpend[budget.category] ?? 0;
@@ -212,7 +254,13 @@ class NoteStorage {
     // the widget just renders text.
     return {
       'month': '${monthShort(now.month)} ${now.year}',
+      // year*12 + zero-based month: the widget compares it to the device
+      // clock and shows a fresh-month state instead of last month's totals.
+      'monthIndex': now.year * 12 + now.month - 1,
       'currency': currency,
+      // Other currencies are never folded into the totals; the widget says
+      // which one it is showing when there is more than one.
+      'currencyCount': currencyCounts.length,
       'incomeText': formatMinorAmount(income, currency),
       'expenseText': formatMinorAmount(expense, currency),
       'balanceText': formatMinorAmount(income - expense, currency),
@@ -223,6 +271,10 @@ class NoteStorage {
           ? (selectedSpent / selectedBudget.limit * 100).round().clamp(0, 100)
           : 0,
       'budgetOver': selectedBudget != null && selectedSpent > selectedBudget.limit,
+      'budgetSpentText': formatMinorAmount(selectedSpent, currency),
+      'budgetLimitText': selectedBudget == null
+          ? ''
+          : formatMinorAmount(selectedBudget.limit, currency),
     };
   }
 

@@ -16,6 +16,10 @@ class CommandPaletteAction {
   /// be found by their full note content, like the note-list search.
   final String? searchText;
 
+  /// Left out of the unfiltered list (it would grow with every note ever
+  /// written) but still matched once the user types.
+  final bool searchOnly;
+
   const CommandPaletteAction({
     required this.id,
     required this.label,
@@ -24,6 +28,7 @@ class CommandPaletteAction {
     this.shortcut,
     required this.onInvoke,
     this.searchText,
+    this.searchOnly = false,
   });
 }
 
@@ -48,15 +53,22 @@ class _CommandPaletteState extends State<CommandPalette> {
 
   List<CommandPaletteAction> get _filtered {
     final query = _query.text.trim().toLowerCase();
-    if (query.isEmpty) return widget.actions;
+    if (query.isEmpty) {
+      return widget.actions.where((a) => !a.searchOnly).toList();
+    }
     return widget.actions.where((action) {
       final haystack = [
         action.label,
         action.description ?? '',
-        action.id,
+        // Command ids help ("new-note"); page ids are "note-<id>" and made
+        // every page match a search for "note".
+        if (!action.searchOnly && !action.id.startsWith('note-')) action.id,
         // Bounded so a huge note cannot stall filtering on every keystroke.
         if (action.searchText != null)
-          action.searchText!.substring(0, action.searchText!.length.clamp(0, 5000)),
+          action.searchText!.substring(
+            0,
+            action.searchText!.length.clamp(0, 5000),
+          ),
       ].join(' ').toLowerCase();
       return haystack.contains(query);
     }).toList();
@@ -148,8 +160,7 @@ class _CommandPaletteState extends State<CommandPalette> {
                         // overflow the screen.
                         constraints: BoxConstraints(
                           maxWidth: 600,
-                          maxHeight:
-                              MediaQuery.sizeOf(context).height * 0.75,
+                          maxHeight: MediaQuery.sizeOf(context).height * 0.75,
                         ),
                         child: Padding(
                           padding: const EdgeInsets.all(20),
@@ -160,162 +171,188 @@ class _CommandPaletteState extends State<CommandPalette> {
                               child: Opacity(
                                 opacity: t,
                                 child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: c.surface,
-                          borderRadius: BorderRadius.circular(AppRadius.panel),
-                          border: Border.all(color: c.border),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Color(0x33000000),
-                              blurRadius: 30,
-                              offset: Offset(0, 12),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(
-                                16,
-                                14,
-                                16,
-                                10,
-                              ),
-                              child: TextField(
-                                controller: _query,
-                                autofocus: true,
-                                decoration: InputDecoration(
-                                  border: InputBorder.none,
-                                  hintText: 'Search actions and pages...',
-                                  hintStyle: TextStyle(color: c.muted),
-                                  prefixIcon: Icon(
-                                    Icons.search,
-                                    color: c.muted,
+                                  decoration: BoxDecoration(
+                                    color: c.surface,
+                                    borderRadius: BorderRadius.circular(
+                                      AppRadius.panel,
+                                    ),
+                                    border: Border.all(color: c.border),
+                                    boxShadow: const [
+                                      BoxShadow(
+                                        color: Color(0x33000000),
+                                        blurRadius: 30,
+                                        offset: Offset(0, 12),
+                                      ),
+                                    ],
                                   ),
-                                  suffixText: 'ESC',
-                                  suffixStyle: TextStyle(
-                                    color: c.muted,
-                                    fontSize: AppType.t10,
-                                    fontFamily: c.monoFontFamily,
-                                  ),
-                                ),
-                                style: TextStyle(color: c.fg),
-                              ),
-                            ),
-                            Divider(height: 1, color: c.border),
-                            if (actions.isEmpty)
-                              Padding(
-                                padding: const EdgeInsets.all(24),
-                                child: Text(
-                                  'No matching actions',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(color: c.muted),
-                                ),
-                              )
-                            else
-                              Flexible(
-                                child: ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    maxHeight: 380,
-                                  ),
-                                  child: ListView.builder(
-                                    shrinkWrap: true,
-                                  padding: const EdgeInsets.all(8),
-                                  itemCount: actions.length,
-                                  itemBuilder: (context, index) {
-                                    final action = actions[index];
-                                    final selected = index == _selected;
-                                    return InkWell(
-                                      onTap: () {
-                                        widget.onDismiss();
-                                        action.onInvoke();
-                                      },
-                                      borderRadius: BorderRadius.circular(AppRadius.card),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 10,
-                                          vertical: 10,
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      Padding(
+                                        padding: const EdgeInsets.fromLTRB(
+                                          16,
+                                          14,
+                                          16,
+                                          10,
                                         ),
-                                        decoration: BoxDecoration(
-                                          color: selected
-                                              ? c.accentDim
-                                              : Colors.transparent,
-                                          borderRadius: BorderRadius.circular(
-                                            7,
+                                        child: TextField(
+                                          controller: _query,
+                                          autofocus: true,
+                                          decoration: InputDecoration(
+                                            border: InputBorder.none,
+                                            hintText:
+                                                'Search actions and pages...',
+                                            hintStyle: TextStyle(
+                                              color: c.muted,
+                                            ),
+                                            prefixIcon: Icon(
+                                              Icons.search,
+                                              color: c.muted,
+                                            ),
+                                            suffixText: 'ESC',
+                                            suffixStyle: TextStyle(
+                                              color: c.muted,
+                                              fontSize: AppType.t10,
+                                              fontFamily: c.monoFontFamily,
+                                            ),
                                           ),
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            Icon(
-                                              action.icon,
-                                              size: 18,
-                                              color: selected
-                                                  ? c.accent
-                                                  : c.muted,
-                                            ),
-                                            const SizedBox(width: 10),
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    action.label,
-                                                    style: TextStyle(
-                                                      color: c.fg,
-                                                      fontSize: AppType.t13_5,
-                                                      fontWeight:
-                                                          FontWeight.w500,
-                                                    ),
-                                                  ),
-                                                  if (action.description !=
-                                                      null)
-                                                    Text(
-                                                      action.description!,
-                                                      style: TextStyle(
-                                                        color: c.muted,
-                                                        fontSize: AppType.t11,
-                                                      ),
-                                                    ),
-                                                ],
-                                              ),
-                                            ),
-                                            if (action.shortcut != null)
-                                              Text(
-                                                action.shortcut!,
-                                                style: TextStyle(
-                                                  color: c.muted,
-                                                  fontSize: AppType.t10,
-                                                  fontFamily: c.monoFontFamily,
-                                                ),
-                                              ),
-                                          ],
+                                          style: TextStyle(color: c.fg),
                                         ),
                                       ),
-                                    );
-                                   },
-                                 ),
-                               ),
+                                      Divider(height: 1, color: c.border),
+                                      if (actions.isEmpty)
+                                        Padding(
+                                          padding: const EdgeInsets.all(24),
+                                          child: Text(
+                                            'No matching actions',
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(color: c.muted),
+                                          ),
+                                        )
+                                      else
+                                        Flexible(
+                                          child: ConstrainedBox(
+                                            constraints: const BoxConstraints(
+                                              maxHeight: 380,
+                                            ),
+                                            child: ListView.builder(
+                                              shrinkWrap: true,
+                                              padding: const EdgeInsets.all(8),
+                                              itemCount: actions.length,
+                                              itemBuilder: (context, index) {
+                                                final action = actions[index];
+                                                final selected =
+                                                    index == _selected;
+                                                return InkWell(
+                                                  onTap: () {
+                                                    widget.onDismiss();
+                                                    action.onInvoke();
+                                                  },
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                        AppRadius.card,
+                                                      ),
+                                                  child: Container(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 10,
+                                                          vertical: 10,
+                                                        ),
+                                                    decoration: BoxDecoration(
+                                                      color: selected
+                                                          ? c.accentDim
+                                                          : Colors.transparent,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            7,
+                                                          ),
+                                                    ),
+                                                    child: Row(
+                                                      children: [
+                                                        Icon(
+                                                          action.icon,
+                                                          size: 18,
+                                                          color: selected
+                                                              ? c.accent
+                                                              : c.muted,
+                                                        ),
+                                                        const SizedBox(
+                                                          width: 10,
+                                                        ),
+                                                        Expanded(
+                                                          child: Column(
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .start,
+                                                            children: [
+                                                              Text(
+                                                                action.label,
+                                                                style: TextStyle(
+                                                                  color: c.fg,
+                                                                  fontSize:
+                                                                      AppType
+                                                                          .t13_5,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .w500,
+                                                                ),
+                                                              ),
+                                                              if (action
+                                                                      .description !=
+                                                                  null)
+                                                                Text(
+                                                                  action
+                                                                      .description!,
+                                                                  style: TextStyle(
+                                                                    color:
+                                                                        c.muted,
+                                                                    fontSize:
+                                                                        AppType
+                                                                            .t11,
+                                                                  ),
+                                                                ),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                        if (action.shortcut !=
+                                                            null)
+                                                          Text(
+                                                            action.shortcut!,
+                                                            style: TextStyle(
+                                                              color: c.muted,
+                                                              fontSize:
+                                                                  AppType.t10,
+                                                              fontFamily: c
+                                                                  .monoFontFamily,
+                                                            ),
+                                                          ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                );
+                                              },
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
                               ),
-                          ],
+                            ),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ),
-              ),
+                  ],
+                );
+              },
             ),
           ),
-        ],
-      );
-    },
-  ),
-),
-),
-),
-);
+        ),
+      ),
+    );
   }
 }
 

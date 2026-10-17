@@ -38,13 +38,13 @@ class BudgetSheet extends StatefulWidget {
       isScrollControlled: true,
       backgroundColor: context.colors.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.panel)),
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppRadius.panel),
+        ),
       ),
       constraints: const BoxConstraints(maxWidth: 560),
       builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(ctx).viewInsets.bottom,
-        ),
+        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
         child: BudgetSheet(
           budget: budget,
           onSave: onSave,
@@ -75,12 +75,15 @@ class _BudgetSheetState extends State<BudgetSheet> {
     final b = widget.budget;
     _categoryCtrl = TextEditingController(text: b?.category ?? '');
     _limitCtrl = TextEditingController(
-        text: b != null
-            ? minorToMajor(b.limit, b.currency)
-                .toStringAsFixed(currencyDecimals(b.currency))
-            : '');
+      text: b != null
+          ? minorToMajor(
+              b.limit,
+              b.currency,
+            ).toStringAsFixed(currencyDecimals(b.currency))
+          : '',
+    );
     _currencyCode = b?.currency ?? widget.currencyCode;
-    _period = b?.period ?? widget.budgetPeriod;
+    _period = normalizeBudgetPeriod(b?.period ?? widget.budgetPeriod);
   }
 
   @override
@@ -93,9 +96,11 @@ class _BudgetSheetState extends State<BudgetSheet> {
   void _save() {
     final limit = parseAmountToMinor(_limitCtrl.text, _currencyCode);
     if (limit == null) {
-      setState(() => _limitError = _limitCtrl.text.trim().isEmpty
-          ? 'Enter a spending limit.'
-          : 'Use numbers only, with up to 2 decimals (e.g. 500 or 500.50).');
+      setState(
+        () => _limitError = _limitCtrl.text.trim().isEmpty
+            ? 'Enter a spending limit.'
+            : amountFormatError(_currencyCode, example: '500'),
+      );
       return;
     }
     if (limit <= 0) {
@@ -129,7 +134,10 @@ class _BudgetSheetState extends State<BudgetSheet> {
       padding: const EdgeInsets.only(top: 6),
       child: Text(
         msg,
-        style: TextStyle(fontSize: AppType.t12, color: context.colors.destructive),
+        style: TextStyle(
+          fontSize: AppType.t12,
+          color: context.colors.destructive,
+        ),
       ),
     );
   }
@@ -160,7 +168,8 @@ class _BudgetSheetState extends State<BudgetSheet> {
           children: [
             Center(
               child: Container(
-                width: 36, height: 4,
+                width: 36,
+                height: 4,
                 margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
                   color: context.colors.border,
@@ -168,11 +177,15 @@ class _BudgetSheetState extends State<BudgetSheet> {
                 ),
               ),
             ),
-            Text(isEdit ? 'Edit budget' : 'Add budget',
-                style: TextStyle(
-                  fontSize: AppType.t15, fontWeight: FontWeight.w600,
-                  color: context.colors.fg, letterSpacing: 0.01,
-                )),
+            Text(
+              isEdit ? 'Edit budget' : 'Add budget',
+              style: TextStyle(
+                fontSize: AppType.t15,
+                fontWeight: FontWeight.w600,
+                color: context.colors.fg,
+                letterSpacing: 0.01,
+              ),
+            ),
             const SizedBox(height: 16),
             _Field(
               label: 'Budget period',
@@ -187,7 +200,9 @@ class _BudgetSheetState extends State<BudgetSheet> {
                     selectedColor: context.colors.accentDim,
                     labelStyle: TextStyle(
                       fontSize: AppType.t12,
-                      color: selected ? context.colors.accent : context.colors.fg,
+                      color: selected
+                          ? context.colors.accent
+                          : context.colors.fg,
                     ),
                   );
                 }).toList(),
@@ -207,7 +222,9 @@ class _BudgetSheetState extends State<BudgetSheet> {
                     selectedColor: context.colors.accentDim,
                     labelStyle: TextStyle(
                       fontSize: AppType.t12,
-                      color: selected ? context.colors.accent : context.colors.fg,
+                      color: selected
+                          ? context.colors.accent
+                          : context.colors.fg,
                     ),
                   );
                 }).toList(),
@@ -220,7 +237,8 @@ class _BudgetSheetState extends State<BudgetSheet> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Wrap(
-                    spacing: 6, runSpacing: 6,
+                    spacing: 6,
+                    runSpacing: 6,
                     children: cats.map((cat) {
                       final selected = _categoryCtrl.text.trim() == cat;
                       return InkWell(
@@ -231,25 +249,31 @@ class _BudgetSheetState extends State<BudgetSheet> {
                         borderRadius: BorderRadius.circular(AppRadius.panel),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 4),
+                            horizontal: 10,
+                            vertical: 4,
+                          ),
                           decoration: BoxDecoration(
                             color: selected
                                 ? context.colors.accentDim
                                 : context.colors.listBg,
-                            borderRadius: BorderRadius.circular(AppRadius.panel),
+                            borderRadius: BorderRadius.circular(
+                              AppRadius.panel,
+                            ),
                             border: Border.all(
                               color: selected
                                   ? context.colors.accent
                                   : context.colors.border,
                             ),
                           ),
-                          child: Text(cat,
-                              style: TextStyle(
-                                fontSize: AppType.t12,
-                                color: selected
-                                    ? context.colors.accent
-                                    : context.colors.fg,
-                              )),
+                          child: Text(
+                            cat,
+                            style: TextStyle(
+                              fontSize: AppType.t12,
+                              color: selected
+                                  ? context.colors.accent
+                                  : context.colors.fg,
+                            ),
+                          ),
                         ),
                       );
                     }).toList(),
@@ -257,12 +281,17 @@ class _BudgetSheetState extends State<BudgetSheet> {
                   const SizedBox(height: 8),
                   TextField(
                     controller: _categoryCtrl,
-                    decoration: _inputDeco('Or type your own',
-                        error: _categoryError != null),
+                    decoration: _inputDeco(
+                      'Or type your own',
+                      error: _categoryError != null,
+                    ),
                     onChanged: (v) => setState(() {
                       if (v.trim().isNotEmpty) _categoryError = null;
                     }),
-                    style: TextStyle(fontSize: AppType.t13_5, color: context.colors.fg),
+                    style: TextStyle(
+                      fontSize: AppType.t13_5,
+                      color: context.colors.fg,
+                    ),
                   ),
                   if (_categoryError != null) _inlineError(_categoryError!),
                 ],
@@ -276,7 +305,9 @@ class _BudgetSheetState extends State<BudgetSheet> {
                 children: [
                   TextField(
                     controller: _limitCtrl,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                     inputFormatters: kAmountInputFormatters,
                     autofocus: !isEdit,
                     decoration: _inputDeco(
@@ -286,10 +317,13 @@ class _BudgetSheetState extends State<BudgetSheet> {
                       error: _limitError != null,
                     ),
                     onChanged: (_) {
-                      if (_limitError != null) setState(() => _limitError = null);
+                      if (_limitError != null) {
+                        setState(() => _limitError = null);
+                      }
                     },
                     style: TextStyle(
-                      fontSize: AppType.t15, fontWeight: FontWeight.w500,
+                      fontSize: AppType.t15,
+                      fontWeight: FontWeight.w500,
                       color: context.colors.fg,
                     ),
                   ),
@@ -307,9 +341,13 @@ class _BudgetSheetState extends State<BudgetSheet> {
                       side: BorderSide(color: context.colors.border),
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
-                    child: Text('Cancel',
-                        style: TextStyle(
-                            color: context.colors.fg, fontSize: AppType.t13_5)),
+                    child: Text(
+                      'Cancel',
+                      style: TextStyle(
+                        color: context.colors.fg,
+                        fontSize: AppType.t13_5,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -320,9 +358,13 @@ class _BudgetSheetState extends State<BudgetSheet> {
                       backgroundColor: context.colors.accent,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
-                    child: Text(isEdit ? 'Update' : 'Add',
-                        style: TextStyle(
-                            color: context.colors.onAccent, fontSize: AppType.t13_5)),
+                    child: Text(
+                      isEdit ? 'Update' : 'Add',
+                      style: TextStyle(
+                        color: context.colors.onAccent,
+                        fontSize: AppType.t13_5,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -336,11 +378,16 @@ class _BudgetSheetState extends State<BudgetSheet> {
   InputDecoration _inputDeco(String hint, {bool error = false}) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: TextStyle(color: context.colors.muted, fontSize: AppType.t13_5),
+      hintStyle: TextStyle(
+        color: context.colors.muted,
+        fontSize: AppType.t13_5,
+        // The UI fonts have no ₱ glyph; without an explicit fallback the
+        // "₱0.00" placeholder drew a tofu box.
+        fontFamilyFallback: const ['Roboto', 'Noto Sans', 'sans-serif'],
+      ),
       filled: true,
       fillColor: context.colors.listBg,
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadius.card),
         borderSide: BorderSide(color: context.colors.border),
@@ -348,12 +395,14 @@ class _BudgetSheetState extends State<BudgetSheet> {
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadius.card),
         borderSide: BorderSide(
-            color: error ? context.colors.destructive : context.colors.border),
+          color: error ? context.colors.destructive : context.colors.border,
+        ),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(AppRadius.card),
         borderSide: BorderSide(
-            color: error ? context.colors.destructive : context.colors.accent),
+          color: error ? context.colors.destructive : context.colors.accent,
+        ),
       ),
     );
   }
@@ -369,11 +418,15 @@ class _Field extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style: TextStyle(
-              fontSize: AppType.t12, fontWeight: FontWeight.w500,
-              color: context.colors.muted, letterSpacing: 0.04,
-            )),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: AppType.t12,
+            fontWeight: FontWeight.w500,
+            color: context.colors.muted,
+            letterSpacing: 0.04,
+          ),
+        ),
         const SizedBox(height: 6),
         child,
       ],

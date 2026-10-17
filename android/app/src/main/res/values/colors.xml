@@ -6,4 +6,5 @@
     <color name="widget_muted">#6E7A85</color>
     <color name="widget_accent">#CC4D3C</color>
     <color name="widget_income">#2D8659</color>
+    <color name="widget_track">#E5E8EB</color>
 </resources>

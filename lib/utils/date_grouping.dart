@@ -8,8 +8,10 @@ import 'date_format.dart';
 /// header and the row timestamp — the two used to disagree because one
 /// counted calendar days and the other counted elapsed hours.
 int calendarDayDiff(DateTime d, DateTime now) {
-  final a = DateTime(d.year, d.month, d.day);
-  final b = DateTime(now.year, now.month, now.day);
+  // UTC midnights: local ones are 23h apart across a DST change, which
+  // `inDays` truncated to 0 (yesterday's note showed under "Today").
+  final a = DateTime.utc(d.year, d.month, d.day);
+  final b = DateTime.utc(now.year, now.month, now.day);
   return a.difference(b).inDays;
 }
 

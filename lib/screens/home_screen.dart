@@ -30,6 +30,9 @@ import '../widgets/editor.dart';
 import '../widgets/mobile_nav.dart';
 import '../widgets/template_picker_sheet.dart';
 import '../widgets/finance_dashboard.dart';
+import '../widgets/home_modules.dart';
+import '../widgets/tasks_view.dart';
+import '../widgets/workspace_sheet.dart';
 import '../widgets/entry_sheet.dart';
 import '../widgets/context_panel.dart';
 import '../widgets/workspace_header.dart';
@@ -38,6 +41,11 @@ import 'onboarding_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  /// Home's sense of "now" (greeting, evening prompt, day line). Tests pin
+  /// it so time-of-day features don't flip depending on when they run.
+  @visibleForTesting
+  static DateTime Function() clock = DateTime.now;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -59,6 +67,30 @@ class _HomeScreenState extends State<HomeScreen>
   bool _showEditor = false;
   bool _contextPanelOpen = false;
   bool _commandPaletteOpen = false;
+
+  /// Mobile dock minimized while the page scrolls down (reading), restored
+  /// on scroll up, at the top, on tab change, or by tapping it.
+  bool _dockCollapsed = false;
+
+  /// "Swipe up on the dock" pill, shown until the sheet has been opened once
+  /// (or the pill is dismissed). Teaches the gesture without a snackbar that
+  /// could queue in front of an Undo.
+  static const _dockHintKey = 'dock_swipe_hint_seen_v1';
+
+  /// Tasks finished today, for Home's acknowledgement ("2 done today").
+  /// Stored as "epochDay:count" and reset by a new day.
+  static const _doneTodayKey = 'done_today_v1';
+  int _doneToday = 0;
+  int _doneTodayDay = -1;
+
+  /// "From your notes": hidden for the rest of the day with "Not today".
+  static const _resurfaceHiddenKey = 'resurface_hidden_day_v1';
+
+  /// What Home calls you ("Good evening, Sam"). Local only, optional.
+  static const _displayNameKey = 'display_name_v1';
+  String? _displayName;
+  int _resurfaceHiddenDay = -1;
+  bool _showDockHint = false;
   bool _previewMode = false;
   bool _isLoading = true;
   Object? _loadError;
@@ -82,9 +114,6 @@ class _HomeScreenState extends State<HomeScreen>
   Timer? _savedResetTimer;
   Timer? _searchDebounce;
   late final AnimationController _shimmer;
-  // Home plays its section entrance once per app start; afterwards plain
-  // children render so revisiting Home never replays it.
-  bool _homeAnimated = false;
   String _saveState = 'idle'; // idle | saving | saved
   static const _shellPrefsKey = 'shell_state_v1';
 
@@ -92,6 +121,7 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    HardwareKeyboard.instance.addHandler(_onHardwareKey);
     _shimmer = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
@@ -166,6 +196,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    HardwareKeyboard.instance.removeHandler(_onHardwareKey);
     _shimmer.dispose();
     _persistTimer?.cancel();
     _shellTimer?.cancel();
@@ -183,6 +214,14 @@ class _HomeScreenState extends State<HomeScreen>
     // cold start). Re-check on every resume. Paused/inactive is also the
     // last safe moment to flush edits before Android can kill the process.
     if (state == AppLifecycleState.resumed) {
+      if (!_isLoading) {
+        // Recurring entries used to materialize only on a cold start: an app
+        // left in the background across the 1st never showed the new rent.
+        _generateRecurringEntries();
+        unawaited(_drainWidgetToggles().then(
+          (_) => _storage.refreshWidgets(notes).catchError((_) {}),
+        ));
+      }
       _consumePendingAction();
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
@@ -206,6 +245,9 @@ class _HomeScreenState extends State<HomeScreen>
         final budgetResult = await _storage.loadBudgetsResult();
         if (budgetResult.hasError) throw budgetResult.error!;
         if (mounted) setState(() => _budgets = budgetResult.items);
+        // Before any save below (recurring entries, onboarding) rewrites the
+        // widget payload from notes that don't have the home-screen ticks yet.
+        await _drainWidgetToggles();
       } else {
         final data = createOnboardingData();
         if (mounted) {
@@ -240,6 +282,15 @@ class _HomeScreenState extends State<HomeScreen>
       if (onboardingChanged) _persistNow();
 
       _generateRecurringEntries();
+      _showDockHint = !(prefs.getBool(_dockHintKey) ?? false);
+      final doneRaw = (prefs.getString(_doneTodayKey) ?? '').split(':');
+      if (doneRaw.length == 2) {
+        _doneTodayDay = int.tryParse(doneRaw[0]) ?? -1;
+        _doneToday = int.tryParse(doneRaw[1]) ?? 0;
+      }
+      _resurfaceHiddenDay = prefs.getInt(_resurfaceHiddenKey) ?? -1;
+      final name = prefs.getString(_displayNameKey)?.trim();
+      _displayName = (name == null || name.isEmpty) ? null : name;
       final cats = prefs.getStringList('custom_categories') ?? [];
       final recent = prefs.getStringList('recent_categories') ?? [];
       if (mounted) {
@@ -259,6 +310,8 @@ class _HomeScreenState extends State<HomeScreen>
       if (!(prefs.getBool(_onboardingCompleteKey) ?? false)) {
         setState(() => _onboardingOpen = true);
       }
+      await _drainWidgetToggles();
+      unawaited(_storage.refreshWidgets(notes).catchError((_) {}));
       await _drainStashedActions();
       await _consumePendingAction();
     } catch (error) {
@@ -314,6 +367,37 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  /// Written by the Android to-do widget (WidgetActionActivity.kt), which
+  /// ticks items on the home screen without opening the app.
+  static const _widgetTogglesKey = 'widget_pending_toggles_v1';
+
+  /// Applies to-do toggles made on the home-screen widget since the last
+  /// load or resume. Each carries the item's state at tap time, so replaying
+  /// one that already landed is a no-op.
+  Future<void> _drainWidgetToggles() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      // The native side wrote behind the plugin's in-memory cache.
+      await prefs.reload();
+      final raw = prefs.getString(_widgetTogglesKey);
+      if (raw == null || raw.isEmpty) return;
+      await prefs.remove(_widgetTogglesKey);
+      for (final toggle in jsonDecode(raw) as List) {
+        if (toggle is! Map) continue;
+        final id = toggle['id'];
+        final text = toggle['text'];
+        if (id is! String || text is! String) continue;
+        _toggleChecklistByContent(
+          id,
+          text,
+          expectedDone: toggle['done'] is bool ? toggle['done'] as bool : null,
+        );
+      }
+    } catch (_) {
+      // Optional, Android-only channel; a bad payload must not block launch.
+    }
+  }
+
   /// Runs the stashed actions once the initial load has completed.
   Future<void> _drainStashedActions() async {
     while (_stashedActions.isNotEmpty && mounted) {
@@ -364,19 +448,22 @@ class _HomeScreenState extends State<HomeScreen>
     final note = _noteById(noteId);
     if (note == null) return;
     final lines = note.content.split('\n');
-    final marker = RegExp(r'^(\s*-\s+\[)([ xX])(\]\s+.*)$');
+    final marker = RegExp(r'^(\s*[-*+]\s+\[)([ xX])(\]\s+.*)$');
     for (var i = 0; i < lines.length; i++) {
       final m = marker.firstMatch(lines[i]);
       if (m == null || stripInlineMarkdown(m.group(3)!.substring(1)) != stripInlineMarkdown(text)) {
         continue;
       }
       final checked = m.group(2) != ' ';
+      // Not in the tapped state: either a duplicate line with the same text
+      // (keep looking) or a stale replay (no line matches; nothing happens).
       if (expectedDone != null && checked != expectedDone) {
-        return;
+        continue;
       }
       lines[i] = '${m.group(1)}${checked ? ' ' : 'x'}${m.group(3)}';
       note.content = lines.join('\n');
       note.updatedAt = DateTime.now();
+      _countDone(!checked);
       _persistNow();
       if (mounted) setState(() {});
       return;
@@ -454,7 +541,10 @@ class _HomeScreenState extends State<HomeScreen>
         }
       }
     }
-    if (changed) _persistNow();
+    if (changed) {
+      _persistNow();
+      if (mounted) setState(() {});
+    }
   }
 
   void _addBudget(Budget budget) {
@@ -500,11 +590,15 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   /// The default destination for dashboard quick-adds: ONE note per calendar
-  /// month holding both directions, e.g. "Finance — September 2026". Created
-  /// on first use. Existing per-day "Quick …" notes are left untouched and
-  /// still count toward totals, because the dashboard aggregates across every
-  /// finance note.
-  Note _findOrCreateMonthlyFinanceNote() {
+  /// month holding both directions, e.g. "Finance — September 2026". Existing
+  /// per-day "Quick …" notes are left untouched and still count toward
+  /// totals, because the dashboard aggregates across every finance note.
+  ///
+  /// A missing monthly note is returned as an unsaved draft: the caller
+  /// inserts it on the first actual save, so opening quick-add and cancelling
+  /// no longer leaves an empty note behind (in the list and on the Android
+  /// Recent widget).
+  Note _monthlyFinanceNoteOrDraft() {
     final today = DateTime.now();
     final label = 'Finance — ${monthName(today.month)} ${today.year}';
     for (final n in notes) {
@@ -523,7 +617,6 @@ class _HomeScreenState extends State<HomeScreen>
       type: 'expense',
       currency: 'PHP',
     );
-    notes.insert(0, note);
     return note;
   }
 
@@ -574,7 +667,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _quickAddTransaction(String type) {
-    var note = _findOrCreateMonthlyFinanceNote();
+    var note = _monthlyFinanceNoteOrDraft();
     // Quick-add inherits the workspace's currency scope (05-C2): logging money while
     // scoped to USD must not silently create a PHP entry. 'all' (and simple mode,
     // which has no scope selector) falls back to the destination note's currency.
@@ -587,12 +680,18 @@ class _HomeScreenState extends State<HomeScreen>
       _activeFilter = 'finance';
       _currentTab = 'finance';
     });
-    _persistNow();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       EntrySheet.show(
         context,
         onSave: (entry) {
+          if (!notes.any((n) => n.id == note.id)) notes.insert(0, note);
+          // The sheet parsed the amount in the scope currency. Unless the
+          // entry says so explicitly it would inherit the destination note's
+          // currency: a USD-scoped add landed as PHP, and a PHP amount moved
+          // to a JPY note was read as 100x yen.
+          final parsedIn = entry.currency ?? scopeCurrency;
+          if (parsedIn != note.currency) entry.currency = parsedIn;
           note.amounts.add(entry);
           note.updatedAt = DateTime.now();
           _persistNow();
@@ -626,6 +725,8 @@ class _HomeScreenState extends State<HomeScreen>
     final candidates = notes
         .where((n) => isFinanceNote(n) && !n.isArchived && !n.isDeleted)
         .toList();
+    // The monthly note may still be an unsaved draft; keep it pickable.
+    if (!candidates.any((n) => n.id == current.id)) candidates.insert(0, current);
     final c = context.colors;
     return showModalBottomSheet<Note>(
       context: context,
@@ -728,10 +829,23 @@ class _HomeScreenState extends State<HomeScreen>
       onDelete: () {
         // Id-based, mirroring editor.dart _removeEntry: the captured index can go
         // stale between opening the sheet and tapping Delete.
-        note.amounts.removeWhere((e) => e.id == entryId);
+        final index = note.amounts.indexWhere((e) => e.id == entryId);
+        if (index == -1) return;
+        final removed = note.amounts.removeAt(index);
         note.updatedAt = DateTime.now();
         _persistNow();
         setState(() {});
+        // Delete sits next to Update and fires without a dialog; one
+        // mis-tap must stay recoverable.
+        _showSnackBar(
+          'Entry deleted',
+          onUndo: () {
+            if (note.amounts.any((e) => e.id == removed.id)) return;
+            note.amounts.insert(index.clamp(0, note.amounts.length), removed);
+            _persistNow();
+            if (mounted) setState(() {});
+          },
+        );
       },
       currencySymbol: currencySymbol(entry.currency ?? note.currency),
       noteCurrency: note.currency,
@@ -887,16 +1001,22 @@ class _HomeScreenState extends State<HomeScreen>
   String get _effectiveFinanceCurrency =>
       _financeMode == 'simple' ? 'all' : _financeCurrency;
 
+  /// Calendar-day arithmetic (`DateTime(y, m, d - n)`), never
+  /// `subtract(Duration(days: n))`: across a daylight-saving change a 24-hour
+  /// step lands at 23:00/01:00 and shifts week starts and day buckets.
+  static DateTime _weekStart(DateTime now) =>
+      DateTime(now.year, now.month, now.day - (now.weekday - 1));
+
   bool _isInPeriod(DateTime d) {
     final now = DateTime.now();
     switch (_effectiveFinancePeriod) {
       case 'day':
         return _isToday(d);
       case 'week':
-        final monday = now.subtract(Duration(days: now.weekday - 1));
-        final startOfWeek = DateTime(monday.year, monday.month, monday.day);
+        final startOfWeek = _weekStart(now);
         return !d.isBefore(startOfWeek) &&
-            d.isBefore(startOfWeek.add(const Duration(days: 7)));
+            d.isBefore(DateTime(startOfWeek.year, startOfWeek.month,
+                startOfWeek.day + 7));
       case 'month':
         final startOfMonth = DateTime(now.year, now.month, 1);
         return !d.isBefore(startOfMonth) &&
@@ -910,30 +1030,44 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  /// The SAME stretch of the previous period: on Oct 16 the month comparison
+  /// is Sep 1 – Sep 16, not all of September. Comparing a partial period with
+  /// a full one made every early-month chip read "Spending down 97%".
   bool _isInPreviousPeriod(DateTime d) {
     final now = DateTime.now();
-    switch (_effectiveFinancePeriod) {
-      case 'day':
-        final yesterday = DateTime(now.year, now.month, now.day - 1);
-        return d.year == yesterday.year &&
-            d.month == yesterday.month &&
-            d.day == yesterday.day;
-      case 'week':
-        final monday = now.subtract(Duration(days: now.weekday - 1));
-        final curStart = DateTime(monday.year, monday.month, monday.day);
-        final prevStart = curStart.subtract(const Duration(days: 7));
-        return !d.isBefore(prevStart) && d.isBefore(curStart);
-      case 'month':
-        final curStart = DateTime(now.year, now.month, 1);
-        final prevStart = DateTime(now.year, now.month - 1, 1);
-        return !d.isBefore(prevStart) && d.isBefore(curStart);
-      case 'year':
-        final curStart = DateTime(now.year, 1, 1);
-        final prevStart = DateTime(now.year - 1, 1, 1);
-        return !d.isBefore(prevStart) && d.isBefore(curStart);
-      default:
-        return false;
-    }
+    final (DateTime prevStart, DateTime curStart, DateTime sameMoment) =
+        switch (_effectiveFinancePeriod) {
+      'day' => (
+          DateTime(now.year, now.month, now.day - 1),
+          DateTime(now.year, now.month, now.day),
+          DateTime(now.year, now.month, now.day - 1, now.hour, now.minute,
+              now.second),
+        ),
+      'week' => (
+          DateTime(_weekStart(now).year, _weekStart(now).month,
+              _weekStart(now).day - 7),
+          _weekStart(now),
+          DateTime(now.year, now.month, now.day - 7, now.hour, now.minute,
+              now.second),
+        ),
+      'month' => (
+          DateTime(now.year, now.month - 1, 1),
+          DateTime(now.year, now.month, 1),
+          // Mar 31 -> "Feb 31" normalizes into March; capped below.
+          DateTime(now.year, now.month - 1, now.day, now.hour, now.minute,
+              now.second),
+        ),
+      'year' => (
+          DateTime(now.year - 1, 1, 1),
+          DateTime(now.year, 1, 1),
+          DateTime(now.year - 1, now.month, now.day, now.hour, now.minute,
+              now.second),
+        ),
+      _ => (now, now, now),
+    };
+    if (!prevStart.isBefore(curStart)) return false;
+    final end = sameMoment.isBefore(curStart) ? sameMoment : curStart;
+    return !d.isBefore(prevStart) && !d.isAfter(end);
   }
 
   double get _daysInCurrentPeriod {
@@ -942,15 +1076,16 @@ class _HomeScreenState extends State<HomeScreen>
       case 'day':
         return 1;
       case 'week':
-        final monday = now.subtract(Duration(days: now.weekday - 1));
-        return now
-                .difference(DateTime(monday.year, monday.month, monday.day))
-                .inDays +
-            1;
+        return now.weekday.toDouble();
       case 'month':
         return now.day.toDouble();
       case 'year':
-        return now.difference(DateTime(now.year, 1, 1)).inDays + 1;
+        // Day of year, counted in calendar days (DST-safe).
+        return (DateTime.utc(now.year, now.month, now.day)
+                    .difference(DateTime.utc(now.year, 1, 1))
+                    .inDays +
+                1)
+            .toDouble();
       default:
         return 0;
     }
@@ -1083,11 +1218,39 @@ class _HomeScreenState extends State<HomeScreen>
   /// tab and only when the user is not typing. `EditableText` is the shared base
   /// of TextField/TextFormField, so one check covers every input in the app,
   /// including the amount field of an already-open EntrySheet.
-  void _financeShortcut(String type) {
-    if (_currentTab != 'finance') return;
-    if (_commandPaletteOpen || _onboardingOpen) return;
+  /// Part 4.2: bare E / I add an expense / income on the Finance tab. A
+  /// global keyboard handler, not a Shortcuts binding: a binding claimed the
+  /// key even when it then did nothing — so lowercase e and i never reached
+  /// any text field on a hardware keyboard — and a focus-tree handler never
+  /// saw the key when nothing was focused. This claims it only when it fires.
+  bool _onHardwareKey(KeyEvent event) {
+    if (!mounted || event is! KeyDownEvent) return false;
+    final keys = HardwareKeyboard.instance;
+    if (keys.isControlPressed ||
+        keys.isMetaPressed ||
+        keys.isAltPressed ||
+        keys.isShiftPressed) {
+      return false;
+    }
+    final type = event.logicalKey == LogicalKeyboardKey.keyE
+        ? 'expense'
+        : event.logicalKey == LogicalKeyboardKey.keyI
+            ? 'income'
+            : null;
+    if (type == null || !_financeShortcutApplies) return false;
+    _financeShortcut(type);
+    return true;
+  }
+
+  bool get _financeShortcutApplies {
+    if (_currentTab != 'finance') return false;
+    if (_commandPaletteOpen || _onboardingOpen) return false;
     final focus = FocusManager.instance.primaryFocus;
-    if (focus?.context?.widget is EditableText) return;
+    return focus?.context?.widget is! EditableText;
+  }
+
+  void _financeShortcut(String type) {
+    if (!_financeShortcutApplies) return;
     if (type == 'income') {
       _quickAddIncome();
     } else {
@@ -1098,11 +1261,13 @@ class _HomeScreenState extends State<HomeScreen>
   /// Minor-unit expense totals per day for the last 14 days (oldest -> newest,
   /// index 13 = today), in the dashboard's dominant currency. Feeds the
   /// SpendSparkline trend card.
-  List<int> get _last14DaySpend {
+  List<int> get _last14DaySpend =>
+      _last14DaySpendIn(_financeSummary.dominantCurrency);
+
+  List<int> _last14DaySpendIn(String dominant) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final start = today.subtract(const Duration(days: 13));
-    final dominant = _financeSummary.dominantCurrency;
+    final start = DateTime(today.year, today.month, today.day - 13);
     final totals = List<int>.filled(14, 0);
     for (final n in notes) {
       if (!isVisibleFinanceNote(n)) continue;
@@ -1111,7 +1276,12 @@ class _HomeScreenState extends State<HomeScreen>
         if ((e.currency ?? n.currency ?? 'PHP') != dominant) continue;
         final day = DateTime(e.date.year, e.date.month, e.date.day);
         if (day.isBefore(start) || day.isAfter(today)) continue;
-        totals[day.difference(start).inDays] += e.amount;
+        // UTC dates: a DST change inside the window shortens one local
+        // "day" to 23h, which inDays would round into the previous bucket.
+        final index = DateTime.utc(day.year, day.month, day.day)
+            .difference(DateTime.utc(start.year, start.month, start.day))
+            .inDays;
+        totals[index] += e.amount;
       }
     }
     return totals;
@@ -1125,23 +1295,28 @@ class _HomeScreenState extends State<HomeScreen>
   Map<String, int> get _budgetActuals {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final weekStart = today.subtract(Duration(days: now.weekday - 1));
+    final weekStart = _weekStart(today);
     final monthStart = DateTime(now.year, now.month);
     final yearStart = DateTime(now.year);
 
     final actuals = <String, int>{};
     for (final budget in _budgets) {
-      final start = switch (budget.period) {
-        'week' => weekStart,
-        'year' => yearStart,
-        _ => monthStart,
+      final (start, end) = switch (budget.period) {
+        'week' => (
+            weekStart,
+            DateTime(weekStart.year, weekStart.month, weekStart.day + 7),
+          ),
+        'year' => (yearStart, DateTime(now.year + 1)),
+        _ => (monthStart, DateTime(now.year, now.month + 1)),
       };
       var spent = 0;
       for (final n in notes) {
         if (!isVisibleFinanceNote(n)) continue;
         for (final e in n.amounts) {
           if ((e.type ?? n.type) != 'expense') continue;
-          if (e.date.isBefore(start)) continue;
+          // Bounded on both sides: a bill dated next month is not this
+          // month's spend (the budget alerts already bound it this way).
+          if (e.date.isBefore(start) || !e.date.isBefore(end)) continue;
           if ((e.currency ?? n.currency ?? 'PHP') != budget.currency) continue;
           if (e.category != budget.category) continue;
           spent += e.amount;
@@ -1230,7 +1405,7 @@ class _HomeScreenState extends State<HomeScreen>
       if (_sortDesc) {
         return b.updatedAt.compareTo(a.updatedAt);
       }
-      return a.title.compareTo(b.title);
+      return a.title.toLowerCase().compareTo(b.title.toLowerCase());
     });
 
     return filtered;
@@ -1246,7 +1421,24 @@ class _HomeScreenState extends State<HomeScreen>
 
   Note? get _currentNote => _noteById(_currentNoteId);
 
+  /// Undo for archive/trash puts back exactly what was there: an archived
+  /// note trashed and restored used to land in Notes, and every undo counted
+  /// as a fresh edit (reordering Recent and feeding the writing streak).
+  VoidCallback _undoTo(Note note) {
+    final wasArchived = note.isArchived;
+    final wasDeleted = note.isDeleted;
+    final updatedAt = note.updatedAt;
+    return () {
+      note.isArchived = wasArchived;
+      note.isDeleted = wasDeleted;
+      note.updatedAt = updatedAt;
+      _persistNow();
+      if (mounted) setState(() {});
+    };
+  }
+
   void _archive(Note note) {
+    final undo = _undoTo(note);
     note.isArchived = true;
     note.updatedAt = DateTime.now();
     if (_currentNoteId == note.id) {
@@ -1255,18 +1447,20 @@ class _HomeScreenState extends State<HomeScreen>
     }
     _persistNow();
     setState(() {});
-    _showSnackBar('Archived', onUndo: () => _restore(note));
+    _showSnackBar('Archived', onUndo: undo);
   }
 
   void _togglePin(Note note) {
+    // Not an edit: bumping updatedAt moved the note under "Today", to the
+    // top of Recent, and counted toward the writing streak.
     note.isPinned = !note.isPinned;
-    note.updatedAt = DateTime.now();
     _persistNow();
     setState(() {});
     _showSnackBar(note.isPinned ? 'Pinned' : 'Unpinned');
   }
 
   void _trash(Note note) {
+    final undo = _undoTo(note);
     note.isDeleted = true;
     note.updatedAt = DateTime.now();
     if (_currentNoteId == note.id) {
@@ -1275,7 +1469,7 @@ class _HomeScreenState extends State<HomeScreen>
     }
     _persistNow();
     setState(() {});
-    _showSnackBar('Moved to trash', onUndo: () => _restore(note));
+    _showSnackBar('Moved to trash', onUndo: undo);
   }
 
   void _restore(Note note) {
@@ -1322,8 +1516,11 @@ class _HomeScreenState extends State<HomeScreen>
     _showSnackBar(
       'Deleted permanently',
       onUndo: () {
+        if (notes.any((n) => n.id == note.id)) return;
         setState(() {
-          notes.insert(index, note);
+          // The list may have shrunk since (Empty trash inside the undo
+          // window): a stale index threw a RangeError and lost the note.
+          notes.insert(index.clamp(0, notes.length), note);
           note.isArchived = wasArchived;
           note.isDeleted = wasDeleted;
         });
@@ -1499,7 +1696,26 @@ class _HomeScreenState extends State<HomeScreen>
       onReplayIntro: _showOnboardingFlow,
       onNotificationsChanged: () => _syncNotifications(checkBudgets: true),
       onRemoveSamples: _hasSampleData ? _removeSampleData : null,
+      displayName: _displayName,
+      onEditName: _editDisplayName,
     );
+  }
+
+  /// "What should we call you?" — from Settings, or by tapping the greeting.
+  Future<void> _editDisplayName() async {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (_) => _NameDialog(initial: _displayName),
+    );
+    if (result == null || !mounted) return;
+    final name = result.trim();
+    setState(() => _displayName = name.isEmpty ? null : name);
+    final prefs = await SharedPreferences.getInstance();
+    if (name.isEmpty) {
+      await prefs.remove(_displayNameKey);
+    } else {
+      await prefs.setString(_displayNameKey, name);
+    }
   }
 
   bool get _hasSampleData =>
@@ -1509,16 +1725,50 @@ class _HomeScreenState extends State<HomeScreen>
       );
 
   void _removeSampleData({bool notify = true}) {
+    final previousNotes = List<Note>.of(notes);
+    final previousAmounts = {
+      for (final n in notes) n.id: List<MoneyEntry>.of(n.amounts),
+    };
+    final previousBudgets = _budgets;
     setState(() {
-      notes = notes.where((n) => !n.id.endsWith('_finance')).toList();
       for (final n in notes) {
         n.amounts.removeWhere((e) => e.isDemo);
       }
+      // The sample ledger is offered as a quick-add destination, so it can
+      // hold the user's own entries: drop the note only once nothing real is
+      // left in it (it used to go wholesale, real entries included).
+      notes = notes
+          .where((n) => !n.id.endsWith('_finance') || n.amounts.isNotEmpty)
+          .toList();
       _budgets = _budgets.where((b) => !b.isDemo).toList();
     });
     _persistNow();
     _storage.saveBudgets(_budgets);
-    if (notify) _showSnackBar('Sample finance data removed');
+    if (!notify) return;
+    _showSnackBar(
+      'Sample finance data removed',
+      onUndo: () {
+        if (!mounted) return;
+        // Put back only what was removed, so anything created inside the
+        // undo window survives.
+        setState(() {
+          for (final n in previousNotes) {
+            if (!notes.any((x) => x.id == n.id)) notes.add(n);
+            final kept = n.amounts.map((e) => e.id).toSet();
+            n.amounts.addAll(
+              (previousAmounts[n.id] ?? const <MoneyEntry>[])
+                  .where((e) => !kept.contains(e.id)),
+            );
+          }
+          _budgets = [
+            ..._budgets,
+            ...previousBudgets.where((b) => !_budgets.any((x) => x.id == b.id)),
+          ];
+        });
+        _persistNow();
+        _storage.saveBudgets(_budgets);
+      },
+    );
   }
 
   void _showOnboardingFlow() {
@@ -1546,6 +1796,7 @@ class _HomeScreenState extends State<HomeScreen>
   void _selectNote(String id) {
     final note = _noteById(id);
     if (note == null) return;
+    _dockCollapsed = false;
     note.viewedAt = DateTime.now();
     _persist();
     setState(() {
@@ -1561,7 +1812,7 @@ class _HomeScreenState extends State<HomeScreen>
         _activeFilter = 'notes';
         _currentTab = 'notes';
       }
-      if (width >= 1200) {
+      if (width >= 1200 && !_contextPanelDismissed) {
         _contextPanelOpen = true;
       }
     });
@@ -1572,6 +1823,8 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _createNote() {
+    // Ctrl/Cmd+N bubbles past the open palette; don't create behind it.
+    if (_commandPaletteOpen) return;
     final id = generateId('n');
     final note = Note(
       id: id,
@@ -1644,11 +1897,65 @@ class _HomeScreenState extends State<HomeScreen>
     _persist();
   }
 
+  /// Keeps today's finished-task count in step with ticks and unticks.
+  void _countDone(bool nowDone) {
+    final today = localEpochDay(DateTime.now());
+    if (today != _doneTodayDay) {
+      _doneTodayDay = today;
+      _doneToday = 0;
+    }
+    _doneToday = (_doneToday + (nowDone ? 1 : -1)).clamp(0, 9999);
+    final value = '$_doneTodayDay:$_doneToday';
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setString(_doneTodayKey, value))
+          .catchError((_) => false),
+    );
+  }
+
+  int get _doneTodayNow =>
+      _doneTodayDay == localEpochDay(DateTime.now()) ? _doneToday : 0;
+
+  /// One older page brought back each day — rediscovery, not a feed. Only
+  /// prose pages with something to read, untouched for a week; the pick is
+  /// stable for the day (seeded by the date) so Home doesn't reshuffle.
+  Note? _resurfaceNote(DateTime now) {
+    final today = localEpochDay(now);
+    if (_resurfaceHiddenDay == today) return null;
+    final cutoff = now.subtract(const Duration(days: 7));
+    final pool = notes
+        .where((n) =>
+            !n.isArchived &&
+            !n.isDeleted &&
+            !isSeedNote(n) &&
+            n.type != 'todo' &&
+            !isFinanceNote(n) &&
+            n.updatedAt.isBefore(cutoff) &&
+            _homeContentPreview(n.content).length >= 30)
+        .toList()
+      ..sort((a, b) => a.id.compareTo(b.id));
+    if (pool.isEmpty) return null;
+    return pool[today % pool.length];
+  }
+
+  void _hideResurfaceToday() {
+    final today = localEpochDay(DateTime.now());
+    setState(() => _resurfaceHiddenDay = today);
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setInt(_resurfaceHiddenKey, today))
+          .catchError((_) => false),
+    );
+  }
+
   void _toggleChecklistItem(Note note, int lineIndex, bool checked) {
     final lines = note.content.split('\n');
     if (lineIndex < 0 || lineIndex >= lines.length) return;
     final marker = RegExp(r'\[[ xX]\]');
-    if (!marker.hasMatch(lines[lineIndex])) return;
+    final current = marker.firstMatch(lines[lineIndex]);
+    if (current == null) return;
+    final wasDone = current.group(0) != '[ ]';
+    if (wasDone != checked) _countDone(checked);
     lines[lineIndex] = lines[lineIndex].replaceFirst(
       marker,
       checked ? '[x]' : '[ ]',
@@ -1736,6 +2043,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   void _setFilter(String filter) {
     setState(() {
+      _dockCollapsed = false;
       _activeFilter = filter;
       _currentNoteId = null;
       _searchQuery = '';
@@ -1753,8 +2061,24 @@ class _HomeScreenState extends State<HomeScreen>
     });
   }
 
+  bool _onMobileScroll(ScrollUpdateNotification n) {
+    if (n.metrics.axis != Axis.vertical) return false;
+    final delta = n.scrollDelta ?? 0;
+    final atTop = n.metrics.pixels <= n.metrics.minScrollExtent + 8;
+    final collapse = atTop
+        ? false
+        : delta > 6
+            ? true
+            : delta < -6
+                ? false
+                : _dockCollapsed;
+    if (collapse != _dockCollapsed) setState(() => _dockCollapsed = collapse);
+    return false;
+  }
+
   void _onTabChanged(String tab) {
     setState(() {
+      _dockCollapsed = false;
       _currentTab = tab;
       _showEditor = false;
       _searchQuery = '';
@@ -1782,15 +2106,25 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _closeEditor() {
-    setState(() => _showEditor = false);
+    setState(() {
+      _showEditor = false;
+      _dockCollapsed = false;
+    });
   }
 
   void _togglePreview() {
     setState(() => _previewMode = !_previewMode);
   }
 
+  /// Set when the user closes the context panel; selecting another note
+  /// then leaves it closed instead of popping it back open.
+  bool _contextPanelDismissed = false;
+
   void _toggleContextPanel() {
-    setState(() => _contextPanelOpen = !_contextPanelOpen);
+    setState(() {
+      _contextPanelOpen = !_contextPanelOpen;
+      _contextPanelDismissed = !_contextPanelOpen;
+    });
   }
 
   void _openCommandPalette() {
@@ -1897,13 +2231,17 @@ class _HomeScreenState extends State<HomeScreen>
     ];
   }
 
-  /// Recent pages as palette results so the top-right Search actually finds
-  /// notes — matched on title and content via the palette's haystack.
+  /// Pages as palette results so the top-right Search actually finds notes —
+  /// matched on title and content via the palette's haystack. The 40 most
+  /// recent are listed up front; every other page is search-only (it used to
+  /// be unfindable: the palette is the app's only search).
   List<CommandPaletteAction> _noteSearchActions() {
     final candidates =
         notes.where((n) => !n.isArchived && !n.isDeleted).toList()
           ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    return candidates.take(40).map((note) {
+    var rank = 0;
+    return candidates.map((note) {
+      final searchOnly = rank++ >= 40;
       final icon = note.type == 'todo'
           ? Icons.check_circle_outline
           : isFinanceNote(note)
@@ -1921,6 +2259,7 @@ class _HomeScreenState extends State<HomeScreen>
         // Full-content haystack so Ctrl+K finds pages by body text, not
         // just by title/preview.
         searchText: '${note.title} ${note.content}',
+        searchOnly: searchOnly,
       );
     }).toList();
   }
@@ -2033,12 +2372,6 @@ class _HomeScreenState extends State<HomeScreen>
         SingleActivator(LogicalKeyboardKey.keyK, meta: true):
             _openCommandPalette,
         SingleActivator(LogicalKeyboardKey.escape): _closeEditor,
-        // Part 4.2: bare E/I are finance-tab-only and self-guard against text
-        // fields, so they never swallow typing in a note.
-        SingleActivator(LogicalKeyboardKey.keyE):
-            () => _financeShortcut('expense'),
-        SingleActivator(LogicalKeyboardKey.keyI):
-            () => _financeShortcut('income'),
       },
       child: Stack(
         children: [
@@ -2115,7 +2448,8 @@ class _HomeScreenState extends State<HomeScreen>
       onSearchTap: _openCommandPalette,
       onHome: () => _setFilter('home'),
       onSection: () => _setFilter(_activeFilter),
-      onMenu: isMobile ? () => _scaffoldKey.currentState?.openDrawer() : null,
+      // Phones navigate from the dock (swipe up); no corner hamburger.
+      onMenu: null,
       onOpenCommandPalette: _openCommandPalette,
     );
   }
@@ -2153,7 +2487,8 @@ class _HomeScreenState extends State<HomeScreen>
   Widget _buildDesktop() {
     final screenWidth = MediaQuery.of(context).size.width;
     final sidebarOccupied = _sidebarState == 'expanded' ? 232.0 : 48.0;
-    final canShowContext = screenWidth >= 1200 && _currentNote != null;
+    final canShowContext =
+        screenWidth >= 1200 && _currentNote != null && _showEditor;
     final showContext = canShowContext && _contextPanelOpen;
     final contextWidth = showContext ? 280.0 : 0.0;
     final remaining = screenWidth - sidebarOccupied - contextWidth;
@@ -2183,6 +2518,9 @@ class _HomeScreenState extends State<HomeScreen>
                   tagCounts: _tagCounts,
                   pinnedNotes: _pinnedNotes,
                   onNoteSelected: _selectNote,
+                  onSearch: _openCommandPalette,
+                  onCreate: _openTemplatePicker,
+                  activeTag: _activeTag,
                 ),
                 Expanded(
                   child: Column(
@@ -2212,7 +2550,9 @@ class _HomeScreenState extends State<HomeScreen>
                                   if (!_hideFinanceListPane)
                                   SizedBox(
                                     width: noteListW,
-                                    child: NoteList(
+                                    child: _activeFilter == 'tasks'
+                                        ? _buildTasksView()
+                                        : NoteList(
                                       notes: _filteredNotes,
                                       currentNoteId: _currentNoteId,
                                       onSelectNote: _selectNote,
@@ -2365,48 +2705,30 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildMobile() {
+    // Android back unwinds the app before leaving it: search palette, then
+    // the open note, then back to Home from any other tab or filter (Trash,
+    // a tag, ...). Previously back exited straight from all of those.
+    final atRoot = _activeFilter == 'home' && _currentTab == 'home';
     return PopScope(
-      canPop: !_showEditor,
+      canPop: !_commandPaletteOpen && !_showEditor && atRoot,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _closeEditor();
+        if (didPop) return;
+        if (_commandPaletteOpen) {
+          _closeCommandPalette();
+        } else if (_showEditor) {
+          _closeEditor();
+        } else {
+          _onTabChanged('home');
+        }
       },
       child: Scaffold(
         key: _scaffoldKey,
-        drawer: SizedBox(
-          width: 280,
-          child: Drawer(
-            child: Material(
-              color: context.colors.sidebarBg,
-              child: SafeArea(
-                child: Sidebar(
-                  activeFilter: _activeFilter,
-                  onFilterChanged: (f) {
-                    _setFilter(f);
-                    Navigator.pop(context);
-                  },
-                  sidebarState: 'expanded',
-                  onCollapse: () => Navigator.pop(context),
-                  onTagFilter: (tag) {
-                    _onTagFilter(tag);
-                    Navigator.pop(context);
-                  },
-                  onSettings: () {
-                    Navigator.pop(context);
-                    _openSettings();
-                  },
-                  counts: _counts,
-                  allTags: _allTags,
-                  tagCounts: _tagCounts,
-                  pinnedNotes: _pinnedNotes,
-                  onNoteSelected: (id) {
-                    _selectNote(id);
-                    Navigator.pop(context);
-                  },
-                ),
-              ),
-            ),
-          ),
-        ),
+        // Pages scroll under the floating glass dock; Scaffold reports the
+        // dock's height as bottom padding so lists can clear it.
+        // ...but not while the keyboard is up: the dock's height would then
+        // count as visible body behind the keyboard and fields near the
+        // bottom would not scroll into view.
+        extendBody: MediaQuery.viewInsetsOf(context).bottom == 0,
         body: AnimatedSwitcher(
           duration: AppMotion.duration(context, AppMotion.page),
           switchInCurve: AppMotion.decelerate,
@@ -2427,7 +2749,12 @@ class _HomeScreenState extends State<HomeScreen>
                       child: Column(
                         children: [
                           _buildMobileMenuBar(),
-                          Expanded(child: _buildMobileContent()),
+                          Expanded(
+                            child: NotificationListener<ScrollUpdateNotification>(
+                              onNotification: _onMobileScroll,
+                              child: _buildMobileContent(),
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -2439,10 +2766,19 @@ class _HomeScreenState extends State<HomeScreen>
           curve: AppMotion.emphasized,
           child: _showEditor
               ? const SizedBox.shrink()
-              : MobileNav(
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_showDockHint) _buildDockHint(),
+                    MobileNav(
                   currentTab: _currentTab,
                   onTabChanged: _onTabChanged,
                   onCreate: _onDockCreate,
+                  collapsed: _dockCollapsed,
+                  onExpand: () => setState(() => _dockCollapsed = false),
+                  onOpenNavigation: _openWorkspaceSheet,
+                ),
+                  ],
                 ),
         ),
       ),
@@ -2520,7 +2856,10 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                 ),
-                if (_currentNote == null || !isFinanceNote(_currentNote!))
+                // Preview is a prose concept: lists and ledgers have none.
+                if (_currentNote == null ||
+                    (!isFinanceNote(_currentNote!) &&
+                        _currentNote!.type != 'todo'))
                   Padding(
                     padding: const EdgeInsets.only(right: 12),
                     child: InkWell(
@@ -2595,8 +2934,126 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  /// Phone navigation beyond the dock: a bottom sheet, not a side drawer.
+  void _dismissDockHint() {
+    if (!_showDockHint) return;
+    setState(() => _showDockHint = false);
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setBool(_dockHintKey, true))
+          .catchError((_) => false),
+    );
+  }
+
+  Widget _buildDockHint() {
+    final c = context.colors;
+    return Padding(
+      // Centred over the tab capsule (which sits left of centre, beside the
+      // Create key), so the tip points at the grabber it describes.
+      padding: const EdgeInsets.only(bottom: 2, right: 68),
+      child: Center(
+        child: ConstrainedBox(
+          // Never wider than the screen: large text shrinks it to an
+          // ellipsis instead of overflowing.
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.sizeOf(context).width - 32,
+          ),
+          child: Material(
+          color: c.surface,
+          shape: StadiumBorder(side: BorderSide(color: c.border)),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: InkWell(
+                onTap: _openWorkspaceSheet,
+                customBorder: const StadiumBorder(),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 8, 6, 8),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.swipe_up_alt_rounded, size: 16, color: c.muted),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          'Swipe up for more',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: AppType.t12, color: c.fg),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              ),
+              IconButton(
+                tooltip: 'Dismiss tip',
+                onPressed: _dismissDockHint,
+                visualDensity: VisualDensity.compact,
+                icon: Icon(Icons.close_rounded, size: 16, color: c.muted),
+              ),
+            ],
+          ),
+        ),
+        ),
+      ),
+    );
+  }
+
+  void _openWorkspaceSheet() {
+    _dismissDockHint();
+    WorkspaceSheet.show(
+      context,
+      activeFilter: _activeFilter,
+      activeTag: _activeTag,
+      counts: _counts,
+      pinnedNotes: _pinnedNotes,
+      tags: _allTags,
+      tagCounts: _tagCounts,
+      onFilter: _setFilter,
+      onTag: _onTagFilter,
+      onNote: _selectNote,
+      onSettings: _openSettings,
+    );
+  }
+
+  /// Tasks tab: every list's open tasks in one grouped, tickable view.
+  Widget _buildTasksView() {
+    return TasksView(
+      lists: _filteredNotes,
+      onToggle: _toggleChecklistItem,
+      onOpenList: (note) => _selectNote(note.id),
+      onAddTask: _appendTask,
+      onNewList: () => _createNoteFromTemplate(
+        getNoteTemplates().firstWhere((t) => t.type == 'todo'),
+      ),
+    );
+  }
+
+  /// Appends an open checklist line to [note], keeping lines separate even
+  /// when its content does not end in a newline.
+  void _appendTask(Note note, String text) {
+    final line = '- [ ] ${text.replaceAll('\n', ' ').trim()}';
+    final current = note.content;
+    setState(() {
+      note.content = current.isEmpty || current.endsWith('\n')
+          ? '$current$line\n'
+          : '$current\n$line\n';
+      note.updatedAt = DateTime.now();
+    });
+    _persistNow();
+  }
+
   Widget _buildNoteListMobile() {
+    if (_activeFilter == 'tasks') {
+      return SafeArea(bottom: false, child: _buildTasksView());
+    }
+    // bottom: false — the list runs under the glass dock and clears it with
+    // its own end padding (NoteList._listPadding).
     return SafeArea(
+      bottom: false,
       child: NoteList(
         notes: _filteredNotes,
         currentNoteId: _currentNoteId,
@@ -2670,29 +3127,62 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  /// Home, built for focus: a greeting, then one thing per block — say
+  /// what's on your mind, the one next task, the one note to return to, one
+  /// line of money. A single reading-width column on every screen size, so
+  /// the eye never has to choose between panels.
   Widget _buildHomeScreen() {
     final isDesktop = MediaQuery.of(context).size.width >= 1024;
-    final hasPins = _pinnedNotes.isNotEmpty;
-    final jumpRows = _jumpBackInRows();
+    final now = HomeScreen.clock();
+    final continueNote = _continueNote();
 
-    final groups = <Widget>[
-      _buildHomeIntro(),
+    final blocks = <Widget>[
+      _buildHomeIntro(now),
+      HomeCaptureBar(onSaveNote: _captureNote, onAddTask: _captureTask),
       if (notes.isEmpty) _buildHomeEmptyCta(),
-      if (hasPins) _homeSection('PINNED', _buildPinnedHome()),
-      if (jumpRows.isNotEmpty)
-        _homeSection('JUMP BACK IN', _buildJumpBackIn(jumpRows)),
+      // Evening with nothing open: the empty Next up gives way to one
+      // optional prompt to set up tomorrow (the subline already says the
+      // plate is clear — two "nothing here" cards would just repeat it).
+      if (now.hour >= 18 && _upNextItems().isEmpty)
+        HomeWindDown(onAdd: _captureTask)
+      else
+        _buildNextUp(),
+      if (continueNote != null)
+        HomeContinueCard(
+          note: continueNote,
+          icon: _noteIcon(continueNote),
+          subtitle: _continueSubtitle(continueNote),
+          when: _relativeTimeLabel(continueNote.updatedAt),
+          onOpen: () => Future.microtask(() => _selectNote(continueNote.id)),
+        ),
+      if (_resurfaceNote(now) case final old?)
+        HomeResurfaceCard(
+          note: old,
+          preview: _homeContentPreview(old.content),
+          age: _ageLabel(old.updatedAt, now),
+          onOpen: () => Future.microtask(() => _selectNote(old.id)),
+          onDismiss: _hideResurfaceToday,
+        ),
+      _buildHomeMoney(now),
     ];
+
     final body = SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 24, 16, 80),
+      padding: EdgeInsets.fromLTRB(
+        20,
+        isDesktop ? 56 : 28,
+        20,
+        // Clears the floating dock, which the page scrolls under.
+        32 + MediaQuery.paddingOf(context).bottom,
+      ),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 960),
+          constraints: const BoxConstraints(maxWidth: 620),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              for (var i = 0; i < groups.length; i++) ...[
-                if (i > 0) const SizedBox(height: 24),
-                _stagger(i, groups[i], lastIndex: groups.length - 1),
+              for (var i = 0; i < blocks.length; i++) ...[
+                if (i > 0) SizedBox(height: i == 1 ? 24 : 32),
+                blocks[i],
               ],
             ],
           ),
@@ -2702,7 +3192,157 @@ class _HomeScreenState extends State<HomeScreen>
 
     return Container(
       color: context.colors.listBg,
-      child: isDesktop ? body : SafeArea(child: body),
+      child: isDesktop ? body : SafeArea(bottom: false, child: body),
+    );
+  }
+
+  /// Every open checklist line across lists, freshest list first.
+  List<UpNextItem> _upNextItems() {
+    final lists = notes
+        .where((n) => !n.isArchived && !n.isDeleted && !isSeedNote(n))
+        .toList()
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return [
+      for (final note in lists)
+        for (final item in parseChecklist(note.content))
+          if (!item.done && item.text.isNotEmpty)
+            UpNextItem(
+              note: note,
+              lineIndex: item.lineIndex,
+              text: stripInlineMarkdown(item.text),
+            ),
+    ];
+  }
+
+  Widget _buildNextUp() {
+    return HomeNextUp(
+      items: _upNextItems(),
+      doneToday: _doneTodayNow,
+      onComplete: (item) {
+        _toggleChecklistItem(item.note, item.lineIndex, true);
+        _showSnackBar(
+          'Done: ${item.text}',
+          // By content: the list may have changed since (lines added or
+          // removed above it), so the old index could untick another task.
+          onUndo: () => _toggleChecklistByContent(
+            item.note.id,
+            item.text,
+            expectedDone: true,
+          ),
+        );
+      },
+      onOpen: (item) => _selectNote(item.note.id),
+      onViewAll: () => _onTabChanged('tasks'),
+    );
+  }
+
+  Widget _buildHomeMoney(DateTime now) {
+    final (hasData, spent, _, currency, _) = _monthFinanceTotals();
+    return HomeMoneyLine(
+      monthLabel: monthName(now.month),
+      hasData: hasData,
+      currency: currency,
+      spent: spent,
+      onOpen: () => _onTabChanged('finance'),
+    );
+  }
+
+  /// The page most recently written in. Task lists and finance ledgers are
+  /// left out — Next Up and the money line already cover them, and showing
+  /// the same list twice splits attention. Guides are reference, not work.
+  Note? _continueNote() {
+    Note? best;
+    for (final n in notes) {
+      if (n.isArchived || n.isDeleted || n.tags.contains('guide')) continue;
+      if (n.type == 'todo' || isFinanceNote(n)) continue;
+      if (best == null || n.updatedAt.isAfter(best.updatedAt)) best = n;
+    }
+    return best;
+  }
+
+  IconData _noteIcon(Note note) => note.type == 'todo'
+      ? Icons.check_circle_outline
+      : isFinanceNote(note)
+          ? Icons.account_balance_wallet_outlined
+          : Icons.article_outlined;
+
+  /// Home capture -> a new note. A short single line becomes the title; a
+  /// longer thought keeps its full text as the body under a trimmed title.
+  void _captureNote(String text) {
+    final body = text.trim();
+    final lines = body.split('\n');
+    final first = lines.first.trim();
+    final single = lines.length == 1 && first.length <= 60;
+    String title = first;
+    if (first.length > 60) {
+      final cut = first.lastIndexOf(' ', 57);
+      title = '${first.substring(0, cut > 20 ? cut : 57)}…';
+    }
+    final note = Note(
+      id: generateId('n'),
+      title: title,
+      content: single ? '' : body,
+      tags: [],
+    );
+    setState(() => notes.insert(0, note));
+    _persistNow();
+    _showSnackBar(
+      'Saved to Notes',
+      onUndo: () {
+        setState(() => notes.removeWhere((n) => n.id == note.id));
+        _persistNow();
+      },
+    );
+  }
+
+  /// Home capture -> a task on the Inbox list (created on first use).
+  void _captureTask(String text) {
+    Note? inbox;
+    for (final n in notes) {
+      if (n.type == 'todo' &&
+          n.title == 'Inbox' &&
+          !n.isArchived &&
+          !n.isDeleted) {
+        inbox = n;
+        break;
+      }
+    }
+    final created = inbox == null;
+    final target = inbox ??
+        Note(
+          id: generateId('n'),
+          title: 'Inbox',
+          content: '',
+          tags: ['todo'],
+          type: 'todo',
+        );
+    final previous = target.content;
+    final line = '- [ ] ${text.replaceAll('\n', ' ').trim()}';
+    setState(() {
+      if (created) notes.insert(0, target);
+      target.content = previous.isEmpty || previous.endsWith('\n')
+          ? '$previous$line\n'
+          : '$previous\n$line\n';
+      target.updatedAt = DateTime.now();
+    });
+    _persistNow();
+    _showSnackBar(
+      'Added to Inbox',
+      // Undo removes only the line this capture added — restoring a
+      // snapshot would also wipe tasks added or ticked since.
+      onUndo: () {
+        setState(() {
+          final lines = target.content.split('\n');
+          final i = lines.lastIndexOf(line);
+          if (i != -1) lines.removeAt(i);
+          target.content = lines.join('\n');
+          final leftover = target.content.trim().isEmpty;
+          if (created && leftover) {
+            notes.removeWhere((n) => n.id == target.id);
+          }
+        });
+        _persistNow();
+      },
     );
   }
 
@@ -2749,315 +3389,87 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _homeSection(String title, Widget content) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildSectionTitle(title),
-        const SizedBox(height: 8),
-        content,
-      ],
-    );
-  }
-
-  /// Home sections rise in once per app start, 45 ms apart; after the last
-  /// section lands, the plain children render so revisiting Home never
-  /// replays the intro.
-  Widget _stagger(int index, Widget child, {required int lastIndex}) {
-    if (_homeAnimated || MediaQuery.disableAnimationsOf(context)) return child;
-    final delayMs = 45.0 * index;
-    final total = AppMotion.slow.inMilliseconds + delayMs;
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
-      duration: AppMotion.duration(
-        context,
-        Duration(milliseconds: total.round()),
-      ),
-      curve: Interval(delayMs / total, 1.0, curve: AppMotion.decelerate),
-      onEnd: () {
-        if (mounted && index == lastIndex && !_homeAnimated) {
-          setState(() => _homeAnimated = true);
-        }
-      },
-      // translate-only: no opacity fade, so a frozen frame can never leave
-      // the home content invisible.
-      builder: (context, t, _) => Transform.translate(
-        offset: Offset(0, 16 * (1 - t)),
-        child: child,
-      ),
-    );
-  }
-
   Widget _buildMobileMenuBar() {
     return _buildWorkspaceHeader(isMobile: true);
   }
 
-  Widget _buildHomeIntro() {
-    final now = DateTime.now();
+  /// Greeting and the date — nothing else competes with the first glance.
+  /// "3 weeks ago", "2 months ago" — how long a page has been resting.
+  static String _ageLabel(DateTime then, DateTime now) {
+    final days = DateTime.utc(now.year, now.month, now.day)
+        .difference(DateTime.utc(then.year, then.month, then.day))
+        .inDays;
+    if (days < 14) return '$days days ago';
+    if (days < 60) return '${days ~/ 7} weeks ago';
+    if (days < 365) return '${days ~/ 30} months ago';
+    final years = days ~/ 365;
+    return years == 1 ? 'a year ago' : '$years years ago';
+  }
+
+  /// One sentence that knows the day: what you've finished, what's waiting,
+  /// or that there's room to write. Encouraging, never a nag.
+  String _homeSubline() {
+    final done = _doneTodayNow;
+    final open = _upNextItems().length;
+    String tasks(int n) => n == 1 ? '1 task' : '$n tasks';
+    if (done > 0 && open == 0) {
+      return 'You finished ${tasks(done)} today. Nothing else waiting.';
+    }
+    if (done > 0) return '${tasks(done)} done today. Keep the momentum.';
+    if (open == 0) return 'Nothing on your plate. A good moment to write.';
+    if (open == 1) return 'One thing waiting for you.';
+    return '$open things waiting. One at a time.';
+  }
+
+  /// Greeting, date, and one line about the day — nothing else competes
+  /// with the first glance.
+  Widget _buildHomeIntro(DateTime now) {
     final greeting = now.hour < 12
         ? 'Good morning'
         : now.hour < 18
-        ? 'Good afternoon'
-        : 'Good evening';
+            ? 'Good afternoon'
+            : 'Good evening';
     final c = context.colors;
-    final isDesktop = MediaQuery.of(context).size.width >= 1024;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                greeting,
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.5,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.s4),
-              _buildHomeMetaLine(now),
-            ],
-          ),
-        ),
-        if (isDesktop) ...[
-          const SizedBox(width: 12),
-          Semantics(
-            label: 'Create',
-            button: true,
-            child: InkWell(
-              onTap: _openTemplatePicker,
-              borderRadius: BorderRadius.circular(AppRadius.panel),
-              child: Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: c.accent,
-                  borderRadius: BorderRadius.circular(AppRadius.panel),
-                ),
-                child: Icon(Icons.add, size: 18, color: c.onAccent),
-              ),
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  /// One quiet text line under the greeting: short date · month spend ·
-  /// open tasks. The old TODAY card and THIS MONTH cards fold into this
-  /// line — numbers bold on foreground, connective text muted.
-  Widget _buildHomeMetaLine(DateTime now) {
-    final c = context.colors;
-    final (hasData, spent, _, currency, _) = _monthFinanceTotals();
-    final openTasks = openTaskCount(notes);
-    final muted = TextStyle(fontSize: AppType.t11, color: c.muted);
-    final bold = TextStyle(
-      fontSize: AppType.t11,
-      fontWeight: FontWeight.w600,
-      color: c.fg,
-    );
-
-    final spans = <InlineSpan>[TextSpan(text: dayLabel(now), style: muted)];
-    if (hasData) {
-      final major = minorToMajor(spent, currency);
-      final amount = formatNumber(
-        major,
-        decimals: major == major.roundToDouble() ? 0 : currencyDecimals(currency),
-      );
-      spans.addAll([
-        TextSpan(text: '  ·  ', style: muted),
-        currencySpan(currency, bold),
-        TextSpan(text: amount, style: bold),
-        TextSpan(text: ' spent', style: muted),
-      ]);
-    }
-    spans.addAll([
-      TextSpan(text: '  ·  ', style: muted),
-      TextSpan(text: '$openTasks', style: bold),
-      TextSpan(
-        text: openTasks == 1 ? ' open task' : ' open tasks',
-        style: muted,
-      ),
-    ]);
-
-    return Text.rich(
-      TextSpan(children: spans),
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-    );
-  }
-
-  Widget _buildSectionTitle(String title) {
-    return Text(
-      title,
-      style: TextStyle(
-        fontSize: AppType.t12,
-        fontWeight: FontWeight.w500,
-        color: context.colors.muted,
-        letterSpacing: 0.08,
-      ),
-    );
-  }
-
-  /// Merged home list: the Continue heuristic picks (first finance, first
-  /// todo, first journal) lead, then the most recently updated pages fill
-  /// the rest — deduped by id, capped at 5 note rows.
-  List<(Note, IconData)> _jumpBackInRows() {
-    // Guides are reference material, not work in progress — exclude them
-    // the way the old Continue and Recent sections did.
-    final workingNotes =
-        notes
-            .where(
-              (n) => !n.isArchived && !n.isDeleted && !n.tags.contains('guide'),
-            )
-            .toList()
-          ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-
-    final rows = <(Note, IconData)>[];
-    final financeNote = workingNotes.cast<Note?>().firstWhere(
-      (n) => n != null && isFinanceNote(n),
-      orElse: () => null,
-    );
-    if (financeNote != null) {
-      rows.add((financeNote, Icons.account_balance_wallet_outlined));
-    }
-    final todoNote = workingNotes.cast<Note?>().firstWhere(
-      (n) => n!.type == 'todo' || n.title.toLowerCase().contains('todo'),
-      orElse: () => null,
-    );
-    if (todoNote != null && !rows.any((r) => r.$1.id == todoNote.id)) {
-      rows.add((todoNote, Icons.check_circle_outline));
-    }
-    final journalNote = workingNotes.cast<Note?>().firstWhere(
-      (n) => n!.title.toLowerCase().contains('journal'),
-      orElse: () => null,
-    );
-    if (journalNote != null && !rows.any((r) => r.$1.id == journalNote.id)) {
-      rows.add((journalNote, Icons.menu_book_outlined));
-    }
-    for (final note in workingNotes) {
-      if (rows.length >= 5) break;
-      if (rows.any((r) => r.$1.id == note.id)) continue;
-      rows.add((
-        note,
-        note.isPinned
-            ? Icons.push_pin_outlined
-            : note.type == 'todo'
-            ? Icons.check_circle_outline
-            : isFinanceNote(note)
-            ? Icons.account_balance_wallet_outlined
-            : Icons.article_outlined,
-      ));
-    }
-
-    return rows;
-  }
-
-  Widget _buildJumpBackIn(List<(Note, IconData)> rows) {
-    return Column(
-      children: [
-        ...rows.map(
-          (r) => _homeQuietRow(
-            icon: r.$2,
-            title: r.$1.title.isEmpty ? 'Untitled' : r.$1.title,
-            subtitle: _continueSubtitle(r.$1),
-            trailing: _relativeTimeLabel(r.$1.updatedAt),
-            onTap: () => Future.microtask(() => _selectNote(r.$1.id)),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _homeQuietRow({
-    required IconData icon,
-    required String title,
-    String? subtitle,
-    String? trailing,
-    Color? titleColor,
-    required VoidCallback onTap,
-  }) {
-    final c = context.colors;
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: c.border.withValues(alpha: 0.7)),
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 15, color: c.muted),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: AppType.t13_5,
-                      fontWeight: FontWeight.w500,
-                      color: titleColor ?? c.fg,
-                    ),
-                  ),
-                  if (subtitle != null && subtitle.isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    _previewLine(
-                      subtitle,
-                      TextStyle(fontSize: AppType.t11, color: c.muted),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            if (trailing != null) ...[
-              const SizedBox(width: 8),
-              Text(trailing, style: TextStyle(fontSize: AppType.t11, color: c.muted)),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  static final RegExp _leadingCurrencySymbol = RegExp(r'^[₱$€£¥₹]');
-
-  /// Renders a preview line that may start with a currency symbol. The UI
-  /// fonts have no ₱ glyph and named fallback families don't rescue it on
-  /// device, so the symbol gets its own span in the platform font — the same
-  /// approach as finance_utils.currencySpan.
-  Widget _previewLine(String text, TextStyle style) {
-    if (!_leadingCurrencySymbol.hasMatch(text)) {
-      return Text(
-        text,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: style,
-      );
-    }
-    return Text.rich(
-      TextSpan(
-        style: style,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          TextSpan(
-            text: text[0],
-            style: style.copyWith(
-              fontFamily: 'Roboto',
-              fontFamilyFallback: const ['Noto Sans', 'sans-serif'],
+          Text(
+            '${weekdayName(now.weekday)}, ${monthName(now.month)} ${now.day}',
+            style: TextStyle(
+              fontSize: AppType.t13_5,
+              fontWeight: FontWeight.w500,
+              color: c.muted,
             ),
           ),
-          TextSpan(text: text.substring(1)),
+          const SizedBox(height: 4),
+          Semantics(
+            button: true,
+            hint: _displayName == null ? 'Add your name' : 'Change your name',
+            child: GestureDetector(
+              onTap: _editDisplayName,
+              child: Text(
+                _displayName == null ? greeting : '$greeting, $_displayName',
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.8,
+                      color: c.fg,
+                    ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          AnimatedSwitcher(
+            duration: AppMotion.duration(context, AppMotion.base),
+            child: Text(
+              _homeSubline(),
+              key: ValueKey(_homeSubline()),
+              style: TextStyle(fontSize: AppType.t15, color: c.muted),
+            ),
+          ),
         ],
       ),
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
     );
   }
 
@@ -3072,20 +3484,30 @@ class _HomeScreenState extends State<HomeScreen>
       if (!counts.containsKey(dominant)) {
         dominant = counts.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
       }
-      var total = 0;
+      var income = 0;
+      var expense = 0;
       var count = 0;
       final others = <String>{};
       for (final e in note.amounts) {
         final cur = e.currency ?? note.currency ?? 'PHP';
         if (cur == dominant) {
-          total += e.amount;
+          // A monthly note holds both directions; adding them together
+          // showed ₱15,000 income + ₱180 spent as "₱15,180.00".
+          if ((e.type ?? note.type) == 'income') {
+            income += e.amount;
+          } else {
+            expense += e.amount;
+          }
           count++;
         } else {
           others.add(cur);
         }
       }
+      final amount = income > 0 && expense > 0
+          ? 'Net ${formatMinorAmount(income - expense, dominant)}'
+          : formatMinorAmount(income + expense, dominant);
       final excl = others.isEmpty ? '' : ' · excl. ${others.join(' · ')}';
-      return '${formatMinorAmount(total, dominant)} · $count '
+      return '$amount · $count '
           '${count == 1 ? 'entry' : 'entries'}$excl';
     }
     if (note.type == 'todo' || note.title.toLowerCase().contains('todo')) {
@@ -3101,49 +3523,6 @@ class _HomeScreenState extends State<HomeScreen>
     }
     final preview = _homeContentPreview(note.content);
     return preview.isEmpty ? null : preview;
-  }
-
-  Widget _buildPinnedHome() {
-    final pinned = _pinnedNotes.toList();
-    final c = context.colors;
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: pinned.take(8).map((note) {
-        return InkWell(
-          onTap: () => Future.microtask(() => _selectNote(note.id)),
-          borderRadius: BorderRadius.circular(AppRadius.panel),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: c.surface,
-              borderRadius: BorderRadius.circular(AppRadius.panel),
-              border: Border.all(color: c.border),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.push_pin, size: 11, color: c.accent),
-                const SizedBox(width: 6),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 160),
-                  child: Text(
-                    note.title.isEmpty ? 'Untitled' : note.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: AppType.t12,
-                      fontWeight: FontWeight.w500,
-                      color: c.fg,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      }).toList(),
-    );
   }
 
   /// Calendar-month finance totals for the home snapshot, scoped to the
@@ -3201,5 +3580,58 @@ class _HomeScreenState extends State<HomeScreen>
     if (diff.inHours < 24) return '${diff.inHours}h';
     if (diff.inDays < 7) return '${diff.inDays}d';
     return '${d.month}/${d.day}';
+  }
+}
+
+/// "What should we call you?" — owns its controller, so the field is only
+/// disposed after the dialog's closing animation has finished with it.
+class _NameDialog extends StatefulWidget {
+  final String? initial;
+
+  const _NameDialog({required this.initial});
+
+  @override
+  State<_NameDialog> createState() => _NameDialogState();
+}
+
+class _NameDialogState extends State<_NameDialog> {
+  late final TextEditingController _ctrl =
+      TextEditingController(text: widget.initial ?? '');
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('What should we call you?'),
+      content: TextField(
+        controller: _ctrl,
+        autofocus: true,
+        maxLength: 30,
+        textCapitalization: TextCapitalization.words,
+        textInputAction: TextInputAction.done,
+        decoration: const InputDecoration(hintText: 'Your first name'),
+        onSubmitted: (v) => Navigator.pop(context, v),
+      ),
+      actions: [
+        if (widget.initial != null)
+          TextButton(
+            onPressed: () => Navigator.pop(context, ''),
+            child: const Text('Remove'),
+          ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _ctrl.text),
+          child: const Text('Save'),
+        ),
+      ],
+    );
   }
 }

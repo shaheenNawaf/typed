@@ -11,8 +11,8 @@ import '../models/note.dart';
 /// index), completion state, and the RAW item text (display sites strip).
 typedef ChecklistItem = ({int lineIndex, bool done, String text});
 
-final RegExp _kCheckboxLine = RegExp(r'^\s*-\s+\[([ xX])\]\s+(.*)$');
-final RegExp _kHasCheckbox = RegExp(r'^\s*-\s+\[[ xX]\]', multiLine: true);
+final RegExp _kCheckboxLine = RegExp(r'^\s*[-*+]\s+\[([ xX])\]\s+(.*)$');
+final RegExp _kHasCheckbox = RegExp(r'^\s*[-*+]\s+\[[ xX]\]', multiLine: true);
 
 /// Parses every `- [ ]` / `- [x]` / `- [X]` line. An item with no text after
 /// the marker (fresh template line `- [ ] `) still parses, with empty text —
@@ -129,7 +129,7 @@ String plainProse(String content) {
     if (RegExp(r'^\s*\|.*$').hasMatch(raw)) continue;
     final line = stripInlineMarkdown(
       raw
-          .replaceAll(RegExp(r'^\s*-\s+\[[ xX]\]\s*'), '')
+          .replaceAll(RegExp(r'^\s*[-*+]\s+\[[ xX]\]\s*'), '')
           .replaceAll(RegExp(r'^#{1,6}\s+'), '')
           .replaceAll(RegExp(r'^\s*>\s+'), '')
           .replaceAll(RegExp(r'^\s*[-+*]\s+'), ''),
@@ -147,7 +147,7 @@ String plainProse(String content) {
 /// every surface shows the same words.
 String contentPreview(String content, {int maxChars = 120}) {
   var text = content
-      .replaceAll(RegExp(r'^\s*-\s+\[[ xX]\]\s*', multiLine: true), '')
+      .replaceAll(RegExp(r'^\s*[-*+]\s+\[[ xX]\]\s*', multiLine: true), '')
       .replaceAll(RegExp(r'^\s*---+\s*$', multiLine: true), '')
       .replaceAll(RegExp(r'^\s*\|.*$', multiLine: true), '')
       .replaceAll(RegExp(r'^#{1,6}\s+', multiLine: true), '')
@@ -182,7 +182,7 @@ String firstPreviewLine(String content) {
   }
   final line = first ?? (lines.isNotEmpty ? lines.first : '');
   var text = line
-      .replaceAll(RegExp(r'^\s*-\s+\[[ xX]\]\s*'), '')
+      .replaceAll(RegExp(r'^\s*[-*+]\s+\[[ xX]\]\s*'), '')
       .replaceAll(RegExp(r'^#{1,6}\s+'), '')
       .replaceAll(RegExp(r'^\s*[-+>]\s+'), '');
   text = stripInlineMarkdown(text);

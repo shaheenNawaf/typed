@@ -62,6 +62,11 @@ private class RecentNotesFactory(
         return RemoteViews(context.packageName, R.layout.widget_recent_item).apply {
             setTextViewText(R.id.recent_item_title, item.title)
             setTextViewText(R.id.recent_item_preview, item.preview)
+            // A blank second line left an empty gap under the title.
+            setViewVisibility(
+                R.id.recent_item_preview,
+                if (item.preview.isBlank()) android.view.View.GONE else android.view.View.VISIBLE,
+            )
             setOnClickFillInIntent(
                 R.id.recent_item_root,
                 WidgetHelper.openRowFillInIntent().putExtra(WidgetHelper.EXTRA_NOTE_ID, item.id),

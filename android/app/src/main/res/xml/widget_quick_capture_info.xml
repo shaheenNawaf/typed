@@ -9,5 +9,7 @@
     android:previewLayout="@layout/widget_quick_capture"
     android:previewImage="@mipmap/ic_launcher"
     android:description="@string/widget_quick_description"
-    android:resizeMode="none"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="110dp"
+    android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen" />

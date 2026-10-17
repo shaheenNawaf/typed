@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sample content for the widget picker previews only. Providers overwrite
+     every one of these on the first real update. -->
+<resources>
+    <string name="preview_finance_month" translatable="false">Net · Oct 2026</string>
+    <string name="preview_finance_balance" translatable="false">₱12,480.00</string>
+    <string name="preview_finance_income" translatable="false">In ₱18,000.00</string>
+    <string name="preview_finance_expense" translatable="false">Out ₱5,520.00</string>
+    <string name="preview_finance_budget" translatable="false">Food</string>
+    <string name="preview_finance_budget_amount" translatable="false">₱3,200.00 of ₱5,000.00</string>
+    <string name="preview_recent_1_title" translatable="false">Weekend plans</string>
+    <string name="preview_recent_1_body" translatable="false">Farmers market, then call Mom</string>
+    <string name="preview_recent_2_title" translatable="false">Reading list</string>
+    <string name="preview_recent_2_body" translatable="false">Three books to finish this month</string>
+    <string name="preview_recent_3_title" translatable="false">Finance — October 2026</string>
+    <string name="preview_recent_3_body" translatable="false">12 entries</string>
+    <string name="preview_todo_progress" translatable="false">1/4 done</string>
+    <string name="preview_todo_1" translatable="false">Pay the electric bill</string>
+    <string name="preview_todo_2" translatable="false">Book dentist appointment</string>
+    <string name="preview_todo_3" translatable="false">Buy milk and eggs</string>
+    <string name="preview_todo_4" translatable="false">Water the plants</string>
+</resources>

@@ -240,7 +240,7 @@ void main() {
     )));
     await tester.pump();
 
-    expect(find.text('Cat 1'), findsNWidgets(2));
+    expect(find.text('Cat 1'), findsOneWidget);
     expect(find.text('Cat 7'), findsNothing);
     expect(find.textContaining('See all 7 transactions'), findsOneWidget);
 
@@ -248,7 +248,7 @@ void main() {
     await tester.tap(find.textContaining('See all 7 transactions'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Cat 7'), findsNWidgets(2));
+    expect(find.text('Cat 7'), findsOneWidget);
     expect(find.text('Show less'), findsOneWidget);
   });
 
@@ -709,15 +709,15 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    // Collapsed: first five rows only. Each visible row renders its category
-    // TWICE (title when no note + subtitle), hence findsNWidgets(2).
-    expect(find.text('Cat 4'), findsNWidgets(2));
+    // Collapsed: first five rows only. A row without a note shows its
+    // category once (as the title; the subtitle no longer repeats it).
+    expect(find.text('Cat 4'), findsOneWidget);
     expect(find.text('Cat 5'), findsNothing);
     expect(find.text('View all 7'), findsOneWidget);
     expect(find.text('View all 7 transactions \u2193'), findsOneWidget);
     await tester.tap(find.text('View all 7 transactions \u2193'));
     await tester.pumpAndSettle();
-    expect(find.text('Cat 6'), findsNWidgets(2));
+    expect(find.text('Cat 6'), findsOneWidget);
     expect(find.text('Show fewer'), findsOneWidget);
     expect(find.text('Show fewer \u2191'), findsOneWidget);
     await tester.binding.setSurfaceSize(null);
