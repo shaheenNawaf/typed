@@ -245,4 +245,26 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('Edit as Markdown'), findsOneWidget);
   });
+
+  testWidgets('a task note with prose opens in the full editor, nothing hidden',
+      (tester) async {
+    await seed(
+      [todoNote(content: 'Plan the trip first.\n\n- [ ] Book flights\n')],
+      tab: 'notes',
+    );
+    await pumpHome(tester, surface: const Size(390, 844));
+    await openNote(tester, 'Shopping list');
+
+    // The checklist panel would only render the "- [ ]" line and drop the
+    // paragraph; the regular editor keeps every line.
+    expect(find.byKey(const ValueKey('checklist-add')), findsNothing);
+    expect(
+      find.byWidgetPredicate(
+        (w) =>
+            w is EditableText &&
+            w.controller.text.contains('Plan the trip first.'),
+      ),
+      findsOneWidget,
+    );
+  });
 }

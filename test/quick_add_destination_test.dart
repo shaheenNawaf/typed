@@ -183,8 +183,8 @@ void main() {
     await seed([seededFinanceNote()], tab: 'finance');
     await pumpHome(tester, surface: const Size(1400, 1400));
 
-    await tester.ensureVisible(find.text('Open ›'));
-    await tester.tap(find.text('Open ›'));
+    await tester.ensureVisible(find.textContaining('ledger lives in'));
+    await tester.tap(find.textContaining('ledger lives in'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pump(const Duration(milliseconds: 400));

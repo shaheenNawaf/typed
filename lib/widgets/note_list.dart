@@ -677,13 +677,14 @@ class _NoteListState extends State<NoteList> {
       ),
       child: Row(
         children: [
+          // Same caps label as Home and Finance sections.
           Text(
-            label,
+            label.toUpperCase(),
             style: TextStyle(
               fontSize: AppType.t11,
               fontWeight: FontWeight.w600,
               color: context.colors.muted,
-              letterSpacing: 0.08,
+              letterSpacing: 0.9,
               height: 1.2,
             ),
           ),

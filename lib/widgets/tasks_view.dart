@@ -17,6 +17,10 @@ class TasksView extends StatefulWidget {
   final void Function(Note note, String text) onAddTask;
   final VoidCallback onNewList;
 
+  /// Desktop, nothing open: the view owns the main canvas, so it sits on the
+  /// page background with Home's roomier top margin.
+  final bool fullCanvas;
+
   const TasksView({
     super.key,
     required this.lists,
@@ -24,6 +28,7 @@ class TasksView extends StatefulWidget {
     required this.onOpenList,
     required this.onAddTask,
     required this.onNewList,
+    this.fullCanvas = false,
   });
 
   @override
@@ -76,14 +81,14 @@ class _TasksViewState extends State<TasksView> {
     );
 
     return ColoredBox(
-      color: c.listBg,
+      color: widget.fullCanvas ? c.bg : c.listBg,
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 640),
           child: ListView(
             padding: EdgeInsets.fromLTRB(
               16,
-              16,
+              widget.fullCanvas ? 56 : 16,
               16,
               24 + MediaQuery.paddingOf(context).bottom,
             ),

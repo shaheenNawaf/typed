@@ -129,7 +129,7 @@ void main() {
     );
 
     expect(find.text('LEDGER'), findsOneWidget);
-    expect(find.text('Today'), findsNothing);
+    expect(find.text('TODAY'), findsNothing);
   });
 
   testWidgets('the notes column header has no finance title', (tester) async {
@@ -197,9 +197,9 @@ void main() {
         [note('Apple', today), note('Banana', older), note('Cherry', today)],
         sortDesc: false,
       );
-      expect(find.text('A–Z'), findsOneWidget);
-      expect(find.text('Today'), findsNothing);
-      expect(find.text('Older'), findsNothing);
+      expect(find.text('A–Z'.toUpperCase()), findsOneWidget);
+      expect(find.text('TODAY'), findsNothing);
+      expect(find.text('OLDER'), findsNothing);
       // The sort toggle rides on the first header and must survive A–Z.
       expect(find.textContaining('A–Z'), findsWidgets);
     });
@@ -209,9 +209,9 @@ void main() {
         note('Old pin', older, pinned: true),
         note('Fresh', today),
       ]);
-      expect(find.text('Pinned'), findsOneWidget);
-      expect(find.text('Today'), findsOneWidget);
-      expect(find.text('Older'), findsNothing);
+      expect(find.text('PINNED'), findsOneWidget);
+      expect(find.text('TODAY'), findsOneWidget);
+      expect(find.text('OLDER'), findsNothing);
     });
   });
 }
