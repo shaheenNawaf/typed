@@ -54,7 +54,8 @@ class SpendSparkline extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         color: c.surface,
-        borderRadius: BorderRadius.circular(AppRadius.card),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: c.border.withValues(alpha: 0.8)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -100,15 +101,17 @@ class SpendSparkline extends StatelessWidget {
                     builder: (context, progress, _) => CustomPaint(
                       painter: _SparklinePainter(
                         totals: dailyTotals,
-                        barColor: c.accent.withAlpha(110),
-                        todayColor: c.accent,
+                        // Ink bars, today darkest: a chart, not a brand
+                        // surface.
+                        barColor: c.fg.withValues(alpha: 0.18),
+                        todayColor: c.fg.withValues(alpha: 0.75),
                         zeroColor: c.border,
                         progress: progress,
                         avgMinor: showAvg ? averagePerDay : null,
                         avgLabel: showAvg
                             ? 'avg ${formatMinorAmount(averagePerDay!, currency)}'
                             : null,
-                        avgColor: c.warning,
+                        avgColor: c.muted,
                         monoFamily: c.monoFontFamily,
                       ),
                     ),

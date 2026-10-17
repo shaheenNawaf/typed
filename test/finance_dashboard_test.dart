@@ -351,10 +351,10 @@ void main() {
     expect(find.text('Income'), findsNothing);
     expect(find.text('Expenses'), findsNothing);
     expect(find.text('Net'), findsNothing);
-    expect(find.text('Transactions'), findsNothing);
+    expect(find.text('TRANSACTIONS'), findsNothing);
     expect(find.text('Last 14 days'), findsNothing);
-    expect(find.text('Top categories'), findsNothing);
-    expect(find.text('Budgets'), findsNothing);
+    expect(find.text('TOP CATEGORIES'), findsNothing);
+    expect(find.text('BUDGETS'), findsNothing);
 
     expect(find.text('All'), findsNothing);
     expect(find.text('Month'), findsNothing);
@@ -379,11 +379,11 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.text('No transactions yet'), findsOneWidget);
-    expect(find.text('Budgets'), findsOneWidget);
+    expect(find.text('BUDGETS'), findsOneWidget);
     expect(find.text('Add budget'), findsOneWidget);
 
-    expect(find.text('Transactions'), findsNothing);
-    expect(find.text('Top categories'), findsNothing);
+    expect(find.text('TRANSACTIONS'), findsNothing);
+    expect(find.text('TOP CATEGORIES'), findsNothing);
   });
 
   testWidgets('zero transactions ever hides the budgets block when there are none',
@@ -401,7 +401,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.text('No transactions yet'), findsOneWidget);
-    expect(find.text('Budgets'), findsNothing);
+    expect(find.text('BUDGETS'), findsNothing);
     expect(find.text('No budgets yet. Add one to track spending against a limit.'), findsNothing);
   });
 
@@ -744,8 +744,8 @@ void main() {
       ),
     );
     await tester.pump(const Duration(milliseconds: 400));
-    final budgetsTop = tester.getTopLeft(find.text('Budgets')).dy;
-    final catsTop = tester.getTopLeft(find.text('Top categories')).dy;
+    final budgetsTop = tester.getTopLeft(find.text('BUDGETS')).dy;
+    final catsTop = tester.getTopLeft(find.text('TOP CATEGORIES')).dy;
     expect(budgetsTop, lessThan(catsTop));
     await tester.binding.setSurfaceSize(null);
   });
@@ -838,7 +838,7 @@ void main() {
 
     expect(find.textContaining('ledger lives in'), findsOneWidget);
     expect(find.textContaining('Finance — September 2026'), findsOneWidget);
-    await tester.tap(find.text('Open ›'));
+    await tester.tap(find.textContaining('ledger lives in'));
     await tester.pump(const Duration(milliseconds: 400));
     expect(opened, 1);
   });
@@ -932,10 +932,12 @@ void main() {
         tester.getTopLeft(heroLabel).dx - tester.getTopLeft(heroCard).dx;
     final inInset = tester.getTopLeft(inLabel).dx - tester.getTopLeft(inCard).dx;
     expect(inInset, closeTo(heroInset, 0.5));
-    expect(inInset, closeTo(17, 1.0));
+    // 1px hairline + the 20px card inset shared with Home's cards.
+    expect(inInset, closeTo(21, 1.0));
   });
 
-  testWidgets('the desktop scope row is one 44dp control height', (tester) async {
+  testWidgets('the desktop scope row sits on one line with the add keys',
+      (tester) async {
     await tester.binding.setSurfaceSize(const Size(1280, 1200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(wrap(SizedBox(
@@ -958,22 +960,17 @@ void main() {
     // find.byType cannot match them (see the tooltips test above).
     final expenseButton = find.bySubtype<ElevatedButton>();
     final incomeButton = find.bySubtype<OutlinedButton>();
-    // find.widgetWithText is ancestor-ordered closest-first, so .first is the
-    // selected segment thumb (inside the chrome); the chrome is the next
-    // Container up (.at(1)).
-    final selectorChrome = find.widgetWithText(Container, 'All').at(1);
 
     expect(tester.getSize(expenseButton).height, closeTo(44, 0.5));
     expect(tester.getSize(incomeButton).height, closeTo(44, 0.5));
-    expect(tester.getSize(selectorChrome).height, closeTo(44, 0.5));
-
     expect(
       tester.getRect(expenseButton).top,
       closeTo(tester.getRect(incomeButton).top, 0.5),
     );
+    // The quiet period chips share the keys' centre line.
     expect(
-      tester.getRect(expenseButton).top,
-      closeTo(tester.getRect(selectorChrome).top, 0.5),
+      tester.getCenter(find.text('All')).dy,
+      closeTo(tester.getCenter(expenseButton).dy, 1.0),
     );
   });
 
@@ -1030,10 +1027,10 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    // Both dense rows are measured card edge -> first child, because each row
-    // indents its own label past a leading mark (a 28px avatar in the ledger, a
-    // 14px category icon in the rail). Neither row has a border, so the shared
-    // inset is exactly the h12 dense-row padding.
+    // Both dense rows are measured row edge -> first child, because each row
+    // indents its own label past a leading mark (an avatar in the ledger, a
+    // 14px category icon in the rail). The shared inset is the 16px row
+    // padding.
     final rowCard = find
         .ancestor(of: find.text('Transport'), matching: find.byType(Container))
         .first;
@@ -1050,6 +1047,6 @@ void main() {
     final railInset =
         tester.getTopLeft(railLeading).dx - tester.getTopLeft(railCard).dx;
     expect(rowInset, closeTo(railInset, 0.5));
-    expect(rowInset, closeTo(12, 0.5));
+    expect(rowInset, closeTo(16, 0.5));
   });
 }

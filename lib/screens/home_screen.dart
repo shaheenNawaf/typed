@@ -1214,6 +1214,12 @@ class _HomeScreenState extends State<HomeScreen>
   /// transaction rows. An open editor always keeps the pane.
   bool get _hideFinanceListPane => _activeFilter == 'finance' && !_showEditor;
 
+  /// Desktop Tasks, nothing open: the grouped view takes the whole canvas
+  /// (like Home) instead of a 340px column beside an empty editor. Opening
+  /// a list brings the column back next to it.
+  bool get _tasksOwnCanvas =>
+      _activeFilter == 'tasks' && !(_showEditor && _currentNote != null);
+
   /// Part 4.2: `E` adds an expense, `I` adds an income, but only on the Finance
   /// tab and only when the user is not typing. `EditableText` is the shared base
   /// of TextField/TextFormField, so one check covers every input in the app,
@@ -2547,7 +2553,8 @@ class _HomeScreenState extends State<HomeScreen>
                                   // Plan 08: Finance always takes the full
                                   // canvas — the pane only returns for the
                                   // editor (any open editor wins).
-                                  if (!_hideFinanceListPane)
+                                  if (!_hideFinanceListPane &&
+                                      !_tasksOwnCanvas)
                                   SizedBox(
                                     width: noteListW,
                                     child: _activeFilter == 'tasks'
@@ -2666,17 +2673,9 @@ class _HomeScreenState extends State<HomeScreen>
                                                     latestFinanceNote.id,
                                                   ),
                                           )
-                                        : Container(
-                                            color: context.colors.bg,
-                                            child: Center(
-                                              child: Text(
-                                                'Select a note to start editing',
-                                                style: TextStyle(
-                                                  color: context.colors.muted,
-                                                ),
-                                              ),
-                                            ),
-                                          ),
+                                        : _activeFilter == 'tasks'
+                                        ? _buildTasksView(fullCanvas: true)
+                                        : _buildNoSelection(),
                                   ),
                                   if (showContext)
                                     ContextPanel(
@@ -3019,9 +3018,41 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  /// Desktop editor pane with nothing open: a quiet pointer to the two ways
+  /// forward instead of a lone grey sentence.
+  Widget _buildNoSelection() {
+    final c = context.colors;
+    return ColoredBox(
+      color: c.bg,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.article_outlined, size: 28, color: c.muted),
+            const SizedBox(height: 12),
+            Text(
+              'Nothing open',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: c.fg,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Pick a page from the list, or press Ctrl N for a new one.',
+              style: TextStyle(fontSize: 13, color: c.muted),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// Tasks tab: every list's open tasks in one grouped, tickable view.
-  Widget _buildTasksView() {
+  Widget _buildTasksView({bool fullCanvas = false}) {
     return TasksView(
+      fullCanvas: fullCanvas,
       lists: _filteredNotes,
       onToggle: _toggleChecklistItem,
       onOpenList: (note) => _selectNote(note.id),

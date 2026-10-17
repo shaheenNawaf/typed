@@ -892,6 +892,8 @@ class _QuietChoice extends StatelessWidget {
 
 // -- Period Selector ---------------------------------------------------------
 
+/// Period chips on the left, currency picker as plain text on the right.
+/// Phone and desktop share it, so the scope reads the same everywhere.
 class _ScopeSelector extends StatelessWidget {
   final String period;
   final ValueChanged<String> onPeriodChanged;
@@ -899,17 +901,12 @@ class _ScopeSelector extends StatelessWidget {
   final List<String> currencyOptions;
   final ValueChanged<String>? onCurrencyChanged;
 
-  /// Fixed height shared by both controls so the scope row has one control
-  /// height (BRANDING 44dp). Null keeps intrinsic height (mobile).
-  final double? controlHeight;
-
   const _ScopeSelector({
     required this.period,
     required this.onPeriodChanged,
     required this.currencyScope,
     required this.currencyOptions,
     this.onCurrencyChanged,
-    this.controlHeight,
   });
 
   @override
@@ -918,24 +915,20 @@ class _ScopeSelector extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: _PeriodSelector(
-            period: period,
+          child: _QuietChoice(
+            value: period,
             onChanged: onPeriodChanged,
-            controlHeight: controlHeight,
+            options: const {
+              'all': 'All',
+              'week': 'Week',
+              'month': 'Month',
+              'year': 'Year',
+            },
           ),
         ),
         if (currencyOptions.length > 1 && onCurrencyChanged != null)
-          Container(
-            height: controlHeight,
-            alignment: Alignment.center,
+          Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: controlHeight == null
-                ? null
-                : BoxDecoration(
-                    color: c.surface,
-                    borderRadius: BorderRadius.circular(AppRadius.card),
-                    border: Border.all(color: c.border),
-                  ),
             child: DropdownButtonHideUnderline(
               child: DropdownButton<String>(
                 value: currencyOptions.contains(currencyScope)
@@ -961,91 +954,6 @@ class _ScopeSelector extends StatelessWidget {
             ),
           ),
       ],
-    );
-  }
-}
-
-class _PeriodSelector extends StatelessWidget {
-  final String period;
-  final ValueChanged<String> onChanged;
-  final double? controlHeight;
-  static const periods = ['all', 'week', 'month', 'year'];
-  const _PeriodSelector({
-    required this.period,
-    required this.onChanged,
-    this.controlHeight,
-  });
-
-  static const _labels = {
-    'all': 'All',
-    'week': 'Week',
-    'month': 'Month',
-    'year': 'Year',
-    'day': 'Day',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    // Phone: the same quiet chips as Simple. Desktop keeps the fixed-height
-    // segmented bar that lines up with its toolbar.
-    if (controlHeight == null) {
-      return _QuietChoice(
-        value: period,
-        onChanged: onChanged,
-        options: {for (final p in periods) p: _labels[p] ?? p},
-      );
-    }
-    final c = context.colors;
-    // Chips share the row width so four segments always fit — natural-size
-    // chips overflowed ~7px at phone widths (285px pane).
-    return Container(
-      height: controlHeight,
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: c.surface,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        border: Border.all(color: c.border),
-      ),
-      child: Row(
-        // Stretch only when the height is fixed; with intrinsic height (mobile)
-        // the row must size itself to the thumbs.
-        crossAxisAlignment: controlHeight != null
-            ? CrossAxisAlignment.stretch
-            : CrossAxisAlignment.center,
-        children: [
-          for (var i = 0; i < periods.length; i++) ...[
-            if (i > 0) const SizedBox(width: 4),
-            Expanded(child: _segment(context, c, periods[i])),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _segment(BuildContext context, AppColors c, String p) {
-    final selected = period == p;
-    return InkWell(
-      onTap: () => onChanged(p),
-      borderRadius: BorderRadius.circular(AppRadius.chip),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: selected ? c.accentDim : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppRadius.chip),
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          _labels[p] ?? p,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: AppType.t12,
-            fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-            color: selected ? c.accent : c.muted,
-          ),
-        ),
-      ),
     );
   }
 }
@@ -1479,10 +1387,6 @@ class _SummaryCard extends StatelessWidget {
   final String? footnote;
   final InlineSpan? footnoteSpan;
 
-  /// False renders a neutral surface card with the border token instead of the
-  /// color-tinted field (desktop In/Out cards, per the accepted prototype).
-  final bool tinted;
-
   /// Card padding. Dense mobile tiles keep the compact default; desktop cards
   /// pass the BRANDING card contract (14px 16px).
   final EdgeInsetsGeometry padding;
@@ -1498,7 +1402,6 @@ class _SummaryCard extends StatelessWidget {
     this.amountsByCurrency,
     this.footnote,
     this.footnoteSpan,
-    this.tinted = false,
     this.padding = const EdgeInsets.fromLTRB(14, 12, 14, 12),
   });
 
@@ -1515,13 +1418,9 @@ class _SummaryCard extends StatelessWidget {
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: tinted ? color.withAlpha(25) : context.colors.surface,
-        borderRadius: BorderRadius.circular(tinted ? AppRadius.card : 18),
-        border: Border.all(
-          color: tinted
-              ? color.withAlpha(60)
-              : context.colors.border.withValues(alpha: 0.8),
-        ),
+        color: context.colors.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: context.colors.border.withValues(alpha: 0.8)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1723,7 +1622,7 @@ List<Widget> _categoryRows(
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
+                  horizontal: 16,
                   vertical: 10,
                 ),
                 child: Row(
@@ -1844,9 +1743,7 @@ class _BudgetCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: context.colors.surface,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: context.colors.border.withValues(alpha: 0.8),
-        ),
+        border: Border.all(color: context.colors.border.withValues(alpha: 0.8)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2264,40 +2161,6 @@ class _RecentTransactionRowState extends State<_RecentTransactionRow> {
   }
 }
 
-/// 1px dashed rectangle on the border token — the prototype's .note-link edge.
-/// Flutter has no dashed BorderSide, so the path is walked with PathMetrics.
-class _DashedBorderPainter extends CustomPainter {
-  final Color color;
-  final double radius;
-
-  const _DashedBorderPainter({required this.color, required this.radius});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    final rect = Rect.fromLTWH(0.5, 0.5, size.width - 1, size.height - 1);
-    final path = Path()
-      ..addRRect(RRect.fromRectAndRadius(rect, Radius.circular(radius)));
-    for (final metric in path.computeMetrics()) {
-      var distance = 0.0;
-      while (distance < metric.length) {
-        canvas.drawPath(metric.extractPath(distance, distance + 4), paint);
-        distance += 7;
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_DashedBorderPainter oldDelegate) =>
-      oldDelegate.color != color || oldDelegate.radius != radius;
-}
-
-/// The single empty state shown when the user has never recorded a
-/// transaction. Replaces the five separate "no data" messages the dashboard
-/// used to render at once.
 class _ZeroTransactionsState extends StatelessWidget {
   final VoidCallback? onAddExpense;
   final VoidCallback? onAddIncome;
@@ -2316,13 +2179,13 @@ class _ZeroTransactionsState extends StatelessWidget {
             width: 56,
             height: 56,
             decoration: BoxDecoration(
-              color: c.accentDim,
+              color: c.fg.withValues(alpha: 0.05),
               shape: BoxShape.circle,
             ),
             child: Icon(
               Icons.account_balance_wallet_outlined,
               size: 26,
-              color: c.accent,
+              color: c.muted,
             ),
           ),
           const SizedBox(height: AppSpacing.s16),
@@ -2357,8 +2220,12 @@ class _ZeroTransactionsState extends StatelessWidget {
                   icon: const Icon(Icons.arrow_downward, size: 16),
                   label: const Text('Add expense'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: c.accent,
-                    foregroundColor: c.onAccent,
+                    backgroundColor: c.fg,
+                    foregroundColor: c.bg,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
                     padding: const EdgeInsets.symmetric(
                       horizontal: AppSpacing.s20,
                       vertical: AppSpacing.s12,
@@ -2376,7 +2243,11 @@ class _ZeroTransactionsState extends StatelessWidget {
                   label: const Text('Add income'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: c.fg,
-                    side: BorderSide(color: c.border),
+                    backgroundColor: c.surface,
+                    side: BorderSide(color: c.border.withValues(alpha: 0.8)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
                     padding: const EdgeInsets.symmetric(
                       horizontal: AppSpacing.s20,
                       vertical: AppSpacing.s12,
@@ -2409,26 +2280,22 @@ class _NetHeroCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final amountColor = summary.net > 0
-        ? c.income
-        : summary.net < 0
-        ? c.destructive
-        : c.muted;
+    // Ink, like every headline figure; red only once more went out than in.
+    final amountColor = summary.net < 0 ? c.destructive : c.fg;
     final heroStyle = TextStyle(
-      fontSize: AppType.t28,
+      fontSize: 34,
       fontWeight: FontWeight.w700,
+      letterSpacing: -0.6,
       color: amountColor,
-      fontFamily: c.monoFontFamily,
-      height: 1.1,
+      height: 1.15,
+      fontFeatures: const [FontFeature.tabularFigures()],
     );
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
       decoration: BoxDecoration(
-        // Prototype .stat.net: a flat accent-dim field over the surface —
-        // alphaBlend keeps the "no gradients" rule.
-        color: Color.alphaBlend(c.accentDim, c.surface),
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        border: Border.all(color: c.accent.withAlpha(90)),
+        color: c.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: c.border.withValues(alpha: 0.8)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2570,27 +2437,16 @@ class _LedgerColumnState extends State<_LedgerColumn> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(child: Text('Transactions', style: _labelStyle(context))),
-            if (canExpand)
-              TextButton(
-                onPressed: () => setState(() => _expanded = !_expanded),
-                style: TextButton.styleFrom(
-                  foregroundColor: context.colors.accent,
-                  padding: EdgeInsets.zero,
-                  minimumSize: const Size(0, 32),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  alignment: Alignment.centerRight,
-                  textStyle: const TextStyle(fontSize: AppType.t12),
-                ),
-                child: Text(
-                  _expanded ? 'Show fewer' : 'View all ${entries.length}',
-                ),
-              ),
-          ],
+        HomeLabel(
+          'TRANSACTIONS',
+          trailing: canExpand
+              ? (_expanded ? 'Show fewer' : 'View all ${entries.length}')
+              : null,
+          trailingIcon: false,
+          onTrailingTap: canExpand
+              ? () => setState(() => _expanded = !_expanded)
+              : null,
         ),
-        const SizedBox(height: 8),
         if (entries.isEmpty)
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -2607,7 +2463,7 @@ class _LedgerColumnState extends State<_LedgerColumn> {
                 TextButton(
                   onPressed: widget.onViewAllTime,
                   style: TextButton.styleFrom(
-                    foregroundColor: context.colors.accent,
+                    foregroundColor: context.colors.fg,
                     padding: EdgeInsets.zero,
                     minimumSize: const Size(0, 32),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -2625,7 +2481,7 @@ class _LedgerColumnState extends State<_LedgerColumn> {
           TextButton(
             onPressed: () => setState(() => _expanded = !_expanded),
             style: TextButton.styleFrom(
-              foregroundColor: context.colors.accent,
+              foregroundColor: context.colors.muted,
               padding: const EdgeInsets.symmetric(vertical: 8),
               minimumSize: const Size(0, 36),
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -2655,10 +2511,10 @@ class _LedgerColumnState extends State<_LedgerColumn> {
       groups.putIfAbsent(day, () => []).add(e);
     }
     final headerStyle = TextStyle(
-      fontSize: AppType.t10,
-      fontFamily: context.colors.monoFontFamily,
+      fontSize: AppType.t11,
+      fontWeight: FontWeight.w600,
       color: context.colors.muted,
-      letterSpacing: 1,
+      letterSpacing: 0.9,
     );
     return [
       for (var i = 0; i < groups.length; i++)
@@ -2679,30 +2535,52 @@ class _LedgerColumnState extends State<_LedgerColumn> {
     required bool isFirst,
     required TextStyle headerStyle,
   }) {
+    final c = context.colors;
     return [
       Padding(
-        padding: EdgeInsets.only(top: isFirst ? 0 : 10, bottom: 6),
+        padding: EdgeInsets.only(top: isFirst ? 0 : 16, bottom: 8, left: 4),
         child: Text(_dayGroupLabel(day).toUpperCase(), style: headerStyle),
       ),
-      for (final e in entries)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: _RecentTransactionRow(
-            entry: e.$1,
-            isIncome: (e.$1.type ?? e.$2.type) == 'income',
-            currency:
-                e.$1.currency ??
-                e.$2.currency ??
-                widget.summary.dominantCurrency,
-            noteTitle: e.$2.title.isNotEmpty ? e.$2.title : null,
-            showEditAffordance: true,
-            onTap: widget.onSelectEntry != null
-                ? () => widget.onSelectEntry!(e.$2.id, e.$1.id)
-                : widget.onSelectNote == null
-                ? null
-                : () => widget.onSelectNote!(e.$2.id),
-          ),
+      // One card per day, rows divided: the same grouped surface the phone
+      // and Home use, instead of a stack of separate tiles.
+      HomeCard(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Column(
+          children: [
+            for (var i = 0; i < entries.length; i++) ...[
+              if (i > 0)
+                Divider(
+                  height: 1,
+                  indent: 58,
+                  endIndent: 16,
+                  color: c.border.withValues(alpha: 0.8),
+                ),
+              _RecentTransactionRow(
+                flat: true,
+                entry: entries[i].$1,
+                isIncome:
+                    (entries[i].$1.type ?? entries[i].$2.type) == 'income',
+                currency:
+                    entries[i].$1.currency ??
+                    entries[i].$2.currency ??
+                    widget.summary.dominantCurrency,
+                noteTitle: entries[i].$2.title.isNotEmpty
+                    ? entries[i].$2.title
+                    : null,
+                showEditAffordance: true,
+                onTap: widget.onSelectEntry != null
+                    ? () => widget.onSelectEntry!(
+                        entries[i].$2.id,
+                        entries[i].$1.id,
+                      )
+                    : widget.onSelectNote == null
+                    ? null
+                    : () => widget.onSelectNote!(entries[i].$2.id),
+              ),
+            ],
+          ],
         ),
+      ),
     ];
   }
 }
@@ -2795,11 +2673,10 @@ class FinanceWorkspace extends StatelessWidget {
     this.onOpenLedgerNote,
   });
 
-  /// Part 4.1: the one persistent add pattern, top-right beside the period
-  /// filter. Expense is the most frequent action so it carries the filled
-  /// accent treatment; Income is secondary. Neither uses money red or green —
-  /// Part 2 reserves those for values, cards and budget status. Tooltips
-  /// advertise the E / I shortcuts wired in home_screen.
+  /// The one persistent add pattern, top-right beside the period filter.
+  /// Expense is the most frequent action so it is the solid ink key (same as
+  /// the phone); Income is its outlined twin. Neither uses money red or green.
+  /// Tooltips advertise the E / I shortcuts wired in home_screen.
   Widget _addButtons(BuildContext context) {
     final c = context.colors;
     const label = TextStyle(
@@ -2820,12 +2697,16 @@ class FinanceWorkspace extends StatelessWidget {
                 children: [
                   const Text('Expense'),
                   const SizedBox(width: 6),
-                  _KbdHint(label: 'E', color: c.onAccent),
+                  _KbdHint(label: 'E', color: c.bg),
                 ],
               ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: c.accent,
-                foregroundColor: c.onAccent,
+                backgroundColor: c.fg,
+                foregroundColor: c.bg,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.s16),
                 minimumSize: const Size(0, 44),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -2851,7 +2732,11 @@ class FinanceWorkspace extends StatelessWidget {
               ),
               style: OutlinedButton.styleFrom(
                 foregroundColor: c.fg,
-                side: BorderSide(color: c.border),
+                backgroundColor: c.surface,
+                side: BorderSide(color: c.border.withValues(alpha: 0.8)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.s16),
                 minimumSize: const Size(0, 44),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -2903,7 +2788,6 @@ class FinanceWorkspace extends StatelessWidget {
                       currencyScope: currencyScope,
                       currencyOptions: currencyOptions,
                       onCurrencyChanged: onCurrencyChanged,
-                      controlHeight: 44,
                     ),
                   ),
                   if (onAddExpense != null || onAddIncome != null) ...[
@@ -2912,7 +2796,7 @@ class FinanceWorkspace extends StatelessWidget {
                   ],
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 20),
               // The prototype's flex row stretches all three cards to one height;
               // a Flutter Row centers them, so the heights must be forced equal.
               IntrinsicHeight(
@@ -2923,9 +2807,9 @@ class FinanceWorkspace extends StatelessWidget {
                       flex: 3,
                       child: _NetHeroCard(summary: summary, period: period),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 12),
                     Expanded(flex: 2, child: _inCard(context)),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 12),
                     Expanded(flex: 2, child: _outCard(context)),
                   ],
                 ),
@@ -2953,7 +2837,7 @@ class FinanceWorkspace extends StatelessWidget {
                       onSelectNote: onSelectNote,
                     ),
                   ),
-                  const SizedBox(width: 16),
+                  const SizedBox(width: 24),
                   Expanded(flex: 2, child: _rightColumn(context)),
                 ],
               ),
@@ -2995,11 +2879,10 @@ class FinanceWorkspace extends StatelessWidget {
       amountsByCurrency: summary.hasMixedCurrencies
           ? _dominantFirst(summary.incomeByCurrency, summary.dominantCurrency)
           : null,
-      color: context.colors.income,
+      color: context.colors.fg,
       currency: summary.dominantCurrency,
       footnote: parts.isEmpty ? null : parts.join(' · '),
-      tinted: false,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
     );
   }
 
@@ -3022,11 +2905,10 @@ class FinanceWorkspace extends StatelessWidget {
       amountsByCurrency: summary.hasMixedCurrencies
           ? _dominantFirst(summary.expenseByCurrency, summary.dominantCurrency)
           : null,
-      color: context.colors.destructive,
+      color: context.colors.fg,
       currency: summary.dominantCurrency,
       footnote: parts.isEmpty ? null : parts.join(' · '),
-      tinted: false,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
     );
   }
 
@@ -3035,9 +2917,8 @@ class FinanceWorkspace extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         ..._budgetsSection(context, leadingGap: false),
-        const SizedBox(height: 16),
-        Text('Top categories', style: _labelStyle(context)),
-        const SizedBox(height: 8),
+        const SizedBox(height: 22),
+        const HomeLabel('TOP CATEGORIES'),
         if (summary.categories.isEmpty)
           Text(
             'No spending in this period.',
@@ -3060,53 +2941,41 @@ class FinanceWorkspace extends StatelessWidget {
   Widget _ledgerNoteLink(BuildContext context) {
     final c = context.colors;
     return Padding(
-      padding: const EdgeInsets.only(top: 12),
-      child: InkWell(
+      padding: const EdgeInsets.only(top: 22),
+      child: HomeCard(
+        padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
         onTap: onOpenLedgerNote,
-        borderRadius: BorderRadius.circular(AppRadius.card),
-        child: CustomPaint(
-          painter: _DashedBorderPainter(
-            color: context.colors.border,
-            radius: AppRadius.card,
-          ),
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 44),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            child: Row(
-              children: [
-                Icon(Icons.article_outlined, size: 14, color: c.muted),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text.rich(
+        semanticsLabel: 'Open $ledgerNoteLabel',
+        child: Row(
+          children: [
+            Icon(Icons.article_outlined, size: 16, color: c.muted),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  style: TextStyle(fontSize: AppType.t12, color: c.muted),
+                  children: [
                     TextSpan(
-                      style: TextStyle(fontSize: AppType.t12, color: c.muted),
-                      children: [
-                        TextSpan(
-                          text:
-                              "${monthName(DateTime.now().month)}'s ledger lives in ",
-                        ),
-                        TextSpan(
-                          text: ledgerNoteLabel,
-                          style: TextStyle(
-                            fontSize: AppType.t12,
-                            fontWeight: FontWeight.w500,
-                            color: c.fg,
-                          ),
-                        ),
-                      ],
+                      text:
+                          "${monthName(DateTime.now().month)}'s ledger lives in ",
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                    TextSpan(
+                      text: ledgerNoteLabel,
+                      style: TextStyle(
+                        fontSize: AppType.t12,
+                        fontWeight: FontWeight.w500,
+                        color: c.fg,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  'Open ›',
-                  style: TextStyle(fontSize: AppType.t12, color: c.accent),
-                ),
-              ],
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-          ),
+            const SizedBox(width: 8),
+            Icon(Icons.arrow_forward_rounded, size: 14, color: c.muted),
+          ],
         ),
       ),
     );
@@ -3121,24 +2990,15 @@ class FinanceWorkspace extends StatelessWidget {
     final mixedBudgetCurrencies =
         budgets.map((b) => b.currency).toSet().length > 1;
     return [
-      if (leadingGap) const SizedBox(height: 16),
-      Row(
-        children: [
-          Expanded(child: Text('Budgets', style: _labelStyle(context))),
-          if (onAddBudget != null)
-            TextButton.icon(
-              onPressed: () => _openBudgetSheet(context),
-              icon: const Icon(Icons.add, size: 15),
-              label: const Text('Add budget'),
-              style: TextButton.styleFrom(
-                foregroundColor: context.colors.accent,
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                textStyle: const TextStyle(fontSize: AppType.t12),
-              ),
-            ),
-        ],
+      if (leadingGap) const SizedBox(height: 22),
+      HomeLabel(
+        'BUDGETS',
+        trailing: onAddBudget == null ? null : 'Add budget',
+        trailingIcon: false,
+        onTrailingTap: onAddBudget == null
+            ? null
+            : () => _openBudgetSheet(context),
       ),
-      const SizedBox(height: 8),
       if (onAddBudget == null)
         const SizedBox.shrink()
       else if (budgets.isEmpty)

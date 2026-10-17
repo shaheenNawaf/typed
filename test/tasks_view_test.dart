@@ -243,4 +243,24 @@ void main() {
     expect(withAction, isNotNull, reason: 'dock exposes Open navigation');
     semantics.dispose();
   });
+
+  testWidgets('desktop Tasks owns the canvas until a list is opened',
+      (tester) async {
+    await pumpTab(tester, size: const Size(1440, 900));
+
+    // No 340px column beside an empty editor: the grouped view is the page.
+    expect(find.byType(TasksView), findsOneWidget);
+    expect(find.text('Select a note to start editing'), findsNothing);
+    expect(find.text('Nothing open'), findsNothing);
+    final wide = tester.getSize(find.byType(TasksView)).width;
+    expect(wide, greaterThan(800));
+
+    await tester.tap(find.text('Groceries'));
+    for (var i = 0; i < 3; i++) {
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+    // Opening a list brings the column back beside the editor.
+    expect(find.byType(Editor), findsOneWidget);
+    expect(tester.getSize(find.byType(TasksView)).width, lessThan(wide));
+  });
 }

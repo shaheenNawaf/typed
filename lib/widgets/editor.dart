@@ -274,7 +274,19 @@ class _EditorState extends State<Editor> {
   /// The note content as of this editor's last sync in either direction.
   String? _lastSyncedContent;
 
-  bool get _isChecklistNote => widget.note?.type == 'todo';
+  /// The checklist panel only renders `- [ ]` lines, so it is used only when
+  /// that is all the note holds. A task note that also carries prose (the
+  /// "Managing Tasks" guide, a pasted plan) opens in the regular editor,
+  /// which shows every line and still renders the checkboxes.
+  bool get _isChecklistNote {
+    if (widget.note?.type != 'todo') return false;
+    return _contentCtrl.text
+        .split('\n')
+        .where((l) => l.trim().isNotEmpty)
+        .every(_checklistLine.hasMatch);
+  }
+
+  static final _checklistLine = RegExp(r'^\s*[-*+]\s+\[[ xX]\]\s+');
 
   int get _wordCount {
     final text = _contentCtrl.text.trim();
@@ -2492,7 +2504,10 @@ class _EditorState extends State<Editor> {
   Widget _buildBody() {
     final horizontalPad = _horizontalPad;
     if (widget.previewMode) {
-      return Center(
+      // Top-aligned: Center floated a short page to the middle of the
+      // pane, leaving a band of empty space under the title.
+      return Align(
+        alignment: Alignment.topCenter,
         child: Container(
           constraints: const BoxConstraints(maxWidth: 640),
           padding: EdgeInsets.fromLTRB(horizontalPad, 16, horizontalPad, 0),

@@ -315,15 +315,20 @@ class TaskCompletedToggle extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
           child: Row(
             children: [
-              Text(
-                'Completed · $count',
-                style: TextStyle(
-                  fontSize: AppType.t13_5,
-                  fontWeight: FontWeight.w500,
-                  color: c.muted,
+              // Flexible: the desktop Tasks column animates its width when a
+              // list opens, and a fixed label overflowed mid-transition.
+              Expanded(
+                child: Text(
+                  'Completed · $count',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppType.t13_5,
+                    fontWeight: FontWeight.w500,
+                    color: c.muted,
+                  ),
                 ),
               ),
-              const Spacer(),
               Text(
                 expanded ? 'Hide' : 'Show',
                 style: TextStyle(fontSize: AppType.t13_5, color: c.muted),
