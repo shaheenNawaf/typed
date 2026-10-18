@@ -6,6 +6,7 @@ import 'package:typed/models/note.dart';
 import 'package:typed/screens/home_screen.dart';
 import 'package:typed/theme/palettes.dart';
 import 'package:typed/utils/note_storage.dart';
+import 'package:typed/widgets/task_row.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -266,5 +267,43 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  testWidgets('clearing an existing task deletes it with an Undo',
+      (tester) async {
+    await seed(
+      [todoNote(content: '- [ ] Apples\n- [ ] Bread\n- [ ] Cheese\n')],
+      tab: 'notes',
+    );
+    await pumpHome(tester, surface: const Size(390, 844));
+    await openNote(tester, 'Shopping list');
+
+    await tester.tap(find.text('Bread'));
+    await tester.pump();
+    await tester.enterText(find.widgetWithText(TextField, 'Bread'), '');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Bread'), findsNothing);
+    expect(find.text('Undo'), findsOneWidget);
+    await tester.tap(find.text('Undo'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Bread'), findsOneWidget);
+  });
+
+  testWidgets('ticking inside an open list counts toward done today',
+      (tester) async {
+    await seed([todoNote(content: '- [ ] Apples\n')], tab: 'notes');
+    await pumpHome(tester, surface: const Size(390, 844));
+    await openNote(tester, 'Shopping list');
+
+    await tester.tap(find.byType(TaskCheck).first);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('done_today_v1'), endsWith(':1'));
   });
 }

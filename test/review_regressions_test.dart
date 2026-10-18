@@ -204,4 +204,32 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     expect(find.text('Add entry'), findsOneWidget);
   });
+
+  testWidgets('on Finance, e and i type into a field and never stack sheets',
+      (tester) async {
+    await pumpApp(
+      tester,
+      [Note(id: 'n', title: 'Plain', content: 'x', tags: const [])],
+      tab: 'finance',
+    );
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyE);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Add entry'), findsOneWidget);
+
+    // A second E over the open sheet must not open another one.
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+    expect(await tester.sendKeyEvent(LogicalKeyboardKey.keyE), isFalse);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Add entry'), findsOneWidget);
+
+    // Typing in the sheet's field: the letters reach the field.
+    await tester.tap(find.byType(TextField).last);
+    await tester.pump();
+    expect(await tester.sendKeyEvent(LogicalKeyboardKey.keyE), isFalse);
+    expect(await tester.sendKeyEvent(LogicalKeyboardKey.keyI), isFalse);
+  });
 }

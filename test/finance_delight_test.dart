@@ -223,6 +223,19 @@ void main() {
       expect(find.textContaining('Groceries budget'), findsOneWidget);
     });
 
+    testWidgets('spending exactly the limit reads 100%, not Over',
+        (tester) async {
+      await tester.pumpWidget(wrap(SimpleFinanceView(
+        summary: summary(dominant: 'PHP'),
+        budgets: [budget('b1', 'Groceries', 300000)],
+        budgetActuals: const {'b1': 300000},
+      )));
+      await tester.pumpAndSettle();
+
+      expect(find.text('100%'), findsOneWidget);
+      expect(find.text('Over'), findsNothing);
+    });
+
     testWidgets('on-track line hidden when there are no budgets', (tester) async {
       await tester.pumpWidget(wrap(SimpleFinanceView(
         summary: summary(dominant: 'PHP'),
