@@ -140,6 +140,8 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
     await _transcriber.start(
       onText: (text) {
         if (!mounted) return;
+        // Never let a blank update erase words already on screen.
+        if (text.trim().isEmpty && _live.trim().isNotEmpty) return;
         setState(() => _live = text);
         _saveDraft();
       },
@@ -171,8 +173,12 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
   Future<void> _done() async {
     _stopClock();
     HapticFeedback.lightImpact();
-    final text = await _transcriber.stop();
+    final shown = _live;
+    final stopped = await _transcriber.stop();
     if (!mounted) return;
+    // What the user watched appear is the floor: a recogniser that hands
+    // back less (or nothing) on stop must not empty the memo.
+    final text = stopped.trim().length >= shown.trim().length ? stopped : shown;
     _before = [_before, text].where((s) => s.trim().isNotEmpty).join(' ');
     _live = '';
     _saveDraft();

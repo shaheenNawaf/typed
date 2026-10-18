@@ -18,6 +18,10 @@ class FakeTranscriber implements Transcriber {
   bool listening = false;
   bool cancelled = false;
 
+  /// Mimics Android's on-device recogniser handing back an empty final
+  /// result on stop after streaming good partials.
+  bool blankOnStop = false;
+
   FakeTranscriber({this.problem});
 
   void say(String text) {
@@ -42,6 +46,10 @@ class FakeTranscriber implements Transcriber {
   @override
   Future<String> stop() async {
     listening = false;
+    if (blankOnStop) {
+      _onText?.call('');
+      return '';
+    }
     return _text;
   }
 
@@ -225,5 +233,25 @@ void main() {
     VoiceMemo.isSupported = () => false;
     await pumpHome(tester);
     expect(find.byTooltip('Voice memo'), findsNothing);
+  });
+
+  testWidgets('a recogniser that goes blank on stop keeps what was shown',
+      (tester) async {
+    fake.blankOnStop = true;
+    await pumpHome(tester);
+    await tester.tap(find.byTooltip('Voice memo'));
+    await settle(tester);
+    fake.say('I need to buy eggs and then call the bank.');
+    await tester.pump();
+
+    await tester.tap(find.text('Done'));
+    await settle(tester);
+
+    expect(find.widgetWithText(TextField, 'Buy eggs'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Call the bank'), findsOneWidget);
+    await tester.tap(find.text('Save'));
+    await settle(tester);
+    final list = (await saved()).firstWhere((n) => n.type == 'todo');
+    expect(list.content, '- [ ] Buy eggs\n- [ ] Call the bank\n');
   });
 }
