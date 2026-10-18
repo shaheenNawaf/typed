@@ -7,12 +7,14 @@ class TemplatePickerSheet extends StatelessWidget {
   final void Function(NoteTemplate) onPick;
   final VoidCallback? onQuickExpense;
   final VoidCallback? onQuickIncome;
+  final VoidCallback? onVoiceMemo;
 
   const TemplatePickerSheet({
     super.key,
     required this.onPick,
     this.onQuickExpense,
     this.onQuickIncome,
+    this.onVoiceMemo,
   });
 
   static Future<void> show(
@@ -20,6 +22,7 @@ class TemplatePickerSheet extends StatelessWidget {
     required void Function(NoteTemplate) onPick,
     VoidCallback? onQuickExpense,
     VoidCallback? onQuickIncome,
+    VoidCallback? onVoiceMemo,
   }) {
     return showModalBottomSheet(
       context: context,
@@ -32,6 +35,7 @@ class TemplatePickerSheet extends StatelessWidget {
         onPick: onPick,
         onQuickExpense: onQuickExpense,
         onQuickIncome: onQuickIncome,
+        onVoiceMemo: onVoiceMemo,
       ),
     );
   }
@@ -73,10 +77,22 @@ class TemplatePickerSheet extends StatelessWidget {
                 onPick(t);
               },
             )),
-            if (onQuickExpense != null || onQuickIncome != null) ...[
+            if (onQuickExpense != null ||
+                onQuickIncome != null ||
+                onVoiceMemo != null) ...[
               const SizedBox(height: 4),
               Divider(height: 1, thickness: 1, indent: 20, endIndent: 20, color: context.colors.border),
               const SizedBox(height: 4),
+              if (onVoiceMemo != null)
+                _ActionRow(
+                  icon: Icons.mic_none_rounded,
+                  title: 'Voice memo',
+                  subtitle: 'Talk it through; it becomes a note or a list.',
+                  onTap: () {
+                    Navigator.pop(context);
+                    onVoiceMemo!();
+                  },
+                ),
               if (onQuickExpense != null)
                 _ActionRow(
                   icon: Icons.arrow_downward,

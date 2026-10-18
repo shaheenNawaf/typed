@@ -80,6 +80,16 @@ class MainActivity : FlutterActivity() {
                         }
                         result.success(null)
                     }
+                    // Voice memos only run on an on-device recogniser. The
+                    // speech plugin silently falls back to the default (often
+                    // cloud) recogniser when there is none, so Dart asks first.
+                    "onDeviceSpeechAvailable" -> {
+                        result.success(
+                            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S &&
+                                android.speech.SpeechRecognizer
+                                    .isOnDeviceRecognitionAvailable(applicationContext)
+                        )
+                    }
                     else -> result.notImplemented()
                 }
             }

@@ -49,6 +49,10 @@
 	<string>Typed uses the camera so you can capture and recognize text from documents and photos.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Typed accesses your photo library so you can select images for text recognition.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Typed listens while you record a voice memo, so it can turn what you say into a note or list.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Typed transcribes voice memos on this device. Your recording never leaves your phone.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Typed saves recognized text output to your photo library.</string>
 </dict>

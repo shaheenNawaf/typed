@@ -1,0 +1,229 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:typed/models/note.dart';
+import 'package:typed/screens/home_screen.dart';
+import 'package:typed/theme/palettes.dart';
+import 'package:typed/utils/note_storage.dart';
+import 'package:typed/voice/transcriber.dart';
+import 'package:typed/widgets/voice_memo_sheet.dart';
+
+/// Speaks whatever the test tells it to.
+class FakeTranscriber implements Transcriber {
+  TranscriberProblem? problem;
+  void Function(String)? _onText;
+  void Function(TranscriberProblem)? onProblem;
+  String _text = '';
+  bool listening = false;
+  bool cancelled = false;
+
+  FakeTranscriber({this.problem});
+
+  void say(String text) {
+    _text = [_text, text].where((s) => s.isNotEmpty).join(' ');
+    _onText?.call(_text);
+  }
+
+  @override
+  Future<TranscriberProblem?> prepare() async => problem;
+
+  @override
+  Future<void> start({
+    required void Function(String text) onText,
+    required void Function(TranscriberProblem problem) onProblem,
+  }) async {
+    _text = '';
+    _onText = onText;
+    this.onProblem = onProblem;
+    listening = true;
+  }
+
+  @override
+  Future<String> stop() async {
+    listening = false;
+    return _text;
+  }
+
+  @override
+  Future<void> cancel() async {
+    listening = false;
+    cancelled = true;
+  }
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  for (final ch in ['com.z4yed.typed/widget', 'flutter_timezone']) {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(MethodChannel(ch), (call) async => null);
+  }
+
+  late FakeTranscriber fake;
+  setUp(() {
+    final today = DateTime.now();
+    HomeScreen.clock = () => DateTime(today.year, today.month, today.day, 12);
+    fake = FakeTranscriber();
+    VoiceMemo.isSupported = () => true;
+    VoiceMemo.createTranscriber = () => fake;
+  });
+  tearDown(() {
+    HomeScreen.clock = DateTime.now;
+    VoiceMemo.reset();
+  });
+
+  Future<void> settle(WidgetTester tester) async {
+    for (var i = 0; i < 4; i++) {
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+  }
+
+  Future<void> pumpHome(
+    WidgetTester tester, {
+    Map<String, Object> prefs = const {},
+  }) async {
+    SharedPreferences.setMockInitialValues({
+      'onboarded_v1': true,
+      'onboarding_flow_complete_v1': true,
+      'dock_swipe_hint_seen_v1': true,
+      'shell_state_v1': '{"filter":"home","tab":"home"}',
+      ...prefs,
+    });
+    await NoteStorage().save([
+      Note(id: 'x', title: 'Existing', content: 'hi', tags: const []),
+    ]);
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+      theme: ThemeData(
+        useMaterial3: true,
+        extensions: <ThemeExtension<dynamic>>[kPalettes.first.light],
+      ),
+      home: const HomeScreen(),
+    ));
+    await settle(tester);
+  }
+
+  Future<List<Note>> saved() async => (await NoteStorage().loadResult()).items;
+
+  testWidgets('speaking tasks saves a to-do list', (tester) async {
+    await pumpHome(tester);
+    await tester.tap(find.byTooltip('Voice memo'));
+    await settle(tester);
+    expect(find.text('LISTENING'), findsOneWidget);
+    expect(find.text('Transcribed on this device'), findsOneWidget);
+
+    fake.say('I need to buy eggs and then call the bank.');
+    await tester.pump();
+    expect(find.textContaining('buy eggs'), findsOneWidget);
+
+    await tester.tap(find.text('Done'));
+    await settle(tester);
+
+    // Review: shaped as a list, tasks editable.
+    expect(find.text('To-do list'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Buy eggs'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Call the bank'), findsOneWidget);
+
+    await tester.tap(find.text('Save'));
+    await settle(tester);
+
+    expect(find.text('List saved'), findsOneWidget);
+    final list = (await saved()).firstWhere((n) => n.type == 'todo');
+    expect(list.content, '- [ ] Buy eggs\n- [ ] Call the bank\n');
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString(VoiceMemoSheet.draftKey), isNull);
+  });
+
+  testWidgets('switching to Note saves what was said as a note',
+      (tester) async {
+    await pumpHome(tester);
+    await tester.tap(find.byTooltip('Voice memo'));
+    await settle(tester);
+    fake.say('The talk was about sync. I should email Sam.');
+    await tester.tap(find.text('Done'));
+    await settle(tester);
+
+    // One incidental task: a note with a checklist line.
+    await tester.tap(find.text('Note'));
+    await settle(tester);
+    await tester.tap(find.text('Save'));
+    await settle(tester);
+
+    final note = (await saved()).firstWhere((n) => n.title.contains('talk'));
+    expect(note.type, 'text');
+    expect(note.content, contains('The talk was about sync.'));
+    expect(note.content, contains('- [ ] Email Sam'));
+  });
+
+  testWidgets('a sheet closed mid-memo keeps the words for next time',
+      (tester) async {
+    await pumpHome(tester);
+    await tester.tap(find.byTooltip('Voice memo'));
+    await settle(tester);
+    fake.say('Remember to renew the passport');
+    await tester.pump();
+
+    // Swipe the sheet away.
+    Navigator.of(tester.element(find.byType(VoiceMemoSheet))).pop();
+    await settle(tester);
+    expect(fake.cancelled, isTrue);
+    final prefs = await SharedPreferences.getInstance();
+    expect(
+      prefs.getString(VoiceMemoSheet.draftKey),
+      'Remember to renew the passport',
+    );
+
+    // Reopening picks the draft back up in review.
+    await tester.tap(find.byTooltip('Voice memo'));
+    await settle(tester);
+    expect(find.text('From your last memo'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Renew the passport'), findsOneWidget);
+
+    await tester.tap(find.text('Discard'));
+    await settle(tester);
+    expect(prefs.getString(VoiceMemoSheet.draftKey), isNull);
+  });
+
+  testWidgets('no on-device speech explains itself instead of using the cloud',
+      (tester) async {
+    fake.problem = TranscriberProblem.unavailable;
+    await pumpHome(tester);
+    await tester.tap(find.byTooltip('Voice memo'));
+    await settle(tester);
+    expect(find.text('Voice memos need on-device speech'), findsOneWidget);
+    expect(fake.listening, isFalse);
+
+    // Fixed (e.g. language downloaded): Try again starts listening.
+    fake.problem = null;
+    await tester.tap(find.text('Try again'));
+    await settle(tester);
+    expect(find.text('LISTENING'), findsOneWidget);
+  });
+
+  testWidgets('a failure mid-memo keeps what was heard for review',
+      (tester) async {
+    await pumpHome(tester);
+    await tester.tap(find.byTooltip('Voice memo'));
+    await settle(tester);
+    fake.say('Call the dentist');
+    await tester.pump();
+    fake.onProblem!(TranscriberProblem.unavailable);
+    await settle(tester);
+    expect(find.widgetWithText(TextField, 'Call the dentist'), findsOneWidget);
+  });
+
+  testWidgets('the Create sheet offers a voice memo', (tester) async {
+    await pumpHome(tester);
+    await tester.tap(find.byTooltip('New note'));
+    await settle(tester);
+    expect(find.text('Voice memo'), findsOneWidget);
+  });
+
+  testWidgets('no mic where voice is not supported', (tester) async {
+    VoiceMemo.isSupported = () => false;
+    await pumpHome(tester);
+    expect(find.byTooltip('Voice memo'), findsNothing);
+  });
+}
