@@ -141,10 +141,14 @@ class HomeCaptureBar extends StatefulWidget {
   final ValueChanged<String> onSaveNote;
   final ValueChanged<String> onAddTask;
 
+  /// Opens a voice memo; null hides the mic (unsupported platform).
+  final VoidCallback? onVoice;
+
   const HomeCaptureBar({
     super.key,
     required this.onSaveNote,
     required this.onAddTask,
+    this.onVoice,
   });
 
   @override
@@ -276,6 +280,18 @@ class _HomeCaptureBarState extends State<HomeCaptureBar> {
                           ),
                         ),
                       ],
+                    )
+                  : widget.onVoice != null
+                  // Empty bar: talk instead of type.
+                  ? IconButton(
+                      key: const ValueKey('voice'),
+                      tooltip: 'Voice memo',
+                      onPressed: widget.onVoice,
+                      icon: Icon(
+                        Icons.mic_none_rounded,
+                        size: 22,
+                        color: c.muted,
+                      ),
                     )
                   : const SizedBox(key: ValueKey('none'), height: 44),
             ),

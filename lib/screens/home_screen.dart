@@ -37,6 +37,9 @@ import '../widgets/entry_sheet.dart';
 import '../widgets/context_panel.dart';
 import '../widgets/workspace_header.dart';
 import '../widgets/command_palette.dart';
+import '../widgets/voice_memo_sheet.dart';
+import '../voice/transcriber.dart';
+import '../voice/voice_shaper.dart';
 import 'onboarding_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -1857,6 +1860,30 @@ class _HomeScreenState extends State<HomeScreen>
       onPick: _createNoteFromTemplate,
       onQuickExpense: _quickAddEntry,
       onQuickIncome: _quickAddIncome,
+      onVoiceMemo: VoiceMemo.isSupported() ? _openVoiceMemo : null,
+    );
+  }
+
+  /// Voice memo → reviewed draft → a note or a to-do list.
+  Future<void> _openVoiceMemo() async {
+    final result = await VoiceMemoSheet.show(context);
+    if (result == null || !mounted) return;
+    final todo = result.kind == VoiceKind.todo;
+    final note = Note(
+      id: generateId('n'),
+      title: result.title,
+      content: result.content,
+      tags: todo ? ['todo'] : [],
+      type: todo ? 'todo' : 'text',
+    );
+    setState(() => notes.insert(0, note));
+    _persistNow();
+    _showSnackBar(
+      todo ? 'List saved' : 'Saved to Notes',
+      onUndo: () {
+        setState(() => notes.removeWhere((n) => n.id == note.id));
+        _persistNow();
+      },
     );
   }
 
@@ -3172,7 +3199,11 @@ class _HomeScreenState extends State<HomeScreen>
 
     final blocks = <Widget>[
       _buildHomeIntro(now),
-      HomeCaptureBar(onSaveNote: _captureNote, onAddTask: _captureTask),
+      HomeCaptureBar(
+        onSaveNote: _captureNote,
+        onAddTask: _captureTask,
+        onVoice: VoiceMemo.isSupported() ? _openVoiceMemo : null,
+      ),
       if (notes.isEmpty) _buildHomeEmptyCta(),
       // Evening with nothing open: the empty Next up gives way to one
       // optional prompt to set up tomorrow (the subline already says the

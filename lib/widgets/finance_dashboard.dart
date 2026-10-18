@@ -10,6 +10,7 @@ import '../utils/date_format.dart';
 import 'budget_sheet.dart';
 import 'count_up_amount.dart';
 import 'home_modules.dart';
+import 'quiet_choice.dart';
 import 'spend_sparkline.dart';
 
 class FinanceSummary {
@@ -395,7 +396,7 @@ class FinanceModeToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _QuietChoice(
+    return QuietChoice(
       value: mode,
       onChanged: onChanged,
       options: const {'simple': 'Simple', 'advanced': 'Advanced'},
@@ -469,7 +470,7 @@ class SimpleFinanceView extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (onPeriodChanged != null) ...[
-          _QuietChoice(
+          QuietChoice(
             value: period,
             onChanged: onPeriodChanged!,
             options: const {
@@ -832,63 +833,6 @@ class _AddButton extends StatelessWidget {
   }
 }
 
-/// A quiet single-choice row: plain words, the chosen one in ink on a soft
-/// pill. Replaces the boxed segmented controls on the calm surfaces.
-class _QuietChoice extends StatelessWidget {
-  final String value;
-  final ValueChanged<String> onChanged;
-  final Map<String, String> options;
-
-  const _QuietChoice({
-    required this.value,
-    required this.onChanged,
-    required this.options,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.colors;
-    return Wrap(
-      spacing: 4,
-      runSpacing: 4,
-      children: [
-        for (final e in options.entries)
-          Semantics(
-            button: true,
-            selected: e.key == value,
-            child: InkWell(
-              onTap: () => onChanged(e.key),
-              borderRadius: BorderRadius.circular(18),
-              child: AnimatedContainer(
-                duration: AppMotion.duration(context, AppMotion.base),
-                curve: AppMotion.decelerate,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 9,
-                ),
-                decoration: BoxDecoration(
-                  color: e.key == value
-                      ? c.fg.withValues(alpha: 0.07)
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: Text(
-                  e.value,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: e.key == value
-                        ? FontWeight.w600
-                        : FontWeight.w500,
-                    color: e.key == value ? c.fg : c.muted,
-                  ),
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}
 
 // -- Period Selector ---------------------------------------------------------
 
@@ -915,7 +859,7 @@ class _ScopeSelector extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: _QuietChoice(
+          child: QuietChoice(
             value: period,
             onChanged: onPeriodChanged,
             options: const {
