@@ -64,12 +64,13 @@ void main() {
   Future<void> pumpTab(
     WidgetTester tester, {
     String tab = 'tasks',
+    String? filter,
     Size size = const Size(390, 844),
   }) async {
     SharedPreferences.setMockInitialValues({
       'onboarded_v1': true,
       'onboarding_flow_complete_v1': true,
-      'shell_state_v1': '{"filter":"$tab","tab":"$tab"}',
+      'shell_state_v1': '{"filter":"${filter ?? tab}","tab":"$tab"}',
     });
     await NoteStorage().save(fixture());
     tester.view.devicePixelRatio = 1.0;
@@ -262,5 +263,25 @@ void main() {
     // Opening a list brings the column back beside the editor.
     expect(find.byType(Editor), findsOneWidget);
     expect(tester.getSize(find.byType(TasksView)).width, lessThan(wide));
+  });
+
+  testWidgets('releasing a scrub on the lit tab still commits it',
+      (tester) async {
+    // Archive is reached from the sheet; the dock lights "Notes" for it.
+    await pumpTab(tester, tab: 'notes', filter: 'archive');
+    expect(find.text('No archived notes'), findsOneWidget);
+
+    final from = tester.getCenter(find.byTooltip('Home'));
+    final to = tester.getCenter(find.byTooltip('Notes'));
+    final gesture = await tester.startGesture(from);
+    await gesture.moveBy(const Offset(20, 0));
+    await gesture.moveTo(to);
+    await tester.pump();
+    await gesture.up();
+    await settle(tester);
+
+    // Same as tapping Notes: back to all notes, not stuck in Archive.
+    expect(find.text('No archived notes'), findsNothing);
+    expect(find.text('Thoughts'), findsWidgets);
   });
 }

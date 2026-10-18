@@ -570,8 +570,10 @@ void main() {
     ))));
     await tester.pumpAndSettle();
 
-    // Rich sub-line: amount + code (prototype "excl. $9.99 USD").
-    expect(find.text('excl. \$500.00 USD'), findsOneWidget);
+    // The In card already lists the USD amount in its stacked figures, so
+    // it no longer also claims to exclude it; the Net sentence (dominant
+    // currency only) still declares the exclusion.
+    expect(find.text('excl. \$500.00 USD'), findsNothing);
     expect(find.textContaining('· excl. USD', findRichText: true), findsOneWidget);
   });
 

@@ -35,6 +35,10 @@ class Editor extends StatefulWidget {
   final Note? note;
   final ValueChanged<String> onTitleChange;
   final ValueChanged<String> onContentChange;
+
+  /// A checklist row was ticked (true) or unticked (false) in the panel, so
+  /// Home's "finished today" count sees ticks made inside an open list.
+  final ValueChanged<bool>? onTaskToggled;
   final ValueChanged<String> onImageAdded;
   final bool previewMode;
   final VoidCallback onTogglePreview;
@@ -63,6 +67,7 @@ class Editor extends StatefulWidget {
     required this.note,
     required this.onTitleChange,
     required this.onContentChange,
+    this.onTaskToggled,
     required this.onImageAdded,
     required this.previewMode,
     required this.onTogglePreview,
@@ -2065,11 +2070,13 @@ class _EditorState extends State<Editor> {
 
   void _toggleItem(int lineIndex, bool checked) {
     final lines = _contentCtrl.text.split('\n');
+    final wasChecked = RegExp(r'\[[xX]\]').hasMatch(lines[lineIndex]);
     lines[lineIndex] = lines[lineIndex].replaceFirst(
       RegExp(r'\[[ xX]\]'),
       checked ? '[x]' : '[ ]',
     );
     _contentCtrl.text = lines.join('\n');
+    if (wasChecked != checked) widget.onTaskToggled?.call(checked);
     _syncContent();
     setState(() {});
   }
@@ -2125,11 +2132,19 @@ class _EditorState extends State<Editor> {
     setState(() {});
   }
 
-  void _submitEdit(int lineIndex, int visualIndex, {bool addNext = false}) {
+  void _submitEdit(
+    int lineIndex,
+    int visualIndex, {
+    bool addNext = false,
+    String originalText = '',
+  }) {
     final text = _checklistEditCtrl.text.trim();
     if (text.isEmpty) {
-      // Clearing a just-made blank row: nothing worth an Undo.
-      if (visualIndex > 0) _deleteItem(lineIndex, undoable: false);
+      // Clearing a just-made blank row is nothing worth an Undo; clearing a
+      // real task deletes it, so that one keeps its Undo.
+      if (visualIndex > 0) {
+        _deleteItem(lineIndex, undoable: originalText.trim().isNotEmpty);
+      }
       _checklistEditIdx = null;
       setState(() {});
       return;
@@ -2225,9 +2240,17 @@ class _EditorState extends State<Editor> {
                 contentPadding: EdgeInsets.zero,
                 border: InputBorder.none,
               ),
-              onSubmitted: (_) =>
-                  _submitEdit(item.lineIndex, index, addNext: true),
-              onTapOutside: (_) => _submitEdit(item.lineIndex, index),
+              onSubmitted: (_) => _submitEdit(
+                item.lineIndex,
+                index,
+                addNext: true,
+                originalText: item.text,
+              ),
+              onTapOutside: (_) => _submitEdit(
+                item.lineIndex,
+                index,
+                originalText: item.text,
+              ),
             )
           : null,
     );

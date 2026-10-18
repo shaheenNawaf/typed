@@ -1027,9 +1027,13 @@ class _NoteCardState extends State<_NoteCard> {
         ? Icons.arrow_upward
         : Icons.arrow_downward;
     final dominant = _dominantCategory(widget.note, amounts);
-    final budget = dominant != null
+    // Same category AND currency: a USD note showed a PHP "Food" budget bar.
+    final noteCurrency = amounts.isEmpty
+        ? null
+        : amounts.first.currency ?? widget.note.currency ?? 'PHP';
+    final budget = dominant != null && !mixedCurrencies && noteCurrency != null
         ? widget.budgets.cast<Budget?>().firstWhere(
-            (b) => b!.category == dominant,
+            (b) => b!.category == dominant && b.currency == noteCurrency,
             orElse: () => null,
           )
         : null;
