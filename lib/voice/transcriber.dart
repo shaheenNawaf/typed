@@ -163,6 +163,9 @@ class SystemTranscriber implements Transcriber {
     if (result.finalResult) {
       _buffer.finalResult(result.recognizedWords);
       if (!(_finished?.isCompleted ?? true)) _finished!.complete();
+    } else if (result.resultTypeValue == ResultType.intermediate) {
+      // A phrase locked in mid-session (fast, unbroken speech).
+      _buffer.intermediate(result.recognizedWords);
     } else {
       _buffer.partial(result.recognizedWords);
     }
@@ -237,45 +240,90 @@ class SystemTranscriber implements Transcriber {
   }
 }
 
-/// The memo's text across recognition sessions: settled words plus the
-/// current session's best guess.
+/// The memo's text across recognition sessions: settled words, the
+/// segments locked in during the current session, and its live guess.
 ///
-/// Android's on-device recogniser can end a session with an *empty* final
-/// result, or with no final result at all, after streaming good partials.
-/// Taking the final as gospel wiped the transcript the user had just watched
-/// appear; here an empty final, or a session that simply ends, settles the
-/// last guess instead.
+/// Android's on-device recogniser misbehaves in two ways this absorbs:
+/// - It can end a session with an *empty* final result (or none) after
+///   streaming good partials; the last guess is kept instead.
+/// - When someone talks without pausing, it locks in each finished phrase
+///   mid-session (an "intermediate" result) and then reports the next phrase
+///   from scratch. Treating those as ordinary guesses let every new phrase
+///   overwrite the previous one, so fast speech lost most of its words.
+///   Locked phrases are kept as segments; a later result that repeats them
+///   (some recognisers report the whole session cumulatively) is trimmed so
+///   nothing is doubled.
 class TranscriptBuffer {
   final _settled = <String>[];
+  final _segments = <String>[];
   String _guess = '';
 
-  String get text => [..._settled, _guess]
+  String get text => [..._settled, ..._segments, _guess]
       .map((s) => s.trim())
       .where((s) => s.isNotEmpty)
       .join(' ');
 
-  /// A live guess for the current session; it may be revised freely, but an
-  /// empty one never erases what was heard.
+  /// A live guess for the current phrase; revised freely, but an empty one
+  /// never erases what was heard.
   void partial(String words) {
-    if (words.trim().isNotEmpty) _guess = words;
+    final fresh = _afterSegments(words);
+    if (fresh.trim().isNotEmpty) _guess = fresh;
+  }
+
+  /// The recogniser locked in a phrase mid-session; the next partials start
+  /// a new one.
+  void intermediate(String words) {
+    final fresh = _afterSegments(words);
+    final phrase = fresh.trim().isNotEmpty ? fresh : _guess;
+    if (phrase.trim().isNotEmpty) _segments.add(phrase);
+    _guess = '';
   }
 
   /// The recogniser's final words for the session (preferred over the
   /// guess), or the guess when the final came back empty.
   void finalResult(String words) {
-    final heard = words.trim().isNotEmpty ? words : _guess;
+    var fresh = _afterSegments(words);
+    // A final that only repeats the last locked phrase adds nothing.
+    if (_segments.isNotEmpty && _norm(fresh) == _norm(_segments.last)) {
+      fresh = '';
+    }
+    final heard = fresh.trim().isNotEmpty ? fresh : _guess;
+    _settled.addAll(_segments);
     if (heard.trim().isNotEmpty) _settled.add(heard);
+    _segments.clear();
     _guess = '';
   }
 
-  /// The session ended without a final result: keep the guess.
+  /// The session ended without a final result: keep what it heard.
   void endSession() {
+    _settled.addAll(_segments);
     if (_guess.trim().isNotEmpty) _settled.add(_guess);
+    _segments.clear();
     _guess = '';
   }
 
   void clear() {
     _settled.clear();
+    _segments.clear();
     _guess = '';
   }
+
+  /// [words] minus this session's locked phrases when it starts with them
+  /// (a cumulative report); otherwise [words] unchanged.
+  String _afterSegments(String words) {
+    if (_segments.isEmpty) return words;
+    final locked = _norm(_segments.join(' ')).split(' ');
+    final heard = words.trim().split(RegExp(r'\s+'));
+    if (heard.length < locked.length) return words;
+    for (var i = 0; i < locked.length; i++) {
+      if (_norm(heard[i]) != locked[i]) return words;
+    }
+    return heard.sublist(locked.length).join(' ');
+  }
+
+  static String _norm(String s) => s
+      .toLowerCase()
+      .replaceAll(RegExp(r"[^\w\s']"), '')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
 }
