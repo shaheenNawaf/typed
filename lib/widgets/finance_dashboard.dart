@@ -725,7 +725,7 @@ class SimpleFinanceView extends StatelessWidget {
 
   Widget _budgetRow(BuildContext context, Budget budget, double ratio) {
     final c = context.colors;
-    final over = ratio >= 1;
+    final over = ratio > 1;
     final tone = over ? c.destructive : c.fg;
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
@@ -1824,9 +1824,12 @@ class _BudgetCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: 12),
+              // Expanded + ellipsis: ₱100k-scale budgets overflowed the row
+              // at 320px.
               if (overBudget)
-                Text.rich(
+                Expanded(
+                  child: Text.rich(
                   TextSpan(
                     style: TextStyle(
                       fontSize: AppType.t11,
@@ -1848,9 +1851,14 @@ class _BudgetCard extends StatelessWidget {
                       const TextSpan(text: ' over budget'),
                     ],
                   ),
+                  textAlign: TextAlign.end,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
                 )
               else
-                Text.rich(
+                Expanded(
+                  child: Text.rich(
                   TextSpan(
                     style: TextStyle(
                       fontSize: AppType.t11,
@@ -1876,6 +1884,10 @@ class _BudgetCard extends StatelessWidget {
                       const TextSpan(text: ' left to spend'),
                     ],
                   ),
+                  textAlign: TextAlign.end,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
                 ),
             ],
           ),
@@ -2796,8 +2808,10 @@ class FinanceWorkspace extends StatelessWidget {
     final others = {...summary.incomeByCurrency.keys}
       ..remove(summary.dominantCurrency);
     final othersList = others.toList()..sort();
+    final dominant = summary.dominantCurrency;
     final incomeEntries = summary.recentEntries
         .where((e) => (e.$1.type ?? e.$2.type) == 'income')
+        .where((e) => (e.$1.currency ?? e.$2.currency ?? dominant) == dominant)
         .toList();
     String? topCategory;
     if (incomeEntries.isNotEmpty) {
@@ -2814,7 +2828,7 @@ class FinanceWorkspace extends StatelessWidget {
       if (incomeEntries.isNotEmpty)
         '${incomeEntries.length} source${incomeEntries.length == 1 ? '' : 's'}',
       if (topCategory != null) topCategory,
-      if (othersList.isNotEmpty)
+      if (othersList.isNotEmpty && !summary.hasMixedCurrencies)
         'excl. ${othersList.map((code) => '${formatMinorAmount(summary.incomeByCurrency[code]!, code)} $code').join(' · ')}',
     ];
     return _SummaryCard(
@@ -2840,7 +2854,7 @@ class FinanceWorkspace extends StatelessWidget {
     final parts = <String>[
       if (expenseCount > 0)
         '$expenseCount ${expenseCount == 1 ? 'entry' : 'entries'}',
-      if (othersList.isNotEmpty)
+      if (othersList.isNotEmpty && !summary.hasMixedCurrencies)
         'excl. ${othersList.map((code) => '${formatMinorAmount(summary.expenseByCurrency[code]!, code)} $code').join(' · ')}',
     ];
     return _SummaryCard(

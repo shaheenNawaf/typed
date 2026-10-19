@@ -1225,10 +1225,6 @@ class _HomeScreenState extends State<HomeScreen>
   bool get _tasksOwnCanvas =>
       _activeFilter == 'tasks' && !(_showEditor && _currentNote != null);
 
-  /// Part 4.2: `E` adds an expense, `I` adds an income, but only on the Finance
-  /// tab and only when the user is not typing. `EditableText` is the shared base
-  /// of TextField/TextFormField, so one check covers every input in the app,
-  /// including the amount field of an already-open EntrySheet.
   /// Part 4.2: bare E / I add an expense / income on the Finance tab. A
   /// global keyboard handler, not a Shortcuts binding: a binding claimed the
   /// key even when it then did nothing — so lowercase e and i never reached
@@ -1256,8 +1252,13 @@ class _HomeScreenState extends State<HomeScreen>
   bool get _financeShortcutApplies {
     if (_currentTab != 'finance') return false;
     if (_commandPaletteOpen || _onboardingOpen) return false;
-    final focus = FocusManager.instance.primaryFocus;
-    return focus?.context?.widget is! EditableText;
+    // Not over a sheet, dialog or pushed route: a second E used to stack a
+    // second entry sheet on the first.
+    if (ModalRoute.of(context)?.isCurrent == false) return false;
+    // A focused field's focus context is the Focus widget *inside*
+    // EditableText, never EditableText itself, so look up the tree.
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    return focusContext?.findAncestorStateOfType<EditableTextState>() == null;
   }
 
   void _financeShortcut(String type) {
@@ -2649,6 +2650,7 @@ class _HomeScreenState extends State<HomeScreen>
                                             note: _currentNote,
                                             onTitleChange: _updateTitle,
                                             onContentChange: _updateContent,
+                                            onTaskToggled: _countDone,
                                             onImageAdded: _onImageAdded,
                                             previewMode: _previewMode,
                                             onTogglePreview: _togglePreview,
@@ -2938,6 +2940,7 @@ class _HomeScreenState extends State<HomeScreen>
               note: _currentNote,
               onTitleChange: _updateTitle,
               onContentChange: _updateContent,
+              onTaskToggled: _countDone,
               onImageAdded: _onImageAdded,
               previewMode: _previewMode,
               onTogglePreview: _togglePreview,

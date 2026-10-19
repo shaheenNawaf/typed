@@ -172,11 +172,10 @@ class _MobileNavState extends State<MobileNav>
     final index = _scrubIndex;
     if (index == null) return;
     setState(() => _scrubIndex = null);
-    if (index != _activeIndex) {
-      widget.onTabChanged(_tabs[index].id);
-    } else {
-      _moveLensTo(_activeIndex);
-    }
+    // Always commit, like a tap: releasing on the highlighted tab must still
+    // leave Archive/Trash/tag views that the dock shows as "Notes".
+    if (index == _activeIndex) _moveLensTo(_activeIndex);
+    widget.onTabChanged(_tabs[index].id);
   }
 
   void _openNavigation() {
