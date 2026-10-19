@@ -7,6 +7,10 @@ import 'package:speech_to_text/speech_recognition_error.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
+import 'llm_shaper.dart';
+import 'voice_model.dart';
+import 'voice_shaper.dart';
+
 /// Why a transcriber could not start.
 enum TranscriberProblem {
   /// Microphone or speech permission was refused.
@@ -53,10 +57,22 @@ class VoiceMemo {
 
   static Transcriber Function() createTranscriber = SystemTranscriber.new;
 
+  /// The model tier: a refined draft, or null when the optional model is
+  /// not installed (or its answer was unusable). The rules draft stands.
+  static Future<VoiceDraft?> Function(String transcript) refine =
+      _defaultRefine;
+
   @visibleForTesting
   static void reset() {
     isSupported = _defaultSupported;
     createTranscriber = SystemTranscriber.new;
+    refine = _defaultRefine;
+  }
+
+  static Future<VoiceDraft?> _defaultRefine(String transcript) async {
+    final path = await VoiceModel.activePath();
+    if (path == null) return null;
+    return LlmShaper.shape(transcript, path);
   }
 
   static bool _defaultSupported() =>
@@ -71,18 +87,16 @@ class SystemTranscriber implements Transcriber {
 
   SystemTranscriber([SpeechToText? speech]) : _speech = speech ?? SpeechToText();
 
-  String _settled = '';
-  String _guess = '';
+  final _buffer = TranscriptBuffer();
+
+  /// Bumped per recognition session; results from an ended session are
+  /// ignored (its words were already settled).
+  int _session = 0;
   bool _active = false;
   bool _restarting = false;
   void Function(String)? _onText;
   void Function(TranscriberProblem)? _onProblem;
   Completer<void>? _finished;
-
-  String get _text => [_settled, _guess]
-      .where((s) => s.trim().isNotEmpty)
-      .map((s) => s.trim())
-      .join(' ');
 
   static const _channel = MethodChannel('com.z4yed.typed/widget');
 
@@ -115,8 +129,7 @@ class SystemTranscriber implements Transcriber {
     required void Function(String text) onText,
     required void Function(TranscriberProblem problem) onProblem,
   }) async {
-    _settled = '';
-    _guess = '';
+    _buffer.clear();
     _onText = onText;
     _onProblem = onProblem;
     _active = true;
@@ -125,9 +138,10 @@ class SystemTranscriber implements Transcriber {
 
   Future<void> _listen() async {
     _finished = Completer<void>();
+    final session = ++_session;
     try {
       await _speech.listen(
-        onResult: _onResult,
+        onResult: (r) => _onResult(r, session),
         listenOptions: SpeechListenOptions(
           // Never fall back to a cloud recogniser.
           onDevice: true,
@@ -144,18 +158,22 @@ class SystemTranscriber implements Transcriber {
     }
   }
 
-  void _onResult(SpeechRecognitionResult result) {
-    _guess = result.recognizedWords;
+  void _onResult(SpeechRecognitionResult result, int session) {
+    if (session != _session) return;
     if (result.finalResult) {
-      _settled = [_settled, _guess].where((s) => s.trim().isNotEmpty).join(' ');
-      _guess = '';
+      _buffer.finalResult(result.recognizedWords);
       if (!(_finished?.isCompleted ?? true)) _finished!.complete();
+    } else {
+      _buffer.partial(result.recognizedWords);
     }
-    _onText?.call(_text);
+    _onText?.call(_buffer.text);
   }
 
   void _onStatus(String status) {
     if (status != SpeechToText.doneStatus) return;
+    // The session is over: whatever is still a guess is the best we have.
+    _buffer.endSession();
+    _session++;
     if (!(_finished?.isCompleted ?? true)) _finished!.complete();
     // The recogniser gave up after a pause; keep the memo going.
     if (_active && !_restarting) {
@@ -201,19 +219,63 @@ class SystemTranscriber implements Transcriber {
           .timeout(const Duration(seconds: 2), onTimeout: () {});
     } catch (_) {}
     // Whatever was still a guess is better kept than lost.
-    final text = _text;
-    _settled = '';
-    _guess = '';
+    _buffer.endSession();
+    _session++;
+    final text = _buffer.text;
+    _buffer.clear();
     return text;
   }
 
   @override
   Future<void> cancel() async {
     _active = false;
-    _settled = '';
-    _guess = '';
+    _session++;
+    _buffer.clear();
     try {
       await _speech.cancel();
     } catch (_) {}
+  }
+}
+
+/// The memo's text across recognition sessions: settled words plus the
+/// current session's best guess.
+///
+/// Android's on-device recogniser can end a session with an *empty* final
+/// result, or with no final result at all, after streaming good partials.
+/// Taking the final as gospel wiped the transcript the user had just watched
+/// appear; here an empty final, or a session that simply ends, settles the
+/// last guess instead.
+class TranscriptBuffer {
+  final _settled = <String>[];
+  String _guess = '';
+
+  String get text => [..._settled, _guess]
+      .map((s) => s.trim())
+      .where((s) => s.isNotEmpty)
+      .join(' ');
+
+  /// A live guess for the current session; it may be revised freely, but an
+  /// empty one never erases what was heard.
+  void partial(String words) {
+    if (words.trim().isNotEmpty) _guess = words;
+  }
+
+  /// The recogniser's final words for the session (preferred over the
+  /// guess), or the guess when the final came back empty.
+  void finalResult(String words) {
+    final heard = words.trim().isNotEmpty ? words : _guess;
+    if (heard.trim().isNotEmpty) _settled.add(heard);
+    _guess = '';
+  }
+
+  /// The session ended without a final result: keep the guess.
+  void endSession() {
+    if (_guess.trim().isNotEmpty) _settled.add(_guess);
+    _guess = '';
+  }
+
+  void clear() {
+    _settled.clear();
+    _guess = '';
   }
 }

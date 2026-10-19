@@ -1,7 +1,7 @@
 name: typed
 description: "A local-first workspace for notes, tasks, and money."
 publish_to: 'none'
-version: 0.1.0
+version: 0.2.0+2
 
 environment:
   sdk: ^3.9.2
@@ -24,6 +24,8 @@ dependencies:
   timezone: ^0.10.1
   flutter_timezone: ^4.1.0
   speech_to_text: ^7.4.0
+  ffi: ^2.2.0
+  crypto: ^3.0.7
 
 dev_dependencies:
   flutter_launcher_icons: ^0.14.4

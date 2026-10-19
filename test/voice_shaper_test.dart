@@ -13,8 +13,8 @@ void main() {
       );
       expect(d.kind, VoiceKind.todo);
       expect(d.tasks, ['Buy eggs', 'Call mom', 'Email Sam about the venue']);
-      // The short lead-in names the list and is not left over as prose.
-      expect(d.title, 'For the weekend');
+      // A lead-in that is only a date titles the list with that day.
+      expect(d.title, 'To-do — Sat, Oct 24');
       expect(d.other, isEmpty);
     });
 
@@ -110,5 +110,41 @@ void main() {
     final d = shape('Remember to renew the passport');
     expect(d.kind, VoiceKind.todo);
     expect(d.listBody, '- [ ] Renew the passport\n');
+  });
+
+  group('dates', () {
+    test('spoken dates and times become absolute on the task', () {
+      final d = shape(
+        'Call the dentist tomorrow at 3. Pay rent on Friday. Buy milk.',
+      );
+      expect(d.tasks, [
+        'Call the dentist — Mon, Oct 19, 3 PM',
+        'Pay rent — Fri, Oct 23',
+        'Buy milk',
+      ]);
+    });
+
+    test('a non-date lead-in still names the list', () {
+      final d = shape('Groceries. Buy eggs. Get coffee.');
+      expect(d.title, 'Groceries');
+    });
+  });
+
+  group('fragments', () {
+    test('a short follow-on joins the task before it', () {
+      final d = shape('I need to buy eggs. Bread too. Call mom.');
+      expect(d.tasks, ['Buy eggs and bread', 'Call mom']);
+    });
+
+    test('"also" inside a task reads as one list', () {
+      final d = shape('Buy eggs, also milk');
+      expect(d.tasks, ['Buy eggs and milk']);
+    });
+
+    test('prose after a task is not swallowed', () {
+      final d = shape('Buy eggs. The shop closes early on Sundays though.');
+      expect(d.tasks, ['Buy eggs']);
+      expect(d.other, ['The shop closes early on Sundays though.']);
+    });
   });
 }

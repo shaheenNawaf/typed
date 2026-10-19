@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +9,7 @@ import 'package:typed/screens/home_screen.dart';
 import 'package:typed/theme/palettes.dart';
 import 'package:typed/utils/note_storage.dart';
 import 'package:typed/voice/transcriber.dart';
+import 'package:typed/voice/voice_shaper.dart';
 import 'package:typed/widgets/voice_memo_sheet.dart';
 
 /// Speaks whatever the test tells it to.
@@ -17,6 +20,10 @@ class FakeTranscriber implements Transcriber {
   String _text = '';
   bool listening = false;
   bool cancelled = false;
+
+  /// Mimics Android's on-device recogniser handing back an empty final
+  /// result on stop after streaming good partials.
+  bool blankOnStop = false;
 
   FakeTranscriber({this.problem});
 
@@ -42,6 +49,10 @@ class FakeTranscriber implements Transcriber {
   @override
   Future<String> stop() async {
     listening = false;
+    if (blankOnStop) {
+      _onText?.call('');
+      return '';
+    }
     return _text;
   }
 
@@ -225,5 +236,75 @@ void main() {
     VoiceMemo.isSupported = () => false;
     await pumpHome(tester);
     expect(find.byTooltip('Voice memo'), findsNothing);
+  });
+
+  testWidgets('a recogniser that goes blank on stop keeps what was shown',
+      (tester) async {
+    fake.blankOnStop = true;
+    await pumpHome(tester);
+    await tester.tap(find.byTooltip('Voice memo'));
+    await settle(tester);
+    fake.say('I need to buy eggs and then call the bank.');
+    await tester.pump();
+
+    await tester.tap(find.text('Done'));
+    await settle(tester);
+
+    expect(find.widgetWithText(TextField, 'Buy eggs'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Call the bank'), findsOneWidget);
+    await tester.tap(find.text('Save'));
+    await settle(tester);
+    final list = (await saved()).firstWhere((n) => n.type == 'todo');
+    expect(list.content, '- [ ] Buy eggs\n- [ ] Call the bank\n');
+  });
+
+  testWidgets('the on-device model refines the draft when it is installed',
+      (tester) async {
+    VoiceMemo.refine = (t) async => const VoiceDraft(
+          noteTitle: 'n',
+          listTitle: 'Bank and groceries',
+          kind: VoiceKind.todo,
+          tasks: ['Call the bank about the card', 'Buy rice'],
+          other: [],
+        );
+    await pumpHome(tester);
+    await tester.tap(find.byTooltip('Voice memo'));
+    await settle(tester);
+    fake.say('the bank still hasnt sorted my card and were out of rice');
+    await tester.tap(find.text('Done'));
+    await settle(tester);
+
+    expect(find.text('Shaped on this device'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Bank and groceries'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Buy rice'), findsOneWidget);
+  });
+
+  testWidgets('a late model draft never overwrites the user\'s edits',
+      (tester) async {
+    final late = Completer<VoiceDraft?>();
+    VoiceMemo.refine = (t) => late.future;
+    await pumpHome(tester);
+    await tester.tap(find.byTooltip('Voice memo'));
+    await settle(tester);
+    fake.say('I need to buy eggs');
+    await tester.tap(find.text('Done'));
+    await settle(tester);
+    expect(find.text('Refining…'), findsOneWidget);
+
+    // The user edits the rules draft while the model is still working.
+    await tester.enterText(find.widgetWithText(TextField, 'Buy eggs'),
+        'Buy free-range eggs');
+    late.complete(const VoiceDraft(
+      noteTitle: 'n',
+      listTitle: 'Model title',
+      kind: VoiceKind.todo,
+      tasks: ['Something else'],
+      other: [],
+    ));
+    await settle(tester);
+
+    expect(find.text('Something else'), findsNothing);
+    expect(find.widgetWithText(TextField, 'Buy free-range eggs'),
+        findsOneWidget);
   });
 }

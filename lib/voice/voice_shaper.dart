@@ -1,4 +1,5 @@
 import '../utils/date_format.dart';
+import 'when_parser.dart';
 
 /// What a voice memo becomes when saved.
 enum VoiceKind { note, todo }
@@ -52,31 +53,49 @@ class VoiceDraft {
 /// - spoken joins between tasks ("…and then…", "also…");
 /// - corrections ("scratch that", "never mind") that drop what came before.
 VoiceDraft shapeVoiceMemo(String transcript, {DateTime? now}) {
+  final date = now ?? DateTime.now();
   final clauses = _clauses(transcript);
   final tasks = <String>[];
   final other = <String>[];
+  var lastWasTask = false;
   for (final clause in clauses) {
     final task = _asTask(clause);
+    final fragment = lastWasTask ? _fragment(clause) : null;
     if (task != null) {
       tasks.add(task);
+      lastWasTask = true;
+    } else if (fragment != null) {
+      // "Buy eggs. Bread too." → "Buy eggs and bread".
+      tasks.last = '${tasks.last} and $fragment';
     } else {
       other.add(_sentence(clause));
+      lastWasTask = false;
     }
+  }
+  // Spoken dates become absolute ones: "tomorrow" in a list read next week
+  // would point at the wrong day.
+  for (var i = 0; i < tasks.length; i++) {
+    final when = parseSpokenWhen(tasks[i], date);
+    if (when != null) tasks[i] = '${_capitalize(when.text)} — ${when.when.label}';
   }
   // A list when the memo is mostly things to do; a note when tasks are
   // incidental to what was said.
   final kind = tasks.length >= 2 || (tasks.length == 1 && other.isEmpty)
       ? VoiceKind.todo
       : VoiceKind.note;
-  final date = now ?? DateTime.now();
   var listTitle = 'To-do — ${monthShort(date.month)} ${date.day}';
-  // A short lead-in before the tasks ("For the weekend, I need to…") names
-  // the list better than a date does.
+  // A short lead-in before the tasks names the list better than today's
+  // date: "Groceries, I need…" → "Groceries"; a lead-in that is only a
+  // date ("Tomorrow, I need to…") → "To-do — Tue, Oct 20".
   if (kind == VoiceKind.todo &&
       clauses.isNotEmpty &&
       _asTask(clauses.first) == null) {
     final lead = other.first.replaceFirst(RegExp(r'[.!?]+$'), '');
-    if (lead.isNotEmpty && lead.split(' ').length <= 6) {
+    final when = parseWhenOnly(lead, date);
+    if (when != null) {
+      listTitle = 'To-do — ${when.label}';
+      other.removeAt(0);
+    } else if (lead.isNotEmpty && lead.split(' ').length <= 6) {
       listTitle = lead;
       other.removeAt(0);
     }
@@ -189,8 +208,36 @@ String _strip(String s) {
   return out;
 }
 
+/// A short follow-on to the previous task: "Bread too.", "Also milk",
+/// "And some coffee as well". Null when the clause is anything more.
+String? _fragment(String clause) {
+  final m = RegExp(
+    r"^(?:(?:oh,?\s+)?and|also|plus)?\s*(.+?)(?:\s+(?:too|as well))?[.!?]*$",
+    caseSensitive: false,
+  ).firstMatch(clause.trim());
+  if (m == null) return null;
+  final hasMarker = RegExp(
+    r"^(?:(?:oh,?\s+)?and|also|plus)\b|\b(?:too|as well)[.!?]*$",
+    caseSensitive: false,
+  ).hasMatch(clause.trim());
+  final body = m.group(1)!.trim();
+  if (!hasMarker || body.isEmpty || body.split(' ').length > 4) return null;
+  final first = body.split(' ').first.toLowerCase();
+  if (_verbs.contains(first) || first == 'i') return null;
+  // "Bread too." is capitalised only because it started a sentence.
+  final word = body.split(' ').first;
+  return word.length > 1 && word.substring(1) == word.substring(1).toLowerCase()
+      ? body[0].toLowerCase() + body.substring(1)
+      : body;
+}
+
 String? _asTask(String clause) {
   var s = _strip(clause);
+  // "buy eggs, also milk" / "eggs, oh and bread" read as one list.
+  s = s.replaceAll(
+    RegExp(r',?\s+(?:oh,?\s+)?(?:and\s+)?(?:also|plus)\s+', caseSensitive: false),
+    ' and ',
+  );
   final cue = _cue.firstMatch(s);
   if (cue != null) {
     s = s.substring(cue.end);

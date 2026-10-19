@@ -418,13 +418,19 @@ class _Glass extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: radius,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: dark ? 0.35 : 0.10),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        // Light mode only. The glass is translucent, so a shadow painted
+        // under it shows *through* it: in dark mode the black smudge
+        // muddied the whole lower half of the capsule. Dark relies on the
+        // hairline and a more solid tint instead.
+        boxShadow: dark
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.10),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
+                ),
+              ],
       ),
       child: ClipRRect(
         borderRadius: radius,
@@ -434,7 +440,7 @@ class _Glass extends StatelessWidget {
             // Tint first, so the blurred content reads through it…
             decoration: BoxDecoration(
               borderRadius: radius,
-              color: c.surface.withValues(alpha: dark ? 0.66 : 0.74),
+              color: c.surface.withValues(alpha: dark ? 0.86 : 0.74),
             ),
             child: DecoratedBox(
               // …then a lit top edge and hairline: what sells it as glass.
@@ -451,7 +457,7 @@ class _Glass extends StatelessWidget {
                 ),
                 border: Border.all(
                   color: dark
-                      ? Colors.white.withValues(alpha: 0.10)
+                      ? Colors.white.withValues(alpha: 0.12)
                       : c.border.withValues(alpha: 0.9),
                 ),
               ),
@@ -491,18 +497,17 @@ class _CreateKey extends StatelessWidget {
             decoration: BoxDecoration(
               color: c.accent,
               shape: BoxShape.circle,
-              // Same shadow as the glass capsule, so the two read as a pair.
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(
-                    alpha: Theme.of(context).brightness == Brightness.dark
-                        ? 0.35
-                        : 0.10,
-                  ),
-                  blurRadius: 24,
-                  offset: const Offset(0, 8),
-                ),
-              ],
+              // Same rule as the glass capsule: a soft shadow in light mode,
+              // none in dark (a black halo on a near-black page is a smudge).
+              boxShadow: Theme.of(context).brightness == Brightness.dark
+                  ? null
+                  : [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.10),
+                        blurRadius: 24,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
             ),
             child: Icon(Icons.add_rounded, size: 30, color: c.onAccent),
           ),

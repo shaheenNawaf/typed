@@ -20,6 +20,9 @@ class SettingsSheet extends StatelessWidget {
   final String? displayName;
   final VoidCallback? onEditName;
 
+  /// Opens "Smarter voice memos"; null where the model can't run.
+  final VoidCallback? onVoiceModel;
+
   const SettingsSheet({
     super.key,
     required this.onExport,
@@ -31,6 +34,7 @@ class SettingsSheet extends StatelessWidget {
     this.onRemoveSamples,
     this.displayName,
     this.onEditName,
+    this.onVoiceModel,
   });
 
   static Future<void> show(
@@ -44,6 +48,7 @@ class SettingsSheet extends StatelessWidget {
     VoidCallback? onRemoveSamples,
     String? displayName,
     VoidCallback? onEditName,
+    VoidCallback? onVoiceModel,
   }) {
     return showModalBottomSheet(
       context: context,
@@ -66,6 +71,7 @@ class SettingsSheet extends StatelessWidget {
           onRemoveSamples: onRemoveSamples,
           displayName: displayName,
           onEditName: onEditName,
+          onVoiceModel: onVoiceModel,
         ),
       ),
     );
@@ -98,6 +104,15 @@ class SettingsSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
+            if (onVoiceModel != null)
+              _Option(
+                icon: Icons.graphic_eq_rounded,
+                label: 'Smarter voice memos',
+                onTap: () {
+                  Navigator.pop(context);
+                  onVoiceModel!();
+                },
+              ),
             if (onEditName != null)
               _Option(
                 icon: Icons.person_outline,
