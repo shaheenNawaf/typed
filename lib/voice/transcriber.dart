@@ -7,6 +7,10 @@ import 'package:speech_to_text/speech_recognition_error.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
+import 'llm_shaper.dart';
+import 'voice_model.dart';
+import 'voice_shaper.dart';
+
 /// Why a transcriber could not start.
 enum TranscriberProblem {
   /// Microphone or speech permission was refused.
@@ -53,10 +57,22 @@ class VoiceMemo {
 
   static Transcriber Function() createTranscriber = SystemTranscriber.new;
 
+  /// The model tier: a refined draft, or null when the optional model is
+  /// not installed (or its answer was unusable). The rules draft stands.
+  static Future<VoiceDraft?> Function(String transcript) refine =
+      _defaultRefine;
+
   @visibleForTesting
   static void reset() {
     isSupported = _defaultSupported;
     createTranscriber = SystemTranscriber.new;
+    refine = _defaultRefine;
+  }
+
+  static Future<VoiceDraft?> _defaultRefine(String transcript) async {
+    final path = await VoiceModel.activePath();
+    if (path == null) return null;
+    return LlmShaper.shape(transcript, path);
   }
 
   static bool _defaultSupported() =>

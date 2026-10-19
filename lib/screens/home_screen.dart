@@ -38,6 +38,8 @@ import '../widgets/context_panel.dart';
 import '../widgets/workspace_header.dart';
 import '../widgets/command_palette.dart';
 import '../widgets/voice_memo_sheet.dart';
+import '../widgets/voice_model_sheet.dart';
+import '../voice/voice_model.dart';
 import '../voice/transcriber.dart';
 import '../voice/voice_shaper.dart';
 import 'onboarding_screen.dart';
@@ -1707,6 +1709,9 @@ class _HomeScreenState extends State<HomeScreen>
       onRemoveSamples: _hasSampleData ? _removeSampleData : null,
       displayName: _displayName,
       onEditName: _editDisplayName,
+      onVoiceModel: VoiceMemo.isSupported() && VoiceModel.isSupported()
+          ? () => VoiceModelSheet.show(context)
+          : null,
     );
   }
 

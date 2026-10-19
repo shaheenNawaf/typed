@@ -83,6 +83,14 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
   bool _titleEdited = false;
   bool _bodyEdited = false;
 
+  /// The optional on-device model is reshaping the draft.
+  bool _refining = false;
+  bool _refined = false;
+
+  /// Any edit in review: a late model draft must never overwrite it.
+  bool _touched = false;
+  int _refineRun = 0;
+
   String get _transcript =>
       [_before, _live].where((s) => s.trim().isNotEmpty).join(' ').trim();
 
@@ -201,7 +209,37 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
   }
 
   void _toReview() {
-    final draft = shapeVoiceMemo(_transcript);
+    _applyDraft(shapeVoiceMemo(_transcript));
+    _touched = false;
+    _refined = false;
+    setState(() => _phase = _Phase.review);
+    _refine();
+  }
+
+  /// Rules draft first (instant), then the model's, if it is installed and
+  /// the user has not started editing.
+  Future<void> _refine() async {
+    final run = ++_refineRun;
+    final transcript = _transcript;
+    if (transcript.isEmpty) return;
+    setState(() => _refining = true);
+    VoiceDraft? better;
+    try {
+      better = await VoiceMemo.refine(transcript);
+    } catch (_) {
+      better = null;
+    }
+    if (!mounted || run != _refineRun) return;
+    setState(() {
+      _refining = false;
+      if (better != null && !_touched) {
+        _applyDraft(better);
+        _refined = true;
+      }
+    });
+  }
+
+  void _applyDraft(VoiceDraft draft) {
     for (final t in _tasks) {
       t.dispose();
     }
@@ -215,7 +253,6 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
     _body.text = draft.noteBody;
     _titleEdited = false;
     _bodyEdited = false;
-    setState(() => _phase = _Phase.review);
   }
 
   Future<void> _saveDraft() async {
@@ -231,6 +268,7 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
   void _setKind(String value) {
     final kind = value == 'todo' ? VoiceKind.todo : VoiceKind.note;
     if (kind == _kind) return;
+    _touched = true;
     setState(() {
       _kind = kind;
       final draft = _draft;
@@ -281,6 +319,8 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
   void _keepTalking() {
     // Edits to the draft are dropped; what was said is kept and extended.
     _recovered = false;
+    _refineRun++;
+    _refining = false;
     _listen();
   }
 
@@ -512,7 +552,31 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
                 options: const {'note': 'Note', 'todo': 'To-do list'},
               ),
             ),
-            if (_recovered)
+            if (_refining)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5,
+                      color: c.muted,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Refining…',
+                    style: TextStyle(fontSize: 12, color: c.muted),
+                  ),
+                ],
+              )
+            else if (_refined)
+              Text(
+                'Shaped on this device',
+                style: TextStyle(fontSize: 12, color: c.muted),
+              )
+            else if (_recovered)
               Text(
                 'From your last memo',
                 style: TextStyle(fontSize: 12, color: c.muted),
@@ -522,7 +586,7 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
         const SizedBox(height: 8),
         TextField(
           controller: _title,
-          onChanged: (_) => _titleEdited = true,
+          onChanged: (_) => _titleEdited = _touched = true,
           textCapitalization: TextCapitalization.sentences,
           style: TextStyle(
             fontSize: 20,
@@ -544,7 +608,7 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
                 ? _taskEditor(context)
                 : TextField(
                     controller: _body,
-                    onChanged: (_) => _bodyEdited = true,
+                    onChanged: (_) => _bodyEdited = _touched = true,
                     minLines: 3,
                     maxLines: null,
                     textCapitalization: TextCapitalization.sentences,
@@ -610,6 +674,10 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
               Expanded(
                 child: TextField(
                   controller: _tasks[i],
+                  onChanged: (_) => _touched = true,
+                  // Wrap: a dated task ("… — Sun, Oct 25") ran off the edge.
+                  minLines: 1,
+                  maxLines: 3,
                   textCapitalization: TextCapitalization.sentences,
                   style: taskTextStyle(context, done: false),
                   decoration: const InputDecoration(
@@ -623,6 +691,7 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
                 tooltip: 'Remove task',
                 visualDensity: VisualDensity.compact,
                 onPressed: () => setState(() {
+                  _touched = true;
                   _tasks.removeAt(i).dispose();
                 }),
                 icon: Icon(Icons.close_rounded, size: 16, color: c.muted),
@@ -632,9 +701,10 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
         TaskAddRow(
           dense: true,
           hint: _tasks.isEmpty ? 'Add the first task' : 'Add a task',
-          onSubmit: (t) => setState(
-            () => _tasks.add(TextEditingController(text: t)),
-          ),
+          onSubmit: (t) => setState(() {
+            _touched = true;
+            _tasks.add(TextEditingController(text: t));
+          }),
         ),
         if (_other.isNotEmpty) ...[
           const SizedBox(height: 14),
@@ -643,6 +713,7 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
             InkWell(
               borderRadius: BorderRadius.circular(10),
               onTap: () => setState(() {
+                _touched = true;
                 final text = _other[i].replaceFirst(RegExp(r'[.!?]$'), '');
                 _tasks.add(TextEditingController(text: text));
                 _other = List.of(_other)..removeAt(i);

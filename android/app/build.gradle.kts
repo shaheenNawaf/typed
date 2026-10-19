@@ -38,6 +38,39 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // On-device voice-memo shaper (llama.cpp). Only 64-bit ABIs: phones
+        // and the x86_64 emulator. 32-bit installs simply don't offer it.
+        externalNativeBuild {
+            cmake {
+                // Build only for what `flutter build --target-platform`
+                // asked for, so a phone APK doesn't carry the emulator's lib.
+                val requested = (project.findProperty("target-platform") as String?)
+                    ?.split(",")
+                    ?.mapNotNull {
+                        when (it.trim()) {
+                            "android-arm64" -> "arm64-v8a"
+                            "android-x64" -> "x86_64"
+                            else -> null
+                        }
+                    }
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: listOf("arm64-v8a", "x86_64")
+                abiFilters(*requested.toTypedArray())
+                // Always optimised: profile/debug variants otherwise compile
+                // ggml at -O0, which is tens of times slower.
+                arguments("-DANDROID_STL=c++_static", "-DCMAKE_BUILD_TYPE=Release")
+                cFlags("-O3")
+                cppFlags("-O3")
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     signingConfigs {

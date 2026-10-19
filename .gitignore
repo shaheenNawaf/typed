@@ -53,3 +53,8 @@ flutter_sdk/
 # Orchestrator run state
 .orchestrator/
 .playwright-mcp/
+
+# Voice model training: generated data, checkpoints, logs
+tools/voice_model/data/
+tools/voice_model/out/
+tools/voice_model/logs/
