@@ -10,11 +10,11 @@ void main() {
       draftFromModelJson(json, transcript, now: now);
 
   test('tasks get absolute dates from the spoken when phrase', () {
-    final d = map('{"kind": "todo", "title": "Errands", "tasks": ['
+    final d = map('{"kind": "todo", "title": "Bank and groceries", "tasks": ['
         '{"text": "Call the bank about the card", "when": "tomorrow at 3"}, '
         '{"text": "Buy rice", "when": ""}], "note": ""}')!;
     expect(d.kind, VoiceKind.todo);
-    expect(d.title, 'Errands');
+    expect(d.title, 'Bank and groceries');
     expect(d.taskLines, [
       'Call the bank about the card — Tue, Oct 20, 3 PM',
       'Buy rice',

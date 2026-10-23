@@ -106,6 +106,12 @@ final _dayPattern = RegExp(
   '|(?:(?<mod>this|next|on|by|until|till)\\s+)?(?<wd>$_weekdayRe)'
   '|(?:on\\s+)?(?:the\\s+)?(?<d1>\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?<m1>$_monthRe)'
   '|(?:on\\s+)?(?<m2>$_monthRe)\\s+(?:the\\s+)?(?<d2>\\d{1,2})(?:st|nd|rd|th)?'
+  // "on the 30th": the next time that day of the month comes round.
+  '|(?:(?:on|by|before|until|till)\\s+)?the\\s+(?<d3>\\d{1,2})(?:st|nd|rd|th)'
+  // …but not "the 2nd floor", "the 3rd time".
+  '(?!\\s+(?:of\\s+)?(?:$_monthRe|floor|place|time|round|step|row|grade|chapter|page|item|thing|edition|attempt|try|level|year|day|week|month|quarter|half|batch|draft|version)\\b)'
+  // "before end of day", "by EOD": today, 5 PM.
+  '|(?<eod>(?:(?:before|by|until|till)\\s+)?(?:the\\s+)?end\\s+of\\s+(?:the\\s+)?(?:day|business)|(?:by\\s+)?eod)'
   ')\\b',
   caseSensitive: false,
 );
@@ -191,6 +197,10 @@ WhenMatch? _parse(String task, DateTime now) {
   if (d != null) {
     day = _resolveDay(d, today, now);
     if (d.namedGroup('today')?.toLowerCase() == 'tonight') part = 'tonight';
+    if (d.namedGroup('eod') != null) {
+      hour = 17;
+      minute = 0;
+    }
     if (day != null) text = _cut(text, d);
   }
 
@@ -280,6 +290,18 @@ DateTime? _resolveDay(RegExpMatch d, DateTime today, DateTime now) {
     // "next Friday" said early in the week skips the one coming up.
     if (mod == 'next' && today.weekday + ahead <= 7) ahead += 7;
     return today.add(Duration(days: ahead));
+  }
+  if (d.namedGroup('eod') != null) return today;
+  final d3 = d.namedGroup('d3');
+  if (d3 != null) {
+    final dayNum = int.parse(d3);
+    if (dayNum < 1 || dayNum > 31) return null;
+    // This month if that day is still ahead, else the next month that has it.
+    for (var i = 0; i < 3; i++) {
+      final date = DateTime(today.year, today.month + i, dayNum);
+      if (date.day == dayNum && !date.isBefore(today)) return date;
+    }
+    return null;
   }
   final m = d.namedGroup('m1') ?? d.namedGroup('m2');
   final dd = d.namedGroup('d1') ?? d.namedGroup('d2');
