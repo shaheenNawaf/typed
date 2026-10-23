@@ -73,17 +73,21 @@ VoiceDraft? draftFromModelJson(
     return null;
   }
   final kind = json['kind'] == 'todo' ? VoiceKind.todo : VoiceKind.note;
-  final tasks = <String>[];
+  final tasks = <VoiceTask>[];
   for (final t in (json['tasks'] as List? ?? const [])) {
     if (t is! Map) continue;
     final text = (t['text'] as String? ?? '').trim();
     if (text.isEmpty) continue;
     final when = (t['when'] as String? ?? '').trim();
     final parsed = when.isEmpty ? null : parseSpokenWhen('$text $when', now);
-    tasks.add(parsed == null
-        ? text
-        : '${parsed.text[0].toUpperCase()}${parsed.text.substring(1)} — '
-            '${parsed.when.label}');
+    tasks.add(
+      parsed == null
+          ? VoiceTask(text)
+          : VoiceTask(
+              '${parsed.text[0].toUpperCase()}${parsed.text.substring(1)}',
+              parsed.when,
+            ),
+    );
   }
   if (kind == VoiceKind.todo && tasks.isEmpty) return null;
 
@@ -96,17 +100,24 @@ VoiceDraft? draftFromModelJson(
   final other = note.isEmpty
       ? <String>[]
       : note
-          .split(RegExp(r'(?<=[.!?])\s+'))
-          .map((s) => s.trim())
-          .where((s) => s.isNotEmpty)
-          .toList();
+            .split(RegExp(r'(?<=[.!?])\s+'))
+            .map((s) => s.trim())
+            .where((s) => s.isNotEmpty)
+            .toList();
 
   final rules = shapeVoiceMemo(transcript, now: now);
+  // The model was not trained on money: an expense memo keeps the rules'.
+  if (rules.kind == VoiceKind.expense) return null;
   return VoiceDraft(
-    noteTitle: kind == VoiceKind.note && title.isNotEmpty ? title : rules.noteTitle,
-    listTitle: kind == VoiceKind.todo && title.isNotEmpty ? title : rules.listTitle,
+    noteTitle: kind == VoiceKind.note && title.isNotEmpty
+        ? title
+        : rules.noteTitle,
+    listTitle: kind == VoiceKind.todo && title.isNotEmpty
+        ? title
+        : rules.listTitle,
     kind: kind,
     tasks: tasks,
     other: other,
+    spends: rules.spends,
   );
 }

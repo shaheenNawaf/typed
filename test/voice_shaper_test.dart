@@ -12,7 +12,7 @@ void main() {
         'Remember to call mom. Also email Sam about the venue.',
       );
       expect(d.kind, VoiceKind.todo);
-      expect(d.tasks, ['Buy eggs', 'Call mom', 'Email Sam about the venue']);
+      expect(d.taskLines, ['Buy eggs', 'Call mom', 'Email Sam about the venue']);
       // A lead-in that is only a date titles the list with that day.
       expect(d.title, 'To-do — Sat, Oct 24');
       expect(d.other, isEmpty);
@@ -28,7 +28,7 @@ void main() {
         'i have to pick up the dry cleaning and then call the bank '
         'and also water the plants',
       );
-      expect(d.tasks, [
+      expect(d.taskLines, [
         'Pick up the dry cleaning',
         'Call the bank',
         'Water the plants',
@@ -37,29 +37,29 @@ void main() {
 
     test('commas between tasks split them', () {
       final d = shape('buy milk, call mom, email Sam');
-      expect(d.tasks, ['Buy milk', 'Call mom', 'Email Sam']);
+      expect(d.taskLines, ['Buy milk', 'Call mom', 'Email Sam']);
     });
 
     test('"and" inside one task does not split it', () {
       final d = shape('I need to buy eggs and milk and bread');
-      expect(d.tasks, ['Buy eggs and milk and bread']);
+      expect(d.taskLines, ['Buy eggs and milk and bread']);
     });
 
     test("don't forget and I'll are cues too", () {
       final d = shape("Don't forget the passport. I'll book the taxi.");
-      expect(d.tasks, ['The passport', 'Book the taxi']);
+      expect(d.taskLines, ['The passport', 'Book the taxi']);
     });
   });
 
   group('corrections', () {
     test('scratch that drops what came before', () {
       final d = shape('Buy milk, scratch that, buy oat milk instead.');
-      expect(d.tasks, ['Buy oat milk']);
+      expect(d.taskLines, ['Buy oat milk']);
     });
 
     test('never mind on its own removes the previous task', () {
       final d = shape('Call Sam. Never mind. Email Priya. Book flights.');
-      expect(d.tasks, ['Email Priya', 'Book flights']);
+      expect(d.taskLines, ['Email Priya', 'Book flights']);
     });
   });
 
@@ -70,7 +70,7 @@ void main() {
         'Sync is the hard part, not storage.',
       );
       expect(d.kind, VoiceKind.note);
-      expect(d.tasks, isEmpty);
+      expect(d.taskLines, isEmpty);
       expect(d.title, 'The talk today was about local-first software');
       expect(
         d.noteBody,
@@ -117,7 +117,7 @@ void main() {
       final d = shape(
         'Call the dentist tomorrow at 3. Pay rent on Friday. Buy milk.',
       );
-      expect(d.tasks, [
+      expect(d.taskLines, [
         'Call the dentist — Mon, Oct 19, 3 PM',
         'Pay rent — Fri, Oct 23',
         'Buy milk',
@@ -133,17 +133,17 @@ void main() {
   group('fragments', () {
     test('a short follow-on joins the task before it', () {
       final d = shape('I need to buy eggs. Bread too. Call mom.');
-      expect(d.tasks, ['Buy eggs and bread', 'Call mom']);
+      expect(d.taskLines, ['Buy eggs and bread', 'Call mom']);
     });
 
     test('"also" inside a task reads as one list', () {
       final d = shape('Buy eggs, also milk');
-      expect(d.tasks, ['Buy eggs and milk']);
+      expect(d.taskLines, ['Buy eggs and milk']);
     });
 
     test('prose after a task is not swallowed', () {
       final d = shape('Buy eggs. The shop closes early on Sundays though.');
-      expect(d.tasks, ['Buy eggs']);
+      expect(d.taskLines, ['Buy eggs']);
       expect(d.other, ['The shop closes early on Sundays though.']);
     });
   });

@@ -20,7 +20,7 @@ void main() {
         'title': d.title,
         // The rules fold the date into the text ("… — Tue, Oct 20").
         'tasks': [
-          for (final t in d.tasks)
+          for (final t in d.taskLines)
             {'text': t.split(' — ').first, 'when': t.contains(' — ') ? '*' : ''}
         ],
         'note': d.other.join(' '),

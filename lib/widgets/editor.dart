@@ -28,6 +28,9 @@ import 'editor_toolbar.dart';
 import 'entry_sheet.dart';
 import 'image_picker_sheet.dart';
 import 'markdown_controller.dart';
+import 'voice_memo_sheet.dart';
+import '../utils/notifications.dart';
+import '../voice/transcriber.dart';
 import 'table_picker_sheet.dart';
 import 'task_row.dart';
 
@@ -729,6 +732,55 @@ class _EditorState extends State<Editor> {
     _syncContent();
   }
 
+  /// Voice into the open note: a list gets tasks (with reminders), a note
+  /// gets the words at the end.
+  Future<void> _dictate() async {
+    final note = widget.note;
+    if (note == null) return;
+    final isList = _isChecklistNote || note.type == 'todo';
+    final result = await VoiceMemoSheet.show(
+      context,
+      appendTo: VoiceAppendTarget(
+        note.title.trim().isEmpty ? 'this note' : note.title,
+        isList: isList,
+      ),
+    );
+    if (result == null || !mounted || widget.note?.id != note.id) return;
+    final current = _contentCtrl.text;
+    final String addition;
+    if (isList) {
+      if (result.tasks.isEmpty) return;
+      addition = result.tasks.map((t) => '- [ ] $t').join('\n');
+    } else {
+      if (result.content.trim().isEmpty) return;
+      addition = result.content.trim();
+    }
+    final String sep;
+    if (current.trim().isEmpty) {
+      sep = '';
+    } else if (isList) {
+      sep = current.endsWith('\n') ? '' : '\n';
+    } else {
+      sep = current.endsWith('\n\n')
+          ? ''
+          : current.endsWith('\n')
+          ? '\n'
+          : '\n\n';
+    }
+    final base = current.trim().isEmpty ? '' : current;
+    _contentCtrl.text = '$base$sep$addition\n';
+    _syncContent();
+    for (final t in result.taskItems) {
+      if (t.remindAt == null) continue;
+      NotificationService.instance.scheduleTaskReminder(
+        noteId: note.id,
+        noteTitle: note.title,
+        line: t.line,
+        at: t.remindAt!,
+      );
+    }
+  }
+
   void _syncContent() {
     // Rebuild so the word count and live preview refresh after programmatic
     // edits (toolbar, slash commands), which fire the controller listener
@@ -1026,6 +1078,17 @@ class _EditorState extends State<Editor> {
               ],
             ],
           ],
+          // Dictate into this note or list.
+          if (note != null && !isFinance && VoiceMemo.isSupported())
+            IconButton(
+              tooltip: 'Dictate',
+              onPressed: _dictate,
+              icon: Icon(
+                Icons.mic_none_rounded,
+                size: 20,
+                color: context.colors.muted,
+              ),
+            ),
           if (note != null &&
               (widget.onArchive != null || widget.onTogglePin != null))
             PopupMenuButton<String>(

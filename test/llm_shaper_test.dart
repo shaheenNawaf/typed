@@ -15,7 +15,7 @@ void main() {
         '{"text": "Buy rice", "when": ""}], "note": ""}')!;
     expect(d.kind, VoiceKind.todo);
     expect(d.title, 'Errands');
-    expect(d.tasks, [
+    expect(d.taskLines, [
       'Call the bank about the card — Tue, Oct 20, 3 PM',
       'Buy rice',
     ]);

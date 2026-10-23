@@ -2,6 +2,9 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Task reminders at the exact minute when the user allows it
+         (Settings → Alarms & reminders); otherwise inexact timing. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <!-- Voice memos: transcribed by the phone's on-device recogniser. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
@@ -42,6 +45,27 @@
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
+
+        <!-- flutter_local_notifications: these deliver scheduled
+             notifications (evening recap, streak, task reminders) and
+             re-arm them after a reboot or app update. The plugin does not
+             declare them itself; without them nothing scheduled ever fires. -->
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver" />
 
         <!-- Quick-settings tile: opens straight into a voice memo. -->
         <service

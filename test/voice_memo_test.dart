@@ -148,6 +148,7 @@ void main() {
     expect(find.text('List saved'), findsOneWidget);
     final list = (await saved()).firstWhere((n) => n.type == 'todo');
     expect(list.content, '- [ ] Buy eggs\n- [ ] Call the bank\n');
+    expect(list.tags, containsAll(['todo', 'voice']));
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString(VoiceMemoSheet.draftKey), isNull);
   });
@@ -269,7 +270,10 @@ void main() {
           noteTitle: 'n',
           listTitle: 'Bank and groceries',
           kind: VoiceKind.todo,
-          tasks: ['Call the bank about the card', 'Buy rice'],
+          tasks: [
+            VoiceTask('Call the bank about the card'),
+            VoiceTask('Buy rice'),
+          ],
           other: [],
         );
     await pumpHome(tester);
@@ -303,7 +307,7 @@ void main() {
       noteTitle: 'n',
       listTitle: 'Model title',
       kind: VoiceKind.todo,
-      tasks: ['Something else'],
+      tasks: [VoiceTask('Something else')],
       other: [],
     ));
     await settle(tester);
@@ -414,6 +418,61 @@ void main() {
     await settle(tester);
     list = (await saved()).firstWhere((n) => n.id == 'g');
     expect(list.content.trim(), '- [ ] Milk');
+  });
+
+  testWidgets('spoken spending is logged to this month\'s money, with Undo',
+      (tester) async {
+    await pumpHome(tester);
+    await tester.tap(find.byTooltip('Voice memo'));
+    await settle(tester);
+    fake.say('Spent 250 on lunch. Grab home was 180.');
+    await tester.tap(find.text('Done').last);
+    await settle(tester);
+
+    // Review: an expense draft with editable amounts.
+    expect(find.text('Expense'), findsOneWidget);
+    expect(find.widgetWithText(TextField, '250'), findsOneWidget);
+    expect(find.widgetWithText(TextField, '180'), findsOneWidget);
+    expect(find.text('Food'), findsWidgets);
+    expect(find.text('Transport'), findsWidgets);
+
+    await tester.tap(find.text('Log'));
+    await settle(tester);
+
+    expect(find.textContaining('2 entries logged'), findsOneWidget);
+    final money = (await saved()).firstWhere((n) => n.amounts.isNotEmpty);
+    expect(money.amounts.map((e) => e.amount), [25000, 18000]);
+    expect(money.amounts.map((e) => e.category), ['Food', 'Transport']);
+
+    await tester.tap(find.text('Undo'));
+    await settle(tester);
+    final after = await saved();
+    expect(after.expand((n) => n.amounts), isEmpty);
+  });
+
+  testWidgets('a spoken time shows a date chip with a reminder bell',
+      (tester) async {
+    await pumpHome(tester);
+    await tester.tap(find.byTooltip('Voice memo'));
+    await settle(tester);
+    fake.say('Call the dentist tomorrow at 3. Buy milk.');
+    await tester.tap(find.text('Done').last);
+    await settle(tester);
+
+    expect(find.byTooltip('Reminder on'), findsOneWidget);
+    expect(find.text('Add date'), findsOneWidget);
+    await tester.tap(find.byTooltip('Reminder on'));
+    await tester.pump();
+    expect(find.byTooltip('Remind me'), findsOneWidget);
+
+    // Clearing the date drops it from the saved line.
+    await tester.tap(find.bySemanticsLabel('Clear date'));
+    await tester.pump();
+    expect(find.text('Add date'), findsNWidgets(2));
+    await tester.tap(find.text('Save'));
+    await settle(tester);
+    final list = (await saved()).firstWhere((n) => n.type == 'todo');
+    expect(list.content, '- [ ] Call the dentist\n- [ ] Buy milk\n');
   });
 
   testWidgets('the widget mic, shortcut and tile open straight into recording',

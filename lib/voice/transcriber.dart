@@ -87,7 +87,8 @@ class VoiceMemo {
 class SystemTranscriber implements Transcriber {
   final SpeechToText _speech;
 
-  SystemTranscriber([SpeechToText? speech]) : _speech = speech ?? SpeechToText();
+  SystemTranscriber([SpeechToText? speech])
+    : _speech = speech ?? SpeechToText();
 
   final _buffer = TranscriptBuffer();
 
@@ -156,6 +157,21 @@ class SystemTranscriber implements Transcriber {
           listenMode: ListenMode.dictation,
           cancelOnError: false,
           pauseFor: const Duration(seconds: 30),
+          // Biases recognition toward the memo's commands (iOS honours it;
+          // Android's recogniser ignores it, so the shaper is tolerant).
+          contextualPhrases: const [
+            'new task',
+            'next task',
+            'scratch that',
+            'never mind',
+            'make it a list',
+            'make it a note',
+            'title is',
+            'spent',
+            'remind me',
+            'tomorrow',
+            'pesos',
+          ],
           listenFor: const Duration(minutes: 10),
         ),
       );
@@ -224,8 +240,10 @@ class SystemTranscriber implements Transcriber {
     try {
       await _speech.stop();
       // The last words arrive just after stop(); wait briefly for them.
-      await (_finished?.future ?? Future<void>.value())
-          .timeout(const Duration(seconds: 2), onTimeout: () {});
+      await (_finished?.future ?? Future<void>.value()).timeout(
+        const Duration(seconds: 2),
+        onTimeout: () {},
+      );
     } catch (_) {}
     // Whatever was still a guess is better kept than lost.
     _buffer.endSession();
@@ -271,10 +289,11 @@ class TranscriptBuffer {
   final _segments = <String>[];
   String _guess = '';
 
-  String get text => [..._settled, ..._segments, _guess]
-      .map((s) => s.trim())
-      .where((s) => s.isNotEmpty)
-      .join(' ');
+  String get text => [
+    ..._settled,
+    ..._segments,
+    _guess,
+  ].map((s) => s.trim()).where((s) => s.isNotEmpty).join(' ');
 
   /// A live guess for the current phrase; revised freely, but an empty one
   /// never erases what was heard.
