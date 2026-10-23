@@ -41,6 +41,7 @@ import '../widgets/voice_memo_sheet.dart';
 import '../widgets/voice_model_sheet.dart';
 import '../voice/voice_model.dart';
 import '../voice/transcriber.dart';
+import '../voice/spend_parser.dart';
 import '../voice/voice_shaper.dart';
 import 'onboarding_screen.dart';
 
@@ -1892,17 +1893,24 @@ class _HomeScreenState extends State<HomeScreen>
         .where((n) => n.type == 'todo' && !n.isArchived && !n.isDeleted)
         .toList()
       ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    final finance = _monthlyFinanceNoteOrDraft();
     final result = await VoiceMemoSheet.show(
       context,
       lists: [
         for (final n in lists)
           VoiceListTarget(n.id, n.title.trim().isEmpty ? 'Untitled list' : n.title),
       ],
+      currencySymbol: currencySymbol(_voiceCurrency(finance)),
     );
     if (result == null || !mounted) return;
+    if (result.kind == VoiceKind.expense) {
+      _logVoiceSpends(result.spends);
+      return;
+    }
     final target = result.appendToId == null ? null : _noteById(result.appendToId);
     if (target != null && result.tasks.isNotEmpty) {
       _appendVoiceTasks(target, result.tasks);
+      _scheduleVoiceReminders(target, result.taskItems);
       return;
     }
     final todo = result.kind == VoiceKind.todo;
@@ -1910,18 +1918,98 @@ class _HomeScreenState extends State<HomeScreen>
       id: generateId('n'),
       title: result.title,
       content: result.content,
-      tags: todo ? ['todo'] : [],
+      // #voice: everything dictated is findable in one place.
+      tags: todo ? ['todo', 'voice'] : ['voice'],
       type: todo ? 'todo' : 'text',
     );
     setState(() => notes.insert(0, note));
     _persistNow();
+    final reminders = await _scheduleVoiceReminders(note, result.taskItems);
+    if (!mounted) return;
+    final saved = todo ? 'List saved' : 'Saved to Notes';
     _showSnackBar(
-      todo ? 'List saved' : 'Saved to Notes',
+      reminders == 0
+          ? saved
+          : '$saved · ${reminders == 1 ? '1 reminder' : '$reminders reminders'} set',
       onUndo: () {
         setState(() => notes.removeWhere((n) => n.id == note.id));
         _persistNow();
       },
     );
+  }
+
+  /// Currency voice expenses are entered in: the workspace scope when one
+  /// is set, else the monthly note's (same rule as quick-add).
+  String _voiceCurrency(Note finance) {
+    final scope = _effectiveFinanceCurrency;
+    return scope != 'all' ? scope : (finance.currency ?? 'PHP');
+  }
+
+  /// "Spent 250 on lunch" → an entry in this month's finance note, exactly
+  /// as quick-add would log it. Undo removes just these entries.
+  void _logVoiceSpends(List<VoiceSpend> spends) {
+    if (spends.isEmpty) return;
+    final note = _monthlyFinanceNoteOrDraft();
+    final currency = _voiceCurrency(note);
+    final now = DateTime.now();
+    final added = <MoneyEntry>[];
+    for (final sp in spends) {
+      final minor = parseAmountToMinor(sp.amount, currency);
+      if (minor == null || minor <= 0) continue;
+      added.add(MoneyEntry(
+        id: generateId('m'),
+        amount: minor,
+        category: sp.category,
+        date: now,
+        note: sp.note.isEmpty ? null : sp.note,
+        type: sp.type,
+        currency: currency != note.currency ? currency : null,
+      ));
+      _onCategoryUsed(sp.category);
+    }
+    if (added.isEmpty) return;
+    setState(() {
+      if (!notes.any((n) => n.id == note.id)) notes.insert(0, note);
+      note.amounts.addAll(added);
+      note.updatedAt = DateTime.now();
+    });
+    _persistNow();
+    HapticFeedback.lightImpact();
+    final total = added.fold<int>(
+      0,
+      (sum, e) => sum + (e.type == 'income' ? -e.amount : e.amount),
+    );
+    final label = added.length == 1
+        ? '${added.first.type == 'income' ? 'Income' : 'Expense'} logged · '
+            '${currencySymbol(currency)}${formatMinorAmount(added.first.amount, currency)}'
+        : '${added.length} entries logged · '
+            '${currencySymbol(currency)}${formatMinorAmount(total.abs(), currency)}';
+    _showSnackBar(
+      label,
+      onUndo: () {
+        final ids = added.map((e) => e.id).toSet();
+        setState(() => note.amounts.removeWhere((e) => ids.contains(e.id)));
+        _persistNow();
+      },
+    );
+  }
+
+  /// Reminders for dated tasks the user left the bell on for. Returns how
+  /// many were scheduled.
+  Future<int> _scheduleVoiceReminders(Note note, List<VoiceTaskOut> items) async {
+    var scheduled = 0;
+    for (final t in items) {
+      final at = t.remindAt;
+      if (at == null) continue;
+      final ok = await NotificationService.instance.scheduleTaskReminder(
+        noteId: note.id,
+        noteTitle: note.title,
+        line: t.line,
+        at: at,
+      );
+      if (ok) scheduled++;
+    }
+    return scheduled;
   }
 
   /// Voice memo tasks added to an existing list; Undo removes exactly the

@@ -1,10 +1,22 @@
 import '../utils/date_format.dart';
+import 'spend_parser.dart';
 import 'when_parser.dart';
 
 /// What a voice memo becomes when saved.
-enum VoiceKind { note, todo }
+enum VoiceKind { note, todo, expense }
 
-/// A first draft of a note or list, made from a transcript. Only a
+/// One thing to do, with the date it was said for (if any).
+class VoiceTask {
+  final String text;
+  final SpokenWhen? when;
+
+  const VoiceTask(this.text, [this.when]);
+
+  /// The checklist line: "Call the dentist — Tue, Oct 20, 3 PM".
+  String get line => when == null ? text : '$text — ${when!.label}';
+}
+
+/// A first draft of a note, list or expense, made from a transcript. Only a
 /// suggestion: the review sheet lets the user change any of it.
 class VoiceDraft {
   /// Titles for each shape, so the review sheet can switch between them.
@@ -13,10 +25,13 @@ class VoiceDraft {
   final VoiceKind kind;
 
   /// Things to do, in the order they were said.
-  final List<String> tasks;
+  final List<VoiceTask> tasks;
 
   /// Everything that was said that is not a task, as cleaned sentences.
   final List<String> other;
+
+  /// Money that was mentioned ("spent 250 on lunch").
+  final List<VoiceSpend> spends;
 
   const VoiceDraft({
     required this.noteTitle,
@@ -24,23 +39,25 @@ class VoiceDraft {
     required this.kind,
     required this.tasks,
     required this.other,
+    this.spends = const [],
   });
 
   String get title => kind == VoiceKind.todo ? listTitle : noteTitle;
 
+  List<String> get taskLines => [for (final t in tasks) t.line];
+
   /// Note body: what was said, with any tasks as a checklist underneath.
   String get noteBody {
     final prose = other.join(' ');
-    final list = tasks.map((t) => '- [ ] $t').join('\n');
+    final list = taskLines.map((t) => '- [ ] $t').join('\n');
     if (list.isEmpty) return prose;
     if (prose.isEmpty) return '$list\n';
     return '$prose\n\n$list\n';
   }
 
   /// Checklist content for a to-do list.
-  String get listBody => tasks.isEmpty
-      ? ''
-      : '${tasks.map((t) => '- [ ] $t').join('\n')}\n';
+  String get listBody =>
+      tasks.isEmpty ? '' : '${taskLines.map((t) => '- [ ] $t').join('\n')}\n';
 }
 
 /// Turns a raw transcript into a [VoiceDraft] with plain rules — no model.
@@ -51,17 +68,33 @@ class VoiceDraft {
 /// - task cues ("I need to…", "remember to…", "don't forget…") and
 ///   imperative openers ("call…", "buy…");
 /// - spoken joins between tasks ("…and then…", "also…");
-/// - corrections ("scratch that", "never mind") that drop what came before.
+/// - corrections ("scratch that", "never mind") that drop what came before;
+/// - money ("spent 250 on lunch", "grab 180") as expenses;
+/// - spoken commands: "new task …" (whatever follows is a task), "title is
+///   …", "make it a list / note / expense".
 VoiceDraft shapeVoiceMemo(String transcript, {DateTime? now}) {
   final date = now ?? DateTime.now();
-  final clauses = _clauses(transcript);
+  final command = _commands(transcript);
+  final clauses = _clauses(command.text);
   final tasks = <String>[];
   final other = <String>[];
+  final spends = <VoiceSpend>[];
   var lastWasTask = false;
-  for (final clause in clauses) {
-    final task = _asTask(clause);
-    final fragment = lastWasTask ? _fragment(clause) : null;
-    if (task != null) {
+  for (var clause in clauses) {
+    // "new task …": whatever follows is a task, cue or no cue.
+    final forced = clause.startsWith(_taskMark);
+    if (forced) clause = clause.substring(_taskMark.length).trim();
+    if (clause.isEmpty) continue;
+    final task = _asTask(clause) ?? (forced ? _forcedTask(clause) : null);
+    // Money, unless it was said as something to do ("remember to pay 500").
+    final money = forced || _cue.hasMatch(_strip(clause))
+        ? const <VoiceSpend>[]
+        : parseSpends(clause);
+    final fragment = lastWasTask && !forced ? _fragment(clause) : null;
+    if (money.isNotEmpty) {
+      spends.addAll(money);
+      lastWasTask = false;
+    } else if (task != null) {
       tasks.add(task);
       lastWasTask = true;
     } else if (fragment != null) {
@@ -73,23 +106,34 @@ VoiceDraft shapeVoiceMemo(String transcript, {DateTime? now}) {
     }
   }
   // Spoken dates become absolute ones: "tomorrow" in a list read next week
-  // would point at the wrong day.
-  for (var i = 0; i < tasks.length; i++) {
-    final when = parseSpokenWhen(tasks[i], date);
-    if (when != null) tasks[i] = '${_capitalize(when.text)} — ${when.when.label}';
-  }
+  // would point at the wrong day. The date stays data, so the review sheet
+  // can show it as a chip and set a reminder.
+  final dated = <VoiceTask>[
+    for (final t in tasks)
+      if (parseSpokenWhen(t, date) case final w?)
+        VoiceTask(_capitalize(w.text), w.when)
+      else
+        VoiceTask(t),
+  ];
   // A list when the memo is mostly things to do; a note when tasks are
-  // incidental to what was said.
-  final kind = tasks.length >= 2 || (tasks.length == 1 && other.isEmpty)
-      ? VoiceKind.todo
-      : VoiceKind.note;
+  // incidental to what was said; an expense when it is mostly money.
+  final kind =
+      command.kind ??
+      (spends.isNotEmpty && spends.length >= tasks.length
+          ? VoiceKind.expense
+          : tasks.length >= 2 || (tasks.length == 1 && other.isEmpty)
+          ? VoiceKind.todo
+          : VoiceKind.note);
   var listTitle = 'To-do — ${monthShort(date.month)} ${date.day}';
   // A short lead-in before the tasks names the list better than today's
   // date: "Groceries, I need…" → "Groceries"; a lead-in that is only a
   // date ("Tomorrow, I need to…") → "To-do — Tue, Oct 20".
   if (kind == VoiceKind.todo &&
+      other.isNotEmpty &&
       clauses.isNotEmpty &&
-      _asTask(clauses.first) == null) {
+      !clauses.first.startsWith(_taskMark) &&
+      _asTask(clauses.first) == null &&
+      parseSpends(clauses.first).isEmpty) {
     final lead = other.first.replaceFirst(RegExp(r'[.!?]+$'), '');
     final when = parseWhenOnly(lead, date);
     if (when != null) {
@@ -100,16 +144,75 @@ VoiceDraft shapeVoiceMemo(String transcript, {DateTime? now}) {
       other.removeAt(0);
     }
   }
+  final spoken = command.title;
   return VoiceDraft(
-    noteTitle: _noteTitle(
-      other.isNotEmpty ? other.first : (tasks.firstOrNull ?? ''),
-      date,
-    ),
-    listTitle: listTitle,
+    noteTitle:
+        spoken ??
+        _noteTitle(
+          other.isNotEmpty ? other.first : (tasks.firstOrNull ?? ''),
+          date,
+        ),
+    listTitle: spoken ?? listTitle,
     kind: kind,
-    tasks: tasks,
+    tasks: dated,
     other: other,
+    spends: spends,
   );
+}
+
+// ── spoken commands ───────────────────────────────────────────────────────
+
+/// Marks a clause that followed "new task".
+const _taskMark = '⟦task⟧';
+
+/// "new task", "next task", "another item", "add a to-do", and the usual
+/// mishearings ("new tasks", "next to do"). Never bare "next": "next week".
+final _taskCommand = RegExp(
+  r"[,;.]?\s*\b(?:new|next|another|add(?:\s+a)?|one more)\s+(?:tasks?|items?|to-?dos?|to do)\b[\s:,.;-]*",
+  caseSensitive: false,
+);
+
+final _titleCommand = RegExp(
+  r"(?:^|[,;.]\s*|\s)(?:the\s+)?(?:title(?:\s+is|\s+it|:)?|call\s+it|name\s+it)\s+([^.!?,;]{1,60})[.!?,;]?",
+  caseSensitive: false,
+);
+
+final _kindCommand = RegExp(
+  r"[,;.]?\s*\b(?:make|save|turn)\s+(?:it|this)(?:\s+(?:into|as))?\s+(?:an?\s+)?(list|to-?do(?:\s+list)?|checklist|note|expenses?)\b[.!?]?|[,;.]?\s*\bas\s+an?\s+(list|to-?do\s+list|checklist|note|expense)\b[.!?]?",
+  caseSensitive: false,
+);
+
+({String text, String? title, VoiceKind? kind}) _commands(String transcript) {
+  var text = transcript;
+  VoiceKind? kind;
+  final k = _kindCommand.firstMatch(text);
+  if (k != null) {
+    final word = (k.group(1) ?? k.group(2))!.toLowerCase();
+    kind = word.startsWith('note')
+        ? VoiceKind.note
+        : word.startsWith('expense')
+        ? VoiceKind.expense
+        : VoiceKind.todo;
+    text = text.replaceRange(k.start, k.end, '. ');
+  }
+  String? title;
+  final t = _titleCommand.firstMatch(text);
+  if (t != null) {
+    final words = t.group(1)!.trim().split(RegExp(r'\s+'));
+    if (words.length <= 8) {
+      title = _capitalize(words.join(' '));
+      text = text.replaceRange(t.start, t.end, '. ');
+    }
+  }
+  text = text.replaceAll(_taskCommand, '. $_taskMark ');
+  return (text: text, title: title, kind: kind);
+}
+
+/// After "new task", anything is a task: "new task the passport photos"
+/// → "The passport photos".
+String? _forcedTask(String clause) {
+  final s = _strip(clause).replaceFirst(RegExp(r'[\s,.;!?]+$'), '').trim();
+  return s.length < 2 ? null : _capitalize(s);
 }
 
 // ── clauses ───────────────────────────────────────────────────────────────
@@ -124,13 +227,58 @@ const _taskStarts =
 
 /// Imperative openers that make a clause a task on their own.
 const _verbs = {
-  'ask', 'book', 'bring', 'buy', 'call', 'cancel', 'check', 'clean', 'drop',
-  'email', 'feed', 'file', 'find', 'finish', 'fix', 'follow', 'get', 'grab',
-  'look', 'mail', 'make', 'message', 'order', 'organise', 'organize', 'pack',
-  'pay', 'pick', 'plan', 'prepare', 'print', 'read', 'renew', 'reply',
-  'research', 'reschedule', 'return', 'review', 'schedule', 'send', 'set',
-  'sign', 'sort', 'start', 'submit', 'take', 'tell', 'text', 'update',
-  'wash', 'water', 'write',
+  'ask',
+  'book',
+  'bring',
+  'buy',
+  'call',
+  'cancel',
+  'check',
+  'clean',
+  'drop',
+  'email',
+  'feed',
+  'file',
+  'find',
+  'finish',
+  'fix',
+  'follow',
+  'get',
+  'grab',
+  'look',
+  'mail',
+  'make',
+  'message',
+  'order',
+  'organise',
+  'organize',
+  'pack',
+  'pay',
+  'pick',
+  'plan',
+  'prepare',
+  'print',
+  'read',
+  'renew',
+  'reply',
+  'research',
+  'reschedule',
+  'return',
+  'review',
+  'schedule',
+  'send',
+  'set',
+  'sign',
+  'sort',
+  'start',
+  'submit',
+  'take',
+  'tell',
+  'text',
+  'update',
+  'wash',
+  'water',
+  'write',
 };
 
 final _verbPattern = _verbs.join('|');
@@ -159,6 +307,7 @@ List<String> _clauses(String transcript) {
   if (text.isEmpty) return const [];
   final sentences = text
       .split(RegExp(r'(?<=[.!?;])\s+'))
+      .expand((s) => s.split(RegExp(r'\s*(?=⟦task⟧)')))
       .expand((s) => s.split(_beforeCorrection))
       .expand((s) => s.split(_beforeCue))
       .expand((s) => s.split(_joins))
@@ -172,7 +321,10 @@ List<String> _clauses(String transcript) {
       if (out.isNotEmpty) out.removeLast();
       s = s.substring(fix.end).trim();
       s = s.replaceFirst(RegExp(r'^instead\b[\s,]*', caseSensitive: false), '');
-      s = s.replaceFirst(RegExp(r'\s*\binstead\b(?=[.!?]?$)', caseSensitive: false), '');
+      s = s.replaceFirst(
+        RegExp(r'\s*\binstead\b(?=[.!?]?$)', caseSensitive: false),
+        '',
+      );
     }
     if (_strip(s).isNotEmpty) out.add(s);
   }
@@ -235,17 +387,20 @@ String? _asTask(String clause) {
   var s = _strip(clause);
   // "buy eggs, also milk" / "eggs, oh and bread" read as one list.
   s = s.replaceAll(
-    RegExp(r',?\s+(?:oh,?\s+)?(?:and\s+)?(?:also|plus)\s+', caseSensitive: false),
+    RegExp(
+      r',?\s+(?:oh,?\s+)?(?:and\s+)?(?:also|plus)\s+',
+      caseSensitive: false,
+    ),
     ' and ',
   );
   final cue = _cue.firstMatch(s);
   if (cue != null) {
     s = s.substring(cue.end);
   } else {
-    final first = RegExp(r"^[a-z']+", caseSensitive: false)
-        .firstMatch(s)
-        ?.group(0)
-        ?.toLowerCase();
+    final first = RegExp(
+      r"^[a-z']+",
+      caseSensitive: false,
+    ).firstMatch(s)?.group(0)?.toLowerCase();
     if (first == null || !_verbs.contains(first)) return null;
   }
   s = s.replaceFirst(RegExp(r'[\s,.;!?]+$'), '').trim();

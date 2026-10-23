@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
@@ -59,6 +61,11 @@ class NotificationService {
   static const _eveningId = 4101;
   static const _streakId = 4102;
   static const _budgetBaseId = 4200;
+
+  /// One-off reminders for dated voice-memo tasks: ids 5000..904999, one
+  /// record each in prefs so they can be cancelled when the task goes.
+  static const _taskBaseId = 5000;
+  static const _taskKey = 'task_reminders_v1';
 
   final _plugin = FlutterLocalNotificationsPlugin();
   bool _initialized = false;
@@ -188,6 +195,100 @@ class NotificationService {
     ]);
   }
 
+  /// Reminds about [line] (a checklist line in note [noteId]) at [at].
+  /// Returns false when it could not be scheduled (past time, no
+  /// permission, unsupported platform).
+  Future<bool> scheduleTaskReminder({
+    required String noteId,
+    required String noteTitle,
+    required String line,
+    required DateTime at,
+  }) async {
+    await _initialize();
+    if (!_initialized || !at.isAfter(DateTime.now())) return false;
+    if (defaultTargetPlatform == TargetPlatform.linux) return false;
+    await requestPermission();
+    final id = _taskId(noteId, line);
+    // "Call the dentist — Tue, Oct 20, 3 PM" → "Call the dentist".
+    final task = line.split(' — ').first.trim();
+    try {
+      final android = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      final exact = await android?.canScheduleExactNotifications() ?? false;
+      await _plugin.zonedSchedule(
+        id,
+        task,
+        noteTitle.isEmpty ? 'Reminder' : 'From $noteTitle',
+        tz.TZDateTime.from(at, tz.local),
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'typed_task_reminders',
+            'Task reminders',
+            channelDescription: 'Reminders for tasks with a time',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+          iOS: DarwinNotificationDetails(),
+          macOS: DarwinNotificationDetails(),
+          windows: WindowsNotificationDetails(),
+        ),
+        // Exact when the user allows it (Settings → Alarms & reminders);
+        // otherwise Android's slightly flexible timing.
+        androidScheduleMode: exact
+            ? AndroidScheduleMode.exactAllowWhileIdle
+            : AndroidScheduleMode.inexactAllowWhileIdle,
+        payload: 'open:$noteId',
+      );
+    } catch (_) {
+      return false;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final all = _loadTaskReminders(prefs)
+      ..removeWhere((r) => r['id'] == id)
+      ..add({'id': id, 'noteId': noteId, 'line': line, 'at': at.toIso8601String()});
+    await prefs.setString(_taskKey, jsonEncode(all));
+    return true;
+  }
+
+  static int _taskId(String noteId, String line) =>
+      _taskBaseId + ('$noteId|$line'.hashCode & 0x7fffffff) % 900000;
+
+  List<Map<String, dynamic>> _loadTaskReminders(SharedPreferences prefs) {
+    try {
+      return (jsonDecode(prefs.getString(_taskKey) ?? '[]') as List)
+          .cast<Map<String, dynamic>>()
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Cancels reminders whose task was ticked, edited away, deleted, or
+  /// whose note is gone; forgets ones already past.
+  Future<void> _reconcileTaskReminders(List<Note> notes) async {
+    final prefs = await SharedPreferences.getInstance();
+    final all = _loadTaskReminders(prefs);
+    if (all.isEmpty) return;
+    final now = DateTime.now();
+    final keep = <Map<String, dynamic>>[];
+    for (final r in all) {
+      final note = notes.where((n) => n.id == r['noteId']).firstOrNull;
+      final open = note != null &&
+          !note.isDeleted &&
+          !note.isArchived &&
+          note.content.split('\n').any((l) => l.trim() == '- [ ] ${r['line']}');
+      final at = DateTime.tryParse(r['at'] as String? ?? '');
+      if (!open) {
+        try {
+          await _plugin.cancel(r['id'] as int);
+        } catch (_) {}
+      } else if (at != null && at.isAfter(now)) {
+        keep.add(r);
+      }
+    }
+    await prefs.setString(_taskKey, jsonEncode(keep));
+  }
+
   Future<void> sync({
     required List<Note> notes,
     required List<Budget> budgets,
@@ -195,6 +296,9 @@ class NotificationService {
   }) async {
     await _initialize();
     if (!_initialized) return;
+    try {
+      await _reconcileTaskReminders(notes);
+    } catch (_) {}
     final settings = await loadSettings();
     try {
       await _plugin.cancel(_eveningId);

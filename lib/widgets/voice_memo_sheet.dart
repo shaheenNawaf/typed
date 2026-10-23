@@ -6,8 +6,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/app_motion.dart';
+import '../voice/spend_parser.dart';
 import '../voice/transcriber.dart';
 import '../voice/voice_shaper.dart';
+import '../voice/when_parser.dart';
+import 'entry_sheet.dart' show kDefaultCategories;
 import 'home_modules.dart';
 import 'quiet_choice.dart';
 import 'task_row.dart';
@@ -31,13 +34,71 @@ class VoiceMemoResult {
   /// The task lines on their own (for appending).
   final List<String> tasks;
 
+  /// Tasks with the reminder each one asked for.
+  final List<VoiceTaskOut> taskItems;
+
+  /// Expenses (and income) to log, for [VoiceKind.expense].
+  final List<VoiceSpend> spends;
+
   const VoiceMemoResult({
     required this.kind,
     required this.title,
     required this.content,
     this.appendToId,
     this.tasks = const [],
+    this.taskItems = const [],
+    this.spends = const [],
   });
+}
+
+/// A saved task line and when to remind about it (null: no reminder).
+class VoiceTaskOut {
+  final String line;
+  final DateTime? remindAt;
+  const VoiceTaskOut(this.line, this.remindAt);
+}
+
+/// Dictating into an open note or list: the shape is fixed to match it and
+/// Save adds to it.
+class VoiceAppendTarget {
+  final String title;
+  final bool isList;
+  const VoiceAppendTarget(this.title, {required this.isList});
+}
+
+class _TaskEdit {
+  final TextEditingController ctrl;
+  SpokenWhen? when;
+  bool remind;
+
+  _TaskEdit(String text, [this.when])
+    : ctrl = TextEditingController(text: text),
+      remind = when != null;
+
+  factory _TaskEdit.from(VoiceTask t) => _TaskEdit(t.text, t.when);
+
+  String get line {
+    final text = ctrl.text.trim();
+    return when == null ? text : '$text — ${when!.label}';
+  }
+}
+
+class _SpendEdit {
+  final TextEditingController amount;
+  final TextEditingController note;
+  String category;
+  String type;
+
+  _SpendEdit(VoiceSpend s)
+    : amount = TextEditingController(text: s.amount),
+      note = TextEditingController(text: s.note),
+      category = s.category,
+      type = s.type;
+
+  void dispose() {
+    amount.dispose();
+    note.dispose();
+  }
 }
 
 /// Record → live transcript → review as a note or a to-do list.
@@ -49,13 +110,26 @@ class VoiceMemoSheet extends StatefulWidget {
   /// Existing lists a to-do memo can be added to, most recent first.
   final List<VoiceListTarget> lists;
 
-  const VoiceMemoSheet({super.key, this.lists = const []});
+  /// Dictating into this open note or list instead of making a new one.
+  final VoiceAppendTarget? appendTo;
+
+  /// Shown before expense amounts ("₱").
+  final String currencySymbol;
+
+  const VoiceMemoSheet({
+    super.key,
+    this.lists = const [],
+    this.appendTo,
+    this.currencySymbol = '',
+  });
 
   static const draftKey = 'voice_draft_v1';
 
   static Future<VoiceMemoResult?> show(
     BuildContext context, {
     List<VoiceListTarget> lists = const [],
+    VoiceAppendTarget? appendTo,
+    String currencySymbol = '',
   }) {
     final c = context.colors;
     return showModalBottomSheet<VoiceMemoResult>(
@@ -67,7 +141,11 @@ class VoiceMemoSheet extends StatefulWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (_) => VoiceMemoSheet(lists: lists),
+      builder: (_) => VoiceMemoSheet(
+        lists: lists,
+        appendTo: appendTo,
+        currencySymbol: currencySymbol,
+      ),
     );
   }
 
@@ -91,6 +169,7 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
   /// Transcript from earlier takes ("Keep talking" appends to it).
   String _before = '';
   String _live = '';
+
   /// Seconds recorded this take, counted by [_ticker].
   int _seconds = 0;
   Timer? _ticker;
@@ -99,7 +178,8 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
   VoiceKind _kind = VoiceKind.note;
   final _title = TextEditingController();
   final _body = TextEditingController();
-  final _tasks = <TextEditingController>[];
+  final _tasks = <_TaskEdit>[];
+  final _spends = <_SpendEdit>[];
   List<String> _other = const [];
   VoiceDraft? _draft;
   bool _titleEdited = false;
@@ -276,13 +356,15 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
   }
 
   void _mergeTake(VoiceDraft take) {
-    _tasks.addAll(take.tasks.map((t) => TextEditingController(text: t)));
+    _tasks.addAll(take.tasks.map(_TaskEdit.from));
+    _spends.addAll(take.spends.map(_SpendEdit.new));
     _other = [..._other, ...take.other];
     final extra = take.noteBody.trim();
     if (extra.isNotEmpty) {
-      _body.text = [_body.text.trim(), extra]
-          .where((s) => s.isNotEmpty)
-          .join('\n\n');
+      _body.text = [
+        _body.text.trim(),
+        extra,
+      ].where((s) => s.isNotEmpty).join('\n\n');
     }
   }
 
@@ -322,14 +404,26 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
 
   void _applyDraft(VoiceDraft draft) {
     for (final t in _tasks) {
-      t.dispose();
+      t.ctrl.dispose();
+    }
+    for (final s in _spends) {
+      s.dispose();
     }
     _tasks
       ..clear()
-      ..addAll(draft.tasks.map((t) => TextEditingController(text: t)));
+      ..addAll(draft.tasks.map(_TaskEdit.from));
+    _spends
+      ..clear()
+      ..addAll(draft.spends.map(_SpendEdit.new));
     _other = List.of(draft.other);
     _draft = draft;
-    _kind = draft.kind;
+    // Dictating into an open note or list: its shape is fixed.
+    final into = widget.appendTo;
+    _kind = into == null
+        ? draft.kind
+        : into.isList
+        ? VoiceKind.todo
+        : VoiceKind.note;
     _title.text = draft.title;
     _body.text = draft.noteBody;
     _titleEdited = false;
@@ -347,15 +441,20 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
   }
 
   void _setKind(String value) {
-    final kind = value == 'todo' ? VoiceKind.todo : VoiceKind.note;
+    final kind = switch (value) {
+      'todo' => VoiceKind.todo,
+      'expense' => VoiceKind.expense,
+      _ => VoiceKind.note,
+    };
     if (kind == _kind) return;
     _touched = true;
     setState(() {
       _kind = kind;
       final draft = _draft;
       if (!_titleEdited && draft != null) {
-        _title.text =
-            kind == VoiceKind.todo ? draft.listTitle : draft.noteTitle;
+        _title.text = kind == VoiceKind.todo
+            ? draft.listTitle
+            : draft.noteTitle;
       }
       // An untouched note body follows the edited task list.
       if (kind == VoiceKind.note && !_bodyEdited) {
@@ -364,18 +463,30 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
     });
   }
 
-  List<String> get _taskTexts => _tasks
-      .map((c) => c.text.trim())
-      .where((t) => t.isNotEmpty)
-      .toList();
+  List<_TaskEdit> get _liveTasks =>
+      _tasks.where((t) => t.ctrl.text.trim().isNotEmpty).toList();
+
+  List<String> get _taskTexts => [for (final t in _liveTasks) t.line];
 
   String _noteBodyFromReview() => VoiceDraft(
-        noteTitle: '',
-        listTitle: '',
-        kind: VoiceKind.note,
-        tasks: _taskTexts,
-        other: _other,
-      ).noteBody;
+    noteTitle: '',
+    listTitle: '',
+    kind: VoiceKind.note,
+    tasks: [for (final t in _liveTasks) VoiceTask(t.ctrl.text.trim(), t.when)],
+    other: _other,
+  ).noteBody;
+
+  List<VoiceSpend> get _spendsOut => [
+    for (final e in _spends)
+      if (double.tryParse(e.amount.text.replaceAll(',', '').trim())
+          case final v? when v > 0)
+        VoiceSpend(
+          amount: e.amount.text.replaceAll(',', '').trim(),
+          note: e.note.text.trim(),
+          category: e.category,
+          type: e.type,
+        ),
+  ];
 
   void _save() {
     final title = _title.text.trim();
@@ -384,13 +495,24 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
         ? _taskTexts.map((t) => '- [ ] $t\n').join()
         : _body.text.trim();
     _clearDraft();
+    final now = DateTime.now();
     Navigator.of(context).pop(
       VoiceMemoResult(
         kind: _kind,
         title: title.isEmpty ? (_draft?.title ?? 'Voice memo') : title,
         content: content,
         tasks: todo ? _taskTexts : const [],
+        taskItems: [
+          for (final t in _liveTasks)
+            VoiceTaskOut(
+              t.line,
+              t.remind && t.when != null && t.when!.at.isAfter(now)
+                  ? t.when!.at
+                  : null,
+            ),
+        ],
         appendToId: todo ? _appendToId : null,
+        spends: _kind == VoiceKind.expense ? _spendsOut : const [],
       ),
     );
   }
@@ -421,7 +543,10 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
     _body.dispose();
     _transcriptCtrl.dispose();
     for (final t in _tasks) {
-      t.dispose();
+      t.ctrl.dispose();
+    }
+    for (final s in _spends) {
+      s.dispose();
     }
     super.dispose();
   }
@@ -476,21 +601,20 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
   // ── listening ───────────────────────────────────────────────────────────
 
   Widget _preparing(BuildContext context) => const SizedBox(
-        height: 180,
-        child: Center(
-          child: SizedBox(
-            width: 20,
-            height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-        ),
-      );
+    height: 180,
+    child: Center(
+      child: SizedBox(
+        width: 20,
+        height: 20,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      ),
+    ),
+  );
 
   Widget _listening(BuildContext context) {
     final c = context.colors;
     final secs = _seconds;
-    final time =
-        '${secs ~/ 60}:${(secs % 60).toString().padLeft(2, '0')}';
+    final time = '${secs ~/ 60}:${(secs % 60).toString().padLeft(2, '0')}';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -549,16 +673,24 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
                       // After a few silent seconds, say why nothing shows.
                       secs >= 4 && !_heardSound
                           ? 'Not hearing much yet. Hold the phone a little '
-                              'closer, or speak up a bit.'
-                          : 'Start talking. Say “I need to…” or “remember '
-                              'to…” and it becomes a task.',
-                      style: TextStyle(fontSize: 17, height: 1.45, color: c.muted),
+                                'closer, or speak up a bit.'
+                          : 'Start talking. “New task…” starts a task; “spent 250 on '
+                                'lunch” logs money.',
+                      style: TextStyle(
+                        fontSize: 17,
+                        height: 1.45,
+                        color: c.muted,
+                      ),
                     )
                   : Semantics(
                       liveRegion: true,
                       child: Text(
                         _transcript,
-                        style: TextStyle(fontSize: 17, height: 1.45, color: c.fg),
+                        style: TextStyle(
+                          fontSize: 17,
+                          height: 1.45,
+                          color: c.fg,
+                        ),
                       ),
                     ),
             ),
@@ -592,20 +724,20 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
     final c = context.colors;
     final (title, body) = switch (_problem) {
       TranscriberProblem.permission => (
-          'Microphone access is off',
-          'Allow microphone access for Typed in your phone’s settings, then '
-              'try again.',
-        ),
+        'Microphone access is off',
+        'Allow microphone access for Typed in your phone’s settings, then '
+            'try again.',
+      ),
       TranscriberProblem.language => (
-          'No offline speech for this language',
-          'Download it in Settings → System → Languages → On-device speech '
-              'recognition, then try again.',
-        ),
+        'No offline speech for this language',
+        'Download it in Settings → System → Languages → On-device speech '
+            'recognition, then try again.',
+      ),
       _ => (
-          'Voice memos need on-device speech',
-          'This phone has no on-device speech recognition (it needs Android '
-              '12 or later). Typed never sends your voice to the cloud.',
-        ),
+        'Voice memos need on-device speech',
+        'This phone has no on-device speech recognition (it needs Android '
+            '12 or later). Typed never sends your voice to the cloud.',
+      ),
     };
     return Padding(
       padding: const EdgeInsets.only(top: 12),
@@ -658,11 +790,28 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
         Row(
           children: [
             Expanded(
-              child: QuietChoice(
-                value: _kind == VoiceKind.todo ? 'todo' : 'note',
-                onChanged: _setKind,
-                options: const {'note': 'Note', 'todo': 'To-do list'},
-              ),
+              child: widget.appendTo != null
+                  ? Text(
+                      'Adding to ${widget.appendTo!.title}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: c.muted,
+                      ),
+                    )
+                  : QuietChoice(
+                      value: _kind.name,
+                      onChanged: _setKind,
+                      options: {
+                        'note': 'Note',
+                        'todo': 'To-do list',
+                        // Offered when money was heard (or already chosen).
+                        if (_spends.isNotEmpty || _kind == VoiceKind.expense)
+                          'expense': 'Expense',
+                      },
+                    ),
             ),
             if (_refining)
               Row(
@@ -696,28 +845,32 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
           ],
         ),
         const SizedBox(height: 8),
-        TextField(
-          controller: _title,
-          onChanged: (_) => _titleEdited = _touched = true,
-          textCapitalization: TextCapitalization.sentences,
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.3,
-            color: c.fg,
+        // Expenses have no title; a note being added to keeps its own.
+        if (_kind != VoiceKind.expense && widget.appendTo == null)
+          TextField(
+            controller: _title,
+            onChanged: (_) => _titleEdited = _touched = true,
+            textCapitalization: TextCapitalization.sentences,
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.3,
+              color: c.fg,
+            ),
+            decoration: const InputDecoration(
+              isDense: true,
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.symmetric(vertical: 8),
+              hintText: 'Title',
+            ),
           ),
-          decoration: const InputDecoration(
-            isDense: true,
-            border: InputBorder.none,
-            contentPadding: EdgeInsets.symmetric(vertical: 8),
-            hintText: 'Title',
-          ),
-        ),
         ConstrainedBox(
           constraints: BoxConstraints(maxHeight: maxH),
           child: SingleChildScrollView(
             child: _kind == VoiceKind.todo
                 ? _taskEditor(context)
+                : _kind == VoiceKind.expense
+                ? _spendEditor(context)
                 : TextField(
                     controller: _body,
                     onChanged: (_) => _bodyEdited = _touched = true,
@@ -734,7 +887,9 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
                   ),
           ),
         ),
-        if (_kind == VoiceKind.todo && widget.lists.isNotEmpty)
+        if (_kind == VoiceKind.todo &&
+            widget.lists.isNotEmpty &&
+            widget.appendTo == null)
           _destination(context),
         _transcriptPanel(context),
         const SizedBox(height: 12),
@@ -764,7 +919,14 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
               child: const Text('Discard'),
             ),
             const SizedBox(width: 6),
-            _InkButton(label: 'Save', onPressed: _save),
+            _InkButton(
+              label: widget.appendTo != null
+                  ? 'Add'
+                  : _kind == VoiceKind.expense
+                  ? 'Log'
+                  : 'Save',
+              onPressed: _save,
+            ),
           ],
         ),
       ],
@@ -787,9 +949,8 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
           Flexible(
             child: PopupMenuButton<String>(
               tooltip: 'Choose where the tasks go',
-              onSelected: (id) => setState(
-                () => _appendToId = id.isEmpty ? null : id,
-              ),
+              onSelected: (id) =>
+                  setState(() => _appendToId = id.isEmpty ? null : id),
               itemBuilder: (_) => [
                 const PopupMenuItem(value: '', child: Text('A new list')),
                 for (final l in widget.lists.take(8))
@@ -833,8 +994,7 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
-            onPressed: () =>
-                setState(() => _showTranscript = !_showTranscript),
+            onPressed: () => setState(() => _showTranscript = !_showTranscript),
             icon: Icon(
               _showTranscript
                   ? Icons.expand_less_rounded
@@ -877,46 +1037,301 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
     );
   }
 
+  /// Under each task: its date as a chip (tap to change, × to clear) and a
+  /// reminder bell. Undated tasks get a quiet "Add date".
+  Widget _whenRow(BuildContext context, _TaskEdit t) {
+    final c = context.colors;
+    final when = t.when;
+    final canRemind = when != null && when.at.isAfter(DateTime.now());
+    return Padding(
+      padding: const EdgeInsets.only(left: 30, bottom: 4),
+      child: Wrap(
+        spacing: 6,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: () => _pickWhen(t),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: when == null
+                    ? Colors.transparent
+                    : c.fg.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.event_rounded, size: 14, color: c.muted),
+                  const SizedBox(width: 5),
+                  Text(
+                    when?.label ?? 'Add date',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: when == null ? c.muted : c.fg,
+                      fontWeight: when == null
+                          ? FontWeight.w400
+                          : FontWeight.w500,
+                    ),
+                  ),
+                  if (when != null) ...[
+                    const SizedBox(width: 4),
+                    Semantics(
+                      button: true,
+                      label: 'Clear date',
+                      child: GestureDetector(
+                        onTap: () => setState(() {
+                          _touched = true;
+                          t.when = null;
+                          t.remind = false;
+                        }),
+                        child: Icon(
+                          Icons.close_rounded,
+                          size: 13,
+                          color: c.muted,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          if (when != null)
+            IconButton(
+              tooltip: !canRemind
+                  ? 'That time has passed'
+                  : t.remind
+                  ? 'Reminder on'
+                  : 'Remind me',
+              visualDensity: VisualDensity.compact,
+              onPressed: canRemind
+                  ? () => setState(() {
+                      _touched = true;
+                      t.remind = !t.remind;
+                    })
+                  : null,
+              icon: Icon(
+                t.remind && canRemind
+                    ? Icons.notifications_active_rounded
+                    : Icons.notifications_none_rounded,
+                size: 18,
+                color: t.remind && canRemind ? c.fg : c.muted,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Date, then (optionally) time. Cancelling the time keeps a date-only
+  /// reminder at 9 AM.
+  Future<void> _pickWhen(_TaskEdit t) async {
+    final now = DateTime.now();
+    final start = t.when?.day ?? DateTime(now.year, now.month, now.day);
+    final day = await showDatePicker(
+      context: context,
+      initialDate: start.isBefore(DateTime(now.year, now.month, now.day))
+          ? now
+          : start,
+      firstDate: DateTime(now.year, now.month, now.day),
+      lastDate: DateTime(now.year + 5),
+    );
+    if (day == null || !mounted) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(
+        hour: t.when?.hour ?? 9,
+        minute: t.when?.minute ?? 0,
+      ),
+      helpText: 'Remind at (optional)',
+    );
+    if (!mounted) return;
+    setState(() {
+      _touched = true;
+      t.when = time == null
+          ? SpokenWhen(day)
+          : SpokenWhen.fromDateTime(
+              DateTime(day.year, day.month, day.day, time.hour, time.minute),
+            );
+      t.remind = true;
+    });
+  }
+
+  /// Money heard in the memo: description, amount and category per row.
+  Widget _spendEditor(BuildContext context) {
+    final c = context.colors;
+    final cats = [...kDefaultCategories, 'Income', 'Salary'];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < _spends.length; i++)
+          Padding(
+            key: ObjectKey(_spends[i]),
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Semantics(
+                  button: true,
+                  label: _spends[i].type == 'income'
+                      ? 'Income, tap for expense'
+                      : 'Expense, tap for income',
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: () => setState(() {
+                      _touched = true;
+                      final e = _spends[i];
+                      e.type = e.type == 'income' ? 'expense' : 'income';
+                    }),
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: Icon(
+                        _spends[i].type == 'income'
+                            ? Icons.add_rounded
+                            : Icons.remove_rounded,
+                        size: 18,
+                        color: _spends[i].type == 'income' ? c.income : c.fg,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: TextField(
+                    controller: _spends[i].note,
+                    onChanged: (_) => _touched = true,
+                    textCapitalization: TextCapitalization.sentences,
+                    style: taskTextStyle(context, done: false),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      border: InputBorder.none,
+                      hintText: _spends[i].category,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 96,
+                  child: TextField(
+                    controller: _spends[i].amount,
+                    onChanged: (_) => _touched = true,
+                    textAlign: TextAlign.end,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: c.fg,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      border: InputBorder.none,
+                      prefixText: widget.currencySymbol,
+                      hintText: '0',
+                    ),
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  tooltip: 'Category',
+                  onSelected: (v) => setState(() {
+                    _touched = true;
+                    _spends[i].category = v;
+                  }),
+                  itemBuilder: (_) => [
+                    for (final cat in cats)
+                      PopupMenuItem(value: cat, child: Text(cat)),
+                  ],
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 8,
+                    ),
+                    child: Text(
+                      _spends[i].category,
+                      style: TextStyle(fontSize: 12.5, color: c.muted),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Remove',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => setState(() {
+                    _touched = true;
+                    _spends.removeAt(i).dispose();
+                  }),
+                  icon: Icon(Icons.close_rounded, size: 16, color: c.muted),
+                ),
+              ],
+            ),
+          ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => setState(() {
+              _touched = true;
+              _spends.add(
+                _SpendEdit(
+                  const VoiceSpend(amount: '', note: '', category: 'Other'),
+                ),
+              );
+            }),
+            icon: const Icon(Icons.add_rounded, size: 18),
+            label: Text(_spends.isEmpty ? 'Add an expense' : 'Add another'),
+            style: TextButton.styleFrom(foregroundColor: c.muted),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _taskEditor(BuildContext context) {
     final c = context.colors;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         for (var i = 0; i < _tasks.length; i++)
-          Row(
+          Column(
             key: ObjectKey(_tasks[i]),
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Padding(
-                padding: const EdgeInsets.only(right: 10),
-                child: ExcludeSemantics(
-                  child: TaskCheck(done: false, onTap: () {}, size: 20),
-                ),
-              ),
-              Expanded(
-                child: TextField(
-                  controller: _tasks[i],
-                  onChanged: (_) => _touched = true,
-                  // Wrap: a dated task ("… — Sun, Oct 25") ran off the edge.
-                  minLines: 1,
-                  maxLines: 3,
-                  textCapitalization: TextCapitalization.sentences,
-                  style: taskTextStyle(context, done: false),
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    border: InputBorder.none,
-                    contentPadding: EdgeInsets.symmetric(vertical: 10),
+              Row(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(right: 10),
+                    child: ExcludeSemantics(
+                      child: TaskCheck(done: false, onTap: () {}, size: 20),
+                    ),
                   ),
-                ),
+                  Expanded(
+                    child: TextField(
+                      controller: _tasks[i].ctrl,
+                      onChanged: (_) => _touched = true,
+                      // Wrap: a dated task ("… — Sun, Oct 25") ran off the edge.
+                      minLines: 1,
+                      maxLines: 3,
+                      textCapitalization: TextCapitalization.sentences,
+                      style: taskTextStyle(context, done: false),
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.symmetric(vertical: 10),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Remove task',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => setState(() {
+                      _touched = true;
+                      _tasks.removeAt(i).ctrl.dispose();
+                    }),
+                    icon: Icon(Icons.close_rounded, size: 16, color: c.muted),
+                  ),
+                ],
               ),
-              IconButton(
-                tooltip: 'Remove task',
-                visualDensity: VisualDensity.compact,
-                onPressed: () => setState(() {
-                  _touched = true;
-                  _tasks.removeAt(i).dispose();
-                }),
-                icon: Icon(Icons.close_rounded, size: 16, color: c.muted),
-              ),
+              _whenRow(context, _tasks[i]),
             ],
           ),
         TaskAddRow(
@@ -924,7 +1339,7 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
           hint: _tasks.isEmpty ? 'Add the first task' : 'Add a task',
           onSubmit: (t) => setState(() {
             _touched = true;
-            _tasks.add(TextEditingController(text: t));
+            _tasks.add(_TaskEdit(t));
           }),
         ),
         if (_other.isNotEmpty) ...[
@@ -936,7 +1351,7 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
               onTap: () => setState(() {
                 _touched = true;
                 final text = _other[i].replaceFirst(RegExp(r'[.!?]$'), '');
-                _tasks.add(TextEditingController(text: text));
+                _tasks.add(_TaskEdit(text));
                 _other = List.of(_other)..removeAt(i);
               }),
               child: Padding(
@@ -997,7 +1412,11 @@ class _LevelPainter extends CustomPainter {
   final Color color;
   final Color track;
 
-  _LevelPainter({required this.levels, required this.color, required this.track});
+  _LevelPainter({
+    required this.levels,
+    required this.color,
+    required this.track,
+  });
 
   static const _bars = 40;
 
