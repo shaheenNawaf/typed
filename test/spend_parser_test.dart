@@ -20,6 +20,35 @@ void main() {
       expect(parseSpends('netflix 2k').single.amount, '2000');
     });
 
+    test('each amount gets its own description, without the filler', () {
+      // As the phone heard it: no punctuation, two spends in one breath.
+      final s = parseSpends(
+        'hey so I like spent ₱250 for Food Panda earlier and I spent around '
+        '₱465 for Chicken Pecho and Potato Corner',
+      );
+      expect(s.map((e) => e.amount), ['250', '465']);
+      expect(s.map((e) => e.note), [
+        'Food Panda',
+        'Chicken Pecho and Potato Corner',
+      ]);
+      expect(s.map((e) => e.category), ['Food', 'Food']);
+    });
+
+    test('lists of amounts split at commas or after each amount', () {
+      expect(parseSpends('lunch 250, coffee 120').map((e) => e.note), [
+        'Lunch',
+        'Coffee',
+      ]);
+      expect(
+        parseSpends('spent 250 on lunch, 120 on coffee').map((e) => e.note),
+        ['Lunch', 'Coffee'],
+      );
+      expect(parseSpends('lunch 250 coffee 120').map((e) => e.note), [
+        'Lunch',
+        'Coffee',
+      ]);
+    });
+
     test('spoken numbers become digits', () {
       expect(wordsToDigits('two hundred fifty pesos'), '250 pesos');
       expect(wordsToDigits('fifteen hundred'), '1500');
@@ -77,6 +106,24 @@ void main() {
       final d = shape('Spent 250 on lunch. Grab home was 180.');
       expect(d.kind, VoiceKind.expense);
       expect(d.spends.map((s) => s.amount), ['250', '180']);
+    });
+
+    test('a rambling money memo gives clean entries', () {
+      for (final said in [
+        'Hey, so I like spent ₱250 for Food Panda earlier. And I spent around '
+            '₱465 for Chicken Pecho and Potato Corner.',
+        'hey so I like spent 250 pesos for food panda earlier and I spent '
+            'around 465 for chicken pecho and potato corner',
+      ]) {
+        final d = shape(said);
+        expect(d.kind, VoiceKind.expense, reason: said);
+        expect(d.spends.map((s) => s.amount), ['250', '465'], reason: said);
+        expect(
+          d.spends.map((s) => s.note.toLowerCase()),
+          ['food panda', 'chicken pecho and potato corner'],
+          reason: said,
+        );
+      }
     });
 
     test('a list with a price in it stays a list', () {
