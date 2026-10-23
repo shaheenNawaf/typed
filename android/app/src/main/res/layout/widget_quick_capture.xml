@@ -111,10 +111,16 @@
     </LinearLayout>
 
     <LinearLayout
-        android:id="@+id/widget_quick_capture"
         android:layout_width="match_parent"
-        android:layout_height="44dp"
+        android:layout_height="wrap_content"
         android:layout_marginTop="6dp"
+        android:orientation="horizontal">
+
+    <LinearLayout
+        android:id="@+id/widget_quick_capture"
+        android:layout_width="0dp"
+        android:layout_height="44dp"
+        android:layout_weight="1"
         android:background="@drawable/widget_accent_bg"
         android:clickable="true"
         android:focusable="true"
@@ -136,5 +142,26 @@
             android:text="@string/widget_new_note"
             android:textColor="@android:color/white"
             android:textSize="14sp" />
+    </LinearLayout>
+
+    <!-- Voice memo: opens straight into recording. -->
+    <FrameLayout
+        android:id="@+id/widget_quick_voice"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
+        android:layout_marginStart="6dp"
+        android:background="@drawable/widget_card_bg"
+        android:clickable="true"
+        android:contentDescription="@string/voice_memo"
+        android:focusable="true">
+
+        <ImageView
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:layout_gravity="center"
+            android:contentDescription="@null"
+            android:src="@drawable/ic_mic"
+            android:tint="@color/widget_fg" />
+    </FrameLayout>
     </LinearLayout>
 </LinearLayout>

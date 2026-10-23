@@ -12,16 +12,31 @@ import 'home_modules.dart';
 import 'quiet_choice.dart';
 import 'task_row.dart';
 
+/// An existing to-do list a voice memo's tasks can be added to.
+class VoiceListTarget {
+  final String id;
+  final String title;
+  const VoiceListTarget(this.id, this.title);
+}
+
 /// What the user chose to save from a voice memo.
 class VoiceMemoResult {
   final VoiceKind kind;
   final String title;
   final String content;
 
+  /// Add the tasks to this existing list instead of creating one.
+  final String? appendToId;
+
+  /// The task lines on their own (for appending).
+  final List<String> tasks;
+
   const VoiceMemoResult({
     required this.kind,
     required this.title,
     required this.content,
+    this.appendToId,
+    this.tasks = const [],
   });
 }
 
@@ -31,11 +46,17 @@ class VoiceMemoResult {
 /// a crash or a lost permission never loses a memo: the next time the sheet
 /// opens it picks the draft back up. Only Save or Discard clears it.
 class VoiceMemoSheet extends StatefulWidget {
-  const VoiceMemoSheet({super.key});
+  /// Existing lists a to-do memo can be added to, most recent first.
+  final List<VoiceListTarget> lists;
+
+  const VoiceMemoSheet({super.key, this.lists = const []});
 
   static const draftKey = 'voice_draft_v1';
 
-  static Future<VoiceMemoResult?> show(BuildContext context) {
+  static Future<VoiceMemoResult?> show(
+    BuildContext context, {
+    List<VoiceListTarget> lists = const [],
+  }) {
     final c = context.colors;
     return showModalBottomSheet<VoiceMemoResult>(
       context: context,
@@ -46,7 +67,7 @@ class VoiceMemoSheet extends StatefulWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (_) => const VoiceMemoSheet(),
+      builder: (_) => VoiceMemoSheet(lists: lists),
     );
   }
 
@@ -70,7 +91,8 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
   /// Transcript from earlier takes ("Keep talking" appends to it).
   String _before = '';
   String _live = '';
-  final _clock = Stopwatch();
+  /// Seconds recorded this take, counted by [_ticker].
+  int _seconds = 0;
   Timer? _ticker;
 
   // Review state.
@@ -90,6 +112,21 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
   /// Any edit in review: a late model draft must never overwrite it.
   bool _touched = false;
   int _refineRun = 0;
+
+  /// Recent input loudness (0..1), newest last, for the level meter.
+  final _levels = <double>[];
+  bool _heardSound = false;
+
+  /// "Keep talking" after editing: the new take is shaped on its own and
+  /// added to the edited draft instead of replacing it.
+  int? _mergeFrom;
+
+  /// Review: the raw transcript, editable, behind a toggle.
+  bool _showTranscript = false;
+  final _transcriptCtrl = TextEditingController();
+
+  /// Review: which list a to-do memo goes to (null = a new list).
+  String? _appendToId;
 
   String get _transcript =>
       [_before, _live].where((s) => s.trim().isNotEmpty).join(' ').trim();
@@ -134,12 +171,13 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
     }
     HapticFeedback.lightImpact();
     _live = '';
-    _clock
-      ..reset()
-      ..start();
+    _levels.clear();
+    _heardSound = false;
+    _seconds = 0;
+    _ticker?.cancel();
     _ticker = Timer.periodic(
       const Duration(seconds: 1),
-      (_) => mounted ? setState(() {}) : null,
+      (_) => mounted ? setState(() => _seconds++) : null,
     );
     if (!MediaQuery.disableAnimationsOf(context)) {
       _pulse.repeat(reverse: true);
@@ -152,6 +190,14 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
         if (text.trim().isEmpty && _live.trim().isNotEmpty) return;
         setState(() => _live = text);
         _saveDraft();
+      },
+      onLevel: (level) {
+        if (!mounted) return;
+        setState(() {
+          _levels.add(level);
+          if (_levels.length > 40) _levels.removeAt(0);
+          if (level > 0.15) _heardSound = true;
+        });
       },
       onProblem: (problem) {
         if (!mounted) return;
@@ -173,7 +219,6 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
   }
 
   void _stopClock() {
-    _clock.stop();
     _ticker?.cancel();
     _pulse.stop();
   }
@@ -209,11 +254,47 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
   }
 
   void _toReview() {
+    final mergeFrom = _mergeFrom;
+    _mergeFrom = null;
+    if (mergeFrom != null) {
+      // The user had edited the draft: keep their edits and add what the
+      // new take said on its own.
+      final added = _transcript.length > mergeFrom
+          ? _transcript.substring(mergeFrom).trim()
+          : '';
+      if (added.isNotEmpty) _mergeTake(shapeVoiceMemo(added));
+      _transcriptCtrl.text = _transcript;
+      setState(() => _phase = _Phase.review);
+      return;
+    }
     _applyDraft(shapeVoiceMemo(_transcript));
+    _transcriptCtrl.text = _transcript;
     _touched = false;
     _refined = false;
     setState(() => _phase = _Phase.review);
     _refine();
+  }
+
+  void _mergeTake(VoiceDraft take) {
+    _tasks.addAll(take.tasks.map((t) => TextEditingController(text: t)));
+    _other = [..._other, ...take.other];
+    final extra = take.noteBody.trim();
+    if (extra.isNotEmpty) {
+      _body.text = [_body.text.trim(), extra]
+          .where((s) => s.isNotEmpty)
+          .join('\n\n');
+    }
+  }
+
+  /// Re-shape from the (possibly corrected) transcript. Replaces the
+  /// draft, so it is an explicit action.
+  void _reshape() {
+    final text = _transcriptCtrl.text.trim();
+    _before = text;
+    _live = '';
+    _saveDraft();
+    _showTranscript = false;
+    _toReview();
   }
 
   /// Rules draft first (instant), then the model's, if it is installed and
@@ -298,7 +379,8 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
 
   void _save() {
     final title = _title.text.trim();
-    final content = _kind == VoiceKind.todo
+    final todo = _kind == VoiceKind.todo;
+    final content = todo
         ? _taskTexts.map((t) => '- [ ] $t\n').join()
         : _body.text.trim();
     _clearDraft();
@@ -307,6 +389,8 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
         kind: _kind,
         title: title.isEmpty ? (_draft?.title ?? 'Voice memo') : title,
         content: content,
+        tasks: todo ? _taskTexts : const [],
+        appendToId: todo ? _appendToId : null,
       ),
     );
   }
@@ -317,10 +401,11 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
   }
 
   void _keepTalking() {
-    // Edits to the draft are dropped; what was said is kept and extended.
     _recovered = false;
     _refineRun++;
     _refining = false;
+    // Edited drafts keep their edits; the new take is added to them.
+    if (_touched) _mergeFrom = _transcript.length;
     _listen();
   }
 
@@ -334,6 +419,7 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
     }
     _title.dispose();
     _body.dispose();
+    _transcriptCtrl.dispose();
     for (final t in _tasks) {
       t.dispose();
     }
@@ -402,7 +488,7 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
 
   Widget _listening(BuildContext context) {
     final c = context.colors;
-    final secs = _clock.elapsed.inSeconds;
+    final secs = _seconds;
     final time =
         '${secs ~/ 60}:${(secs % 60).toString().padLeft(2, '0')}';
     return Column(
@@ -422,7 +508,12 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
               ),
             ),
             const SizedBox(width: 8),
-            const Expanded(child: HomeLabel('LISTENING')),
+            Expanded(
+              child: Semantics(
+                liveRegion: true,
+                child: const HomeLabel('LISTENING'),
+              ),
+            ),
             Text(
               time,
               style: TextStyle(
@@ -433,6 +524,20 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
             ),
           ],
         ),
+        const SizedBox(height: 6),
+        // Live input level: proof the mic is hearing you.
+        ExcludeSemantics(
+          child: SizedBox(
+            height: 28,
+            child: CustomPaint(
+              painter: _LevelPainter(
+                levels: List.of(_levels),
+                color: c.fg,
+                track: c.border,
+              ),
+            ),
+          ),
+        ),
         ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 120, maxHeight: 280),
           child: SingleChildScrollView(
@@ -441,13 +546,20 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: _transcript.isEmpty
                   ? Text(
-                      'Start talking. Say “I need to…” or “remember to…” '
-                      'and it becomes a task.',
+                      // After a few silent seconds, say why nothing shows.
+                      secs >= 4 && !_heardSound
+                          ? 'Not hearing much yet. Hold the phone a little '
+                              'closer, or speak up a bit.'
+                          : 'Start talking. Say “I need to…” or “remember '
+                              'to…” and it becomes a task.',
                       style: TextStyle(fontSize: 17, height: 1.45, color: c.muted),
                     )
-                  : Text(
-                      _transcript,
-                      style: TextStyle(fontSize: 17, height: 1.45, color: c.fg),
+                  : Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        _transcript,
+                        style: TextStyle(fontSize: 17, height: 1.45, color: c.fg),
+                      ),
                     ),
             ),
           ),
@@ -622,6 +734,9 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
                   ),
           ),
         ),
+        if (_kind == VoiceKind.todo && widget.lists.isNotEmpty)
+          _destination(context),
+        _transcriptPanel(context),
         const SizedBox(height: 12),
         Row(
           children: [
@@ -652,6 +767,112 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
             _InkButton(label: 'Save', onPressed: _save),
           ],
         ),
+      ],
+    );
+  }
+
+  /// "Save to: New list ▾" — add the tasks to an existing list instead.
+  Widget _destination(BuildContext context) {
+    final c = context.colors;
+    final current = widget.lists
+        .where((l) => l.id == _appendToId)
+        .map((l) => l.title)
+        .firstOrNull;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        children: [
+          Text('Save to', style: TextStyle(fontSize: 13, color: c.muted)),
+          const SizedBox(width: 6),
+          Flexible(
+            child: PopupMenuButton<String>(
+              tooltip: 'Choose where the tasks go',
+              onSelected: (id) => setState(
+                () => _appendToId = id.isEmpty ? null : id,
+              ),
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: '', child: Text('A new list')),
+                for (final l in widget.lists.take(8))
+                  PopupMenuItem(value: l.id, child: Text(l.title)),
+              ],
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        current ?? 'A new list',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: c.fg,
+                        ),
+                      ),
+                    ),
+                    Icon(Icons.expand_more_rounded, size: 18, color: c.muted),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The raw transcript behind a toggle: fix a misheard word, then
+  /// re-shape the draft from it.
+  Widget _transcriptPanel(BuildContext context) {
+    final c = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () =>
+                setState(() => _showTranscript = !_showTranscript),
+            icon: Icon(
+              _showTranscript
+                  ? Icons.expand_less_rounded
+                  : Icons.subject_rounded,
+              size: 18,
+            ),
+            label: Text(_showTranscript ? 'Hide transcript' : 'Transcript'),
+            style: TextButton.styleFrom(foregroundColor: c.muted),
+          ),
+        ),
+        if (_showTranscript) ...[
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+            decoration: BoxDecoration(
+              color: c.fg.withValues(alpha: 0.04),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: TextField(
+              controller: _transcriptCtrl,
+              minLines: 2,
+              maxLines: 6,
+              style: TextStyle(fontSize: 14.5, height: 1.45, color: c.fg),
+              decoration: const InputDecoration(
+                isDense: true,
+                border: InputBorder.none,
+                hintText: 'What was heard',
+              ),
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: _reshape,
+              style: TextButton.styleFrom(foregroundColor: c.fg),
+              child: const Text('Re-shape from transcript'),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -768,4 +989,43 @@ class _InkButton extends StatelessWidget {
       child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
     );
   }
+}
+
+/// A rolling row of thin bars: recent input loudness, newest on the right.
+class _LevelPainter extends CustomPainter {
+  final List<double> levels;
+  final Color color;
+  final Color track;
+
+  _LevelPainter({required this.levels, required this.color, required this.track});
+
+  static const _bars = 40;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final gap = 3.0;
+    final w = ((size.width - gap * (_bars - 1)) / _bars).clamp(1.5, 4.0);
+    final total = _bars * w + (_bars - 1) * gap;
+    final left = (size.width - total) / 2;
+    final paint = Paint()..strokeCap = StrokeCap.round;
+    for (var i = 0; i < _bars; i++) {
+      final k = i - (_bars - levels.length);
+      final v = k >= 0 ? levels[k] : 0.0;
+      final h = (size.height * (0.12 + 0.88 * v)).clamp(2.0, size.height);
+      final x = left + i * (w + gap) + w / 2;
+      paint
+        ..strokeWidth = w
+        ..color = v > 0.05 ? color.withValues(alpha: 0.35 + 0.5 * v) : track;
+      canvas.drawLine(
+        Offset(x, (size.height - h) / 2),
+        Offset(x, (size.height + h) / 2),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_LevelPainter old) =>
+      old.levels.length != levels.length ||
+      (levels.isNotEmpty && old.levels.lastOrNull != levels.last);
 }

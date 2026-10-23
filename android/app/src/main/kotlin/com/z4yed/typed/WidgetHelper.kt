@@ -13,6 +13,9 @@ import java.util.TimeZone
 
 object WidgetHelper {
     const val ACTION_NEW = "com.z4yed.typed.ACTION_NEW"
+    /** Opens straight into recording a voice memo (widget mic, app
+     *  shortcut, quick-settings tile). */
+    const val ACTION_VOICE = "com.z4yed.typed.ACTION_VOICE"
     const val ACTION_EXPENSE = "com.z4yed.typed.ACTION_EXPENSE"
     const val ACTION_INCOME = "com.z4yed.typed.ACTION_INCOME"
     const val ACTION_FINANCE = "com.z4yed.typed.ACTION_FINANCE"
@@ -59,6 +62,12 @@ object WidgetHelper {
             context, 0, intent, PENDING_INTENT_FLAGS
         )
     }
+
+    fun voiceIntent(context: Context): PendingIntent = actionIntent(
+        context,
+        ACTION_VOICE,
+        8,
+    )
 
     fun expenseIntent(context: Context): PendingIntent = actionIntent(
         context,

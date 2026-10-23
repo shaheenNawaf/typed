@@ -99,6 +99,7 @@ class MainActivity : FlutterActivity() {
         intent ?: return
         when (intent.action) {
             WidgetHelper.ACTION_NEW -> pendingIntents.addLast("new")
+            WidgetHelper.ACTION_VOICE -> pendingIntents.addLast("voice")
             WidgetHelper.ACTION_WIDGET_DISPATCH -> {
                 val id = intent.getStringExtra(WidgetHelper.EXTRA_NOTE_ID)
                 when (intent.getStringExtra(WidgetHelper.EXTRA_VERB)) {

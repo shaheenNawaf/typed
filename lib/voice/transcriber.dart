@@ -32,10 +32,12 @@ abstract class Transcriber {
 
   /// Starts listening. [onText] gets the whole transcript so far each time
   /// it changes (settled words plus the current guess). [onProblem] reports
-  /// a failure that ends the session.
+  /// a failure that ends the session. [onLevel], when the recogniser reports
+  /// it, gets the input loudness as 0..1 so the user can see they are heard.
   Future<void> start({
     required void Function(String text) onText,
     required void Function(TranscriberProblem problem) onProblem,
+    void Function(double level)? onLevel,
   });
 
   /// Stops listening and returns the final transcript.
@@ -95,6 +97,7 @@ class SystemTranscriber implements Transcriber {
   bool _active = false;
   bool _restarting = false;
   void Function(String)? _onText;
+  void Function(double)? _onLevel;
   void Function(TranscriberProblem)? _onProblem;
   Completer<void>? _finished;
 
@@ -128,9 +131,11 @@ class SystemTranscriber implements Transcriber {
   Future<void> start({
     required void Function(String text) onText,
     required void Function(TranscriberProblem problem) onProblem,
+    void Function(double level)? onLevel,
   }) async {
     _buffer.clear();
     _onText = onText;
+    _onLevel = onLevel;
     _onProblem = onProblem;
     _active = true;
     await _listen();
@@ -142,6 +147,7 @@ class SystemTranscriber implements Transcriber {
     try {
       await _speech.listen(
         onResult: (r) => _onResult(r, session),
+        onSoundLevelChange: (db) => _onLevel?.call(normaliseLevel(db)),
         listenOptions: SpeechListenOptions(
           // Never fall back to a cloud recogniser.
           onDevice: true,
@@ -238,6 +244,13 @@ class SystemTranscriber implements Transcriber {
       await _speech.cancel();
     } catch (_) {}
   }
+}
+
+/// Recogniser loudness (dB-ish: Android reports about -2..10, iOS about
+/// -50..0) as 0..1 for a meter.
+double normaliseLevel(double db) {
+  final (lo, hi) = Platform.isIOS ? (-50.0, 0.0) : (-2.0, 10.0);
+  return ((db - lo) / (hi - lo)).clamp(0.0, 1.0);
 }
 
 /// The memo's text across recognition sessions: settled words, the
