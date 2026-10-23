@@ -37,7 +37,26 @@
             <!-- Widget actions are delivered as explicit component intents,
                  so no action filters are needed here; exposing them would
                  let any app deep-link into arbitrary notes. -->
+            <!-- Long-press app shortcuts: Voice memo, New note. -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
+
+        <!-- Quick-settings tile: opens straight into a voice memo. -->
+        <service
+            android:name=".VoiceMemoTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_mic"
+            android:label="@string/voice_memo"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="false" />
+        </service>
 
         <!-- Target of the collection widgets' tap template: ticks a to-do in
              place on the home screen, forwards everything else to

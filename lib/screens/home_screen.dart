@@ -419,6 +419,9 @@ class _HomeScreenState extends State<HomeScreen>
     }
     if (intentAction == 'new') {
       _openTemplatePicker();
+    } else if (intentAction == 'voice') {
+      // Widget mic, app-icon shortcut or quick-settings tile.
+      if (VoiceMemo.isSupported()) _openVoiceMemo();
     } else if (intentAction == 'expense') {
       _quickAddEntry();
     } else if (intentAction == 'income') {
@@ -1870,9 +1873,38 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   /// Voice memo → reviewed draft → a note or a to-do list.
+  bool _voiceSheetOpen = false;
+
   Future<void> _openVoiceMemo() async {
-    final result = await VoiceMemoSheet.show(context);
+    // A second launch (tile tapped twice) must not stack a second recorder.
+    if (_voiceSheetOpen) return;
+    _voiceSheetOpen = true;
+    try {
+      await _runVoiceMemo();
+    } finally {
+      _voiceSheetOpen = false;
+    }
+  }
+
+  Future<void> _runVoiceMemo() async {
+    // Open lists, most recently edited first, as places tasks can go.
+    final lists = notes
+        .where((n) => n.type == 'todo' && !n.isArchived && !n.isDeleted)
+        .toList()
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    final result = await VoiceMemoSheet.show(
+      context,
+      lists: [
+        for (final n in lists)
+          VoiceListTarget(n.id, n.title.trim().isEmpty ? 'Untitled list' : n.title),
+      ],
+    );
     if (result == null || !mounted) return;
+    final target = result.appendToId == null ? null : _noteById(result.appendToId);
+    if (target != null && result.tasks.isNotEmpty) {
+      _appendVoiceTasks(target, result.tasks);
+      return;
+    }
     final todo = result.kind == VoiceKind.todo;
     final note = Note(
       id: generateId('n'),
@@ -1887,6 +1919,36 @@ class _HomeScreenState extends State<HomeScreen>
       todo ? 'List saved' : 'Saved to Notes',
       onUndo: () {
         setState(() => notes.removeWhere((n) => n.id == note.id));
+        _persistNow();
+      },
+    );
+  }
+
+  /// Voice memo tasks added to an existing list; Undo removes exactly the
+  /// lines it added (not edits or ticks made since).
+  void _appendVoiceTasks(Note target, List<String> tasks) {
+    final lines = [
+      for (final t in tasks) '- [ ] ${t.replaceAll('\n', ' ').trim()}',
+    ];
+    setState(() {
+      final current = target.content;
+      final sep = current.isEmpty || current.endsWith('\n') ? '' : '\n';
+      target.content = '$current$sep${lines.join('\n')}\n';
+      target.updatedAt = DateTime.now();
+    });
+    _persistNow();
+    final n = lines.length;
+    _showSnackBar(
+      'Added ${n == 1 ? '1 task' : '$n tasks'} to ${target.title}',
+      onUndo: () {
+        setState(() {
+          final all = target.content.split('\n');
+          for (final line in lines.reversed) {
+            final i = all.lastIndexOf(line);
+            if (i != -1) all.removeAt(i);
+          }
+          target.content = all.join('\n');
+        });
         _persistNow();
       },
     );

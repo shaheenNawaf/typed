@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the app icon. Explicit intents to MainActivity: no action
+     filters are exported, so other apps still can't deep-link in. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_mic"
+        android:shortcutId="voice_memo"
+        android:shortcutLongLabel="@string/voice_memo_long"
+        android:shortcutShortLabel="@string/voice_memo">
+        <intent
+            android:action="com.z4yed.typed.ACTION_VOICE"
+            android:targetClass="com.z4yed.typed.MainActivity"
+            android:targetPackage="com.z4yed.typed" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_note"
+        android:shortcutId="new_note"
+        android:shortcutLongLabel="@string/new_note_long"
+        android:shortcutShortLabel="@string/widget_new_note">
+        <intent
+            android:action="com.z4yed.typed.ACTION_NEW"
+            android:targetClass="com.z4yed.typed.MainActivity"
+            android:targetPackage="com.z4yed.typed" />
+    </shortcut>
+</shortcuts>

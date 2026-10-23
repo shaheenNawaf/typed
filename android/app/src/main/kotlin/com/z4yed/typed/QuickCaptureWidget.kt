@@ -41,6 +41,10 @@ class QuickCaptureWidget : AppWidgetProvider() {
                 WidgetHelper.openAppIntent(context)
             )
             views.setOnClickPendingIntent(
+                R.id.widget_quick_voice,
+                WidgetHelper.voiceIntent(context)
+            )
+            views.setOnClickPendingIntent(
                 R.id.widget_quick_expense,
                 WidgetHelper.expenseIntent(context)
             )

@@ -10,6 +10,9 @@
     <string name="widget_quick_title">Capture a thought</string>
     <string name="widget_quick_sub">Tap here to start writing</string>
     <string name="widget_new_note">New note</string>
+    <string name="voice_memo">Voice memo</string>
+    <string name="voice_memo_long">Record a voice memo</string>
+    <string name="new_note_long">Start a new note</string>
     <string name="widget_recent_title">Recent</string>
     <string name="widget_todo_title">To-do</string>
     <string name="widget_empty">No notes yet. Tap to start writing.</string>

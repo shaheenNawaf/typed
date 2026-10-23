@@ -60,37 +60,61 @@ class VoiceModel {
 
   static Future<bool> isInstalled() async => (await file()).exists();
 
-  /// Downloads to a temp file, verifies the hash, then moves it into place.
-  /// [onProgress] gets 0..1. Throws on network or integrity failure.
-  static Future<void> download({
-    void Function(double progress)? onProgress,
-    HttpClient? client,
-  }) async {
+  /// Progress of the one download in flight (0..1), or null when idle.
+  /// A single shared job: closing and reopening the Settings sheet shows
+  /// the same download instead of starting a second one.
+  static final progress = ValueNotifier<double?>(null);
+  static Future<void>? _inFlight;
+
+  /// Downloads (or resumes) into a `.part` file, verifies the SHA-256 of
+  /// the whole file, then moves it into place. Joins a download already
+  /// running. Throws on network or integrity failure.
+  static Future<void> download({HttpClient? client}) {
+    return _inFlight ??= _download(client).whenComplete(() {
+      _inFlight = null;
+      progress.value = null;
+    });
+  }
+
+  static Future<void> _download(HttpClient? client) async {
     final target = await file();
     await target.parent.create(recursive: true);
     final part = File('${target.path}.part');
     final http = client ?? HttpClient();
+    progress.value = 0;
     try {
+      var have = await part.exists() ? await part.length() : 0;
       final req = await http.getUrl(Uri.parse(url));
+      // Resume a download a dropped connection cut short.
+      if (have > 0) req.headers.set(HttpHeaders.rangeHeader, 'bytes=$have-');
       final res = await req.close();
-      if (res.statusCode != 200) {
+      if (res.statusCode == 200) {
+        have = 0; // The server sent the whole file: start over.
+      } else if (res.statusCode != 206) {
         throw HttpException('HTTP ${res.statusCode}');
       }
-      final total = res.contentLength > 0 ? res.contentLength : sizeBytes;
-      final sink = part.openWrite();
-      var got = 0;
       final digestSink = _DigestSink();
       final hasher = sha256.startChunkedConversion(digestSink);
-      await for (final chunk in res) {
-        sink.add(chunk);
-        hasher.add(chunk);
-        got += chunk.length;
-        if (total > 0) onProgress?.call(got / total);
+      if (have > 0) {
+        await for (final chunk in part.openRead()) {
+          hasher.add(chunk);
+        }
       }
-      await sink.close();
+      final sink = part.openWrite(mode: have > 0 ? FileMode.append : FileMode.write);
+      var got = have;
+      try {
+        await for (final chunk in res) {
+          sink.add(chunk);
+          hasher.add(chunk);
+          got += chunk.length;
+          progress.value = (got / sizeBytes).clamp(0.0, 1.0);
+        }
+      } finally {
+        await sink.close();
+      }
       hasher.close();
       if (digestSink.value.toString() != sha256Hex) {
-        await part.delete();
+        await part.delete(); // Corrupt: never resume from it.
         throw const FileSystemException('Model download failed its check');
       }
       await part.rename(target.path);
@@ -98,13 +122,14 @@ class VoiceModel {
       await prefs.setBool(_enabledKey, true);
     } finally {
       if (client == null) http.close(force: true);
-      if (await part.exists()) await part.delete();
     }
   }
 
   static Future<void> remove() async {
     final f = await file();
     if (await f.exists()) await f.delete();
+    final part = File('${f.path}.part');
+    if (await part.exists()) await part.delete();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_enabledKey, false);
   }

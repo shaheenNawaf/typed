@@ -17,6 +17,7 @@ class FakeTranscriber implements Transcriber {
   TranscriberProblem? problem;
   void Function(String)? _onText;
   void Function(TranscriberProblem)? onProblem;
+  void Function(double)? onLevel;
   String _text = '';
   bool listening = false;
   bool cancelled = false;
@@ -39,7 +40,9 @@ class FakeTranscriber implements Transcriber {
   Future<void> start({
     required void Function(String text) onText,
     required void Function(TranscriberProblem problem) onProblem,
+    void Function(double level)? onLevel,
   }) async {
+    this.onLevel = onLevel;
     _text = '';
     _onText = onText;
     this.onProblem = onProblem;
@@ -92,6 +95,7 @@ void main() {
   Future<void> pumpHome(
     WidgetTester tester, {
     Map<String, Object> prefs = const {},
+    List<Note> extra = const [],
   }) async {
     SharedPreferences.setMockInitialValues({
       'onboarded_v1': true,
@@ -102,6 +106,7 @@ void main() {
     });
     await NoteStorage().save([
       Note(id: 'x', title: 'Existing', content: 'hi', tags: const []),
+      ...extra,
     ]);
     tester.view.devicePixelRatio = 1.0;
     tester.view.physicalSize = const Size(390, 844);
@@ -306,5 +311,129 @@ void main() {
     expect(find.text('Something else'), findsNothing);
     expect(find.widgetWithText(TextField, 'Buy free-range eggs'),
         findsOneWidget);
+  });
+
+  testWidgets('the level meter hears silence and says so', (tester) async {
+    await pumpHome(tester);
+    await tester.tap(find.byTooltip('Voice memo'));
+    await settle(tester);
+    expect(find.textContaining('Start talking'), findsOneWidget);
+
+    // Four silent seconds: explain why nothing is showing.
+    for (var i = 0; i < 5; i++) {
+      fake.onLevel?.call(0.02);
+      await tester.pump(const Duration(seconds: 1));
+    }
+    expect(find.textContaining('Not hearing much yet'), findsOneWidget);
+
+    // Sound arrives: the hint goes away.
+    fake.onLevel?.call(0.6);
+    await tester.pump();
+    expect(find.textContaining('Not hearing much yet'), findsNothing);
+    await tester.tap(find.text('Cancel'));
+    await settle(tester);
+  });
+
+  testWidgets('a misheard word can be fixed in the transcript and re-shaped',
+      (tester) async {
+    await pumpHome(tester);
+    await tester.tap(find.byTooltip('Voice memo'));
+    await settle(tester);
+    fake.say('I need to buy x. Call the bank.');
+    await tester.tap(find.text('Done'));
+    await settle(tester);
+    expect(find.widgetWithText(TextField, 'Buy x'), findsOneWidget);
+
+    await tester.tap(find.text('Transcript'));
+    await settle(tester);
+    await tester.enterText(
+      find.widgetWithText(TextField, 'I need to buy x. Call the bank.'),
+      'I need to buy eggs. Call the bank.',
+    );
+    await tester.tap(find.text('Re-shape from transcript'));
+    await settle(tester);
+
+    expect(find.widgetWithText(TextField, 'Buy eggs'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Buy x'), findsNothing);
+  });
+
+  testWidgets('keep talking adds to an edited draft instead of replacing it',
+      (tester) async {
+    await pumpHome(tester);
+    await tester.tap(find.byTooltip('Voice memo'));
+    await settle(tester);
+    fake.say('I need to buy eggs. Call the bank.');
+    await tester.tap(find.text('Done'));
+    await settle(tester);
+
+    await tester.enterText(
+        find.widgetWithText(TextField, 'Buy eggs'), 'Buy free-range eggs');
+    await tester.tap(find.text('Keep talking'));
+    await settle(tester);
+    fake.say('Also water the plants.');
+    await tester.tap(find.text('Done'));
+    await settle(tester);
+
+    expect(find.widgetWithText(TextField, 'Buy free-range eggs'),
+        findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Call the bank'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Water the plants'), findsOneWidget);
+  });
+
+  testWidgets('tasks can go into an existing list, with an exact Undo',
+      (tester) async {
+    await pumpHome(tester, extra: [
+      Note(
+        id: 'g',
+        title: 'Groceries',
+        content: '- [ ] Milk\n',
+        tags: const ['todo'],
+        type: 'todo',
+      ),
+    ]);
+    await tester.tap(find.byTooltip('Voice memo'));
+    await settle(tester);
+    fake.say('I need to buy eggs and then buy bread.');
+    // Home's Next up also has a Done button; the sheet's is on top.
+    await tester.tap(find.text('Done').last);
+    await settle(tester);
+
+    await tester.tap(find.text('A new list'));
+    await settle(tester);
+    await tester.tap(find.text('Groceries').last);
+    await settle(tester);
+    await tester.tap(find.text('Save'));
+    await settle(tester);
+
+    expect(find.text('Added 2 tasks to Groceries'), findsOneWidget);
+    var list = (await saved()).firstWhere((n) => n.id == 'g');
+    expect(list.content, '- [ ] Milk\n- [ ] Buy eggs\n- [ ] Buy bread\n');
+    expect((await saved()).where((n) => n.type == 'todo'), hasLength(1));
+
+    await tester.tap(find.text('Undo'));
+    await settle(tester);
+    list = (await saved()).firstWhere((n) => n.id == 'g');
+    expect(list.content.trim(), '- [ ] Milk');
+  });
+
+  testWidgets('the widget mic, shortcut and tile open straight into recording',
+      (tester) async {
+    var served = false;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('com.z4yed.typed/widget'),
+            (call) async {
+      if (call.method == 'getIntent' && !served) {
+        served = true;
+        return 'voice';
+      }
+      return null;
+    });
+    addTearDown(() => TestDefaultBinaryMessengerBinding
+        .instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+            const MethodChannel('com.z4yed.typed/widget'), (call) async => null));
+    await pumpHome(tester);
+    await settle(tester);
+    expect(find.text('LISTENING'), findsOneWidget);
   });
 }

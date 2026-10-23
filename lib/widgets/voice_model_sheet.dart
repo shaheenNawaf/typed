@@ -26,7 +26,6 @@ class VoiceModelSheet extends StatefulWidget {
 
 class _VoiceModelSheetState extends State<VoiceModelSheet> {
   bool? _installed;
-  double? _progress;
   String? _error;
 
   @override
@@ -35,7 +34,28 @@ class _VoiceModelSheetState extends State<VoiceModelSheet> {
     VoiceModel.isInstalled().then((v) {
       if (mounted) setState(() => _installed = v);
     });
+    // Reopened mid-download: follow the job already running.
+    VoiceModel.progress.addListener(_onProgress);
   }
+
+  @override
+  void dispose() {
+    VoiceModel.progress.removeListener(_onProgress);
+    super.dispose();
+  }
+
+  void _onProgress() {
+    if (!mounted) return;
+    setState(() {});
+    // A download started before this sheet opened has just ended.
+    if (VoiceModel.progress.value == null) {
+      VoiceModel.isInstalled().then((v) {
+        if (mounted) setState(() => _installed = v);
+      });
+    }
+  }
+
+  double? get _progress => VoiceModel.progress.value;
 
   String get _size =>
       VoiceModel.sizeBytes > 0
@@ -43,22 +63,15 @@ class _VoiceModelSheetState extends State<VoiceModelSheet> {
           : 'a few hundred MB';
 
   Future<void> _download() async {
-    setState(() {
-      _progress = 0;
-      _error = null;
-    });
+    setState(() => _error = null);
     try {
-      await VoiceModel.download(
-        onProgress: (p) => mounted ? setState(() => _progress = p) : null,
-      );
+      await VoiceModel.download();
       if (mounted) setState(() => _installed = true);
     } catch (_) {
       if (mounted) {
-        setState(() => _error =
-            'The download didn’t finish. Check your connection and try again.');
+        setState(() => _error = 'The download stopped. Tap Download to pick '
+            'up where it left off.');
       }
-    } finally {
-      if (mounted) setState(() => _progress = null);
     }
   }
 
