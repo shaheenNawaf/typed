@@ -1,7 +1,7 @@
 name: typed
 description: "A local-first workspace for notes, tasks, and money."
 publish_to: 'none'
-version: 0.2.3+5
+version: 0.2.4+8
 
 environment:
   sdk: ^3.9.2

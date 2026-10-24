@@ -14,20 +14,24 @@ import 'package:shared_preferences/shared_preferences.dart';
 class VoiceModel {
   VoiceModel._();
 
-  static const fileName = 'voice-shaper-v1.gguf';
+  static const fileName = 'voice-shaper-v2.gguf';
   static const url =
-      'https://github.com/shaheenNawaf/typed/releases/download/voice-model-v1/'
+      'https://github.com/shaheenNawaf/typed/releases/download/voice-model-v2/'
       '$fileName';
   static const sha256Hex =
-      '8fc9aa5370a6d1426e348e5fa986f217d843156066c1df7699d8add4d2b4b4da';
+      '9f445847380e33f7ae22e64138e8c0ee323bb82c64555c9a22605d27557d327a';
   static const sizeBytes = 444414880;
 
   static const _enabledKey = 'voice_model_enabled_v1';
 
+  /// Older models a phone may still have. One keeps working until the
+  /// update is downloaded, then it is deleted.
+  static const _previous = ['voice-shaper-v1.gguf'];
+
   /// Android 64-bit only: the native library is built for arm64-v8a and
   /// x86_64 (see android/app/build.gradle.kts). Swappable for tests.
-  static bool Function() isSupported =
-      () => !kIsWeb && Platform.isAndroid && _cpuCanRun();
+  static bool Function() isSupported = () =>
+      !kIsWeb && Platform.isAndroid && _cpuCanRun();
 
   static bool? _cpu;
 
@@ -35,18 +39,37 @@ class VoiceModel {
   /// llama.cpp kernels); cores without them would crash on load, so they
   /// never see the option. x86_64 (emulators) is built for its baseline.
   static bool _cpuCanRun() => _cpu ??= () {
-        if (Platform.version.contains('x64')) return true;
-        try {
-          final info = File('/proc/cpuinfo').readAsStringSync();
-          return info.contains('asimddp') && info.contains('fphp');
-        } catch (_) {
-          return false;
-        }
-      }();
+    if (Platform.version.contains('x64')) return true;
+    try {
+      final info = File('/proc/cpuinfo').readAsStringSync();
+      return info.contains('asimddp') && info.contains('fphp');
+    } catch (_) {
+      return false;
+    }
+  }();
+
+  /// Where models live. Swappable for tests.
+  static Future<Directory> Function() supportDir =
+      getApplicationSupportDirectory;
 
   static Future<File> file() async {
-    final dir = await getApplicationSupportDirectory();
+    final dir = await supportDir();
     return File('${dir.path}/models/$fileName');
+  }
+
+  static Future<List<File>> _previousFiles() async {
+    final dir = await supportDir();
+    return [for (final name in _previous) File('${dir.path}/models/$name')];
+  }
+
+  /// The model on this phone: the current one, else an older one.
+  static Future<File?> _installed() async {
+    final current = await file();
+    if (await current.exists()) return current;
+    for (final f in await _previousFiles()) {
+      if (await f.exists()) return f;
+    }
+    return null;
   }
 
   /// Installed and switched on.
@@ -54,11 +77,14 @@ class VoiceModel {
     if (!isSupported()) return null;
     final prefs = await SharedPreferences.getInstance();
     if (!(prefs.getBool(_enabledKey) ?? false)) return null;
-    final f = await file();
-    return await f.exists() ? f.path : null;
+    return (await _installed())?.path;
   }
 
-  static Future<bool> isInstalled() async => (await file()).exists();
+  static Future<bool> isInstalled() async => await _installed() != null;
+
+  /// An older model is installed and a better one can be downloaded.
+  static Future<bool> hasUpdate() async =>
+      !await (await file()).exists() && await _installed() != null;
 
   /// Progress of the one download in flight (0..1), or null when idle.
   /// A single shared job: closing and reopening the Settings sheet shows
@@ -100,7 +126,9 @@ class VoiceModel {
           hasher.add(chunk);
         }
       }
-      final sink = part.openWrite(mode: have > 0 ? FileMode.append : FileMode.write);
+      final sink = part.openWrite(
+        mode: have > 0 ? FileMode.append : FileMode.write,
+      );
       var got = have;
       try {
         await for (final chunk in res) {
@@ -118,6 +146,9 @@ class VoiceModel {
         throw const FileSystemException('Model download failed its check');
       }
       await part.rename(target.path);
+      for (final old in await _previousFiles()) {
+        if (await old.exists()) await old.delete();
+      }
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_enabledKey, true);
     } finally {
@@ -130,6 +161,9 @@ class VoiceModel {
     if (await f.exists()) await f.delete();
     final part = File('${f.path}.part');
     if (await part.exists()) await part.delete();
+    for (final old in await _previousFiles()) {
+      if (await old.exists()) await old.delete();
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_enabledKey, false);
   }

@@ -52,7 +52,8 @@ WHEN = ["tomorrow", "today", "tonight", "on Friday", "on Monday",
         "this afternoon", "on the 3rd", "before Wednesday", "tonight at 8",
         "on Saturday morning", "at 9:30 am", "Sunday", "in a week"]
 FILLERS = ["um", "uh", "like", "you know", "so", "okay so", "basically",
-           "right", "I mean", "anyway", "oh"]
+           "right", "I mean", "anyway", "oh", "hey", "hey so", "hi",
+           "okay okay", "so like", "uh yeah so"]
 
 
 def pick(xs):
@@ -87,7 +88,7 @@ def t_buy():
     return pick([
         (f"buy {a}", Task(f"Buy {a}", category="shopping")),
         (f"pick up some {a}", Task(f"Pick up {a}", category="shopping")),
-        (f"get {a} and {b}", Task(f"Get {a} and {b}", category="shopping")),
+        (f"get {a}", Task(f"Get {a}", category="shopping")),
         (f"grab {a}", Task(f"Grab {a}", category="shopping")),
     ])
 
@@ -186,6 +187,14 @@ def t_implicit():
         (f"the car is making that noise again", Task("Get the car checked", category="home")),
         (f"{pick(DOCS)} expires soon", None),
     ]
+    who = pick(["the landlord", "the repair guy", "the technician",
+                "the building admin", "a plumber"])
+    options += [
+        (f"{f} is broken again so I'll call {who}",
+         Task(f"Call {who} about {f}", category="home")),
+        (f"{f} still isn't working, I'm going to message {who} tonight",
+         Task(f"Message {who} about {f}", category="home")),
+    ]
     spoken, task = pick(options)
     if task is None:
         doc = spoken.replace(" expires soon", "")
@@ -266,13 +275,17 @@ def memo_list() -> Memo:
         m.spoken.append(spoken)
         m.tasks.append(task)
 
-    # Follow-on fragment: "... bread too" merges into a shopping task.
+    # Follow-on fragment: "... bread too" is one more thing to buy. It is
+    # added to the tasks after the corrections below, which index spoken
+    # phrases and tasks together.
+    extra_task = None
     for i, t in enumerate(m.tasks):
         if t.category == "shopping" and random.random() < 0.3 and not t.when:
             extra = pick([x for x in ITEMS if x not in t.text])
             m.spoken[i] += pick([f". oh and {extra} too", f", {extra} as well",
                                  f". {extra} too", f", also {extra}"])
-            t.text += f" and {extra}"
+            verb = t.text.split()[0]
+            extra_task = (t, Task(f"{verb} {extra}", category="shopping"))
             break
 
     # Correction: say something wrong, then fix it.
@@ -289,6 +302,10 @@ def memo_list() -> Memo:
             new = pick([w for w in WHEN if w != m.tasks[i].when])
             m.spoken[i] += f", actually make it {new}"
             m.tasks[i].when = new
+
+    if extra_task:
+        parent, task = extra_task
+        m.tasks.insert(m.tasks.index(parent) + 1, task)
 
     if cat_lead:
         m.spoken.insert(0, pick(LEADS[cat_lead]))
@@ -321,7 +338,8 @@ NOTE_TOPICS = [
         "the talk today was about local-first software",
         "the main point was that sync is the hard part, not storage",
         "they used conflict-free data types to merge edits",
-        "I want to read more about how they handle deletes"]),
+        ("I want to read more about how they handle deletes",
+         "Read more about how they handle deletes")]),
     ("the app idea", "App idea: weekly recap", [
         "I had an idea for the app",
         "a weekly recap on Sunday evenings could show what you finished",
@@ -346,7 +364,7 @@ NOTE_TOPICS = [
         "went for a run this morning",
         "did about five kilometres in thirty minutes",
         "my knee felt better than last week",
-        "next time I should start slower"]),
+        "my knee still clicks a bit going downhill"]),
     ("the kitchen", "Kitchen renovation ideas", [
         "thinking about the kitchen again",
         "open shelves would make it feel bigger",
@@ -356,7 +374,41 @@ NOTE_TOPICS = [
         "this week felt scattered",
         "too many meetings and not enough deep work",
         "mornings were the most productive",
-        "I should block off Tuesday mornings"]),
+        ("I should block off Tuesday mornings",
+         "Block off Tuesday mornings")]),
+    ("the landlord", "Call with the landlord", [
+        "the landlord finally called back",
+        "he agreed to fix the gate next week",
+        "the rent stays the same until March",
+        ("I should send him photos of the water damage",
+         "Send the landlord photos of the water damage")]),
+    ("the garden", "Garden plan", [
+        "so the plan for the garden",
+        "tomatoes along the back fence",
+        "herbs in the raised bed by the door",
+        "the compost bin moves to the shady corner"]),
+    ("the client", "Client call notes", [
+        "the client call went okay",
+        "they want the launch moved up a week",
+        "Priya will redo the pricing page",
+        ("I need to tell the team about the new date",
+         "Tell the team about the new launch date")]),
+    ("the podcast", "Podcast notes: sleep", [
+        "listened to a podcast on sleep",
+        "keep the bedroom cool and dark",
+        "morning sunlight resets your body clock",
+        "caffeine after two hurts deep sleep"]),
+    ("the standup", "Standup notes", [
+        "notes from standup",
+        "Ben is blocked on the API keys",
+        "Aisha shipped the login screen",
+        ("I should ping IT about the keys",
+         "Ping IT about the API keys")]),
+    ("the house hunt", "House hunting", [
+        "saw two flats today",
+        "the one near the park is bright but small",
+        "the bigger one needs a lot of work",
+        "the agent will send the floor plans"]),
 ]
 
 
@@ -365,8 +417,9 @@ def memo_note() -> Memo:
     k = random.randint(2, len(sentences))
     chosen = sentences[:k]
     m = Memo(kind="note", title=title)
-    m.spoken = list(chosen)
-    m.note = [cap(s) + "." for s in chosen]
+    m.spoken = [c[0] if isinstance(c, tuple) else c for c in chosen]
+    m.note = [cap(c) + "." for c in chosen if not isinstance(c, tuple)]
+    m.tasks = [Task(c[1]) for c in chosen if isinstance(c, tuple)]
     # One incidental task inside a note.
     if random.random() < 0.4:
         spoken, task = spoken_task()

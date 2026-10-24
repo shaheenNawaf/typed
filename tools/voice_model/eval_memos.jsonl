@@ -28,3 +28,13 @@
 {"transcript": "call grandma on Sunday, she mentioned her knee is acting up, maybe ask if she needs help with the shopping", "expect": {"kind": "todo", "tasks": [{"text": "Call grandma", "when": "on Sunday"}, {"text": "Ask grandma if she needs help with the shopping", "when": ""}]}}
 {"transcript": "submit the expense report scratch that I already did that, submit the timesheet and the travel claim before end of day", "expect": {"kind": "todo", "tasks": [{"text": "Submit the timesheet", "when": "before end of day"}, {"text": "Submit the travel claim", "when": "before end of day"}]}}
 {"transcript": "the water heater is making a weird clicking sound since this morning", "expect": {"kind": "todo", "tasks": [{"text": "Get the water heater checked", "when": ""}]}}
+{"transcript": "hey so I like need to buy eggs and then call mom later", "expect": {"kind": "todo", "tasks": [{"text": "Buy eggs", "when": ""}, {"text": "Call mom later", "when": ""}]}}
+{"transcript": "hey um so basically I have to finish the report by Friday and like also email Sam", "expect": {"kind": "todo", "tasks": [{"text": "Finish the report", "when": "by Friday"}, {"text": "Email Sam", "when": ""}]}}
+{"transcript": "okay so hi um remind me to pay the electric bill tomorrow", "expect": {"kind": "todo", "tasks": [{"text": "Pay the electric bill", "when": "tomorrow"}]}}
+{"transcript": "so yeah I was thinking like maybe we could add dark mode to the app you know", "expect": {"kind": "note", "tasks": []}}
+{"transcript": "hey hey uh can you remind me to call the dentist at 3 tomorrow", "expect": {"kind": "todo", "tasks": [{"text": "Call the dentist", "when": "at 3 tomorrow"}]}}
+{"transcript": "Hey, so I need to pick up the laundry. And basically also buy rice, like five kilos.", "expect": {"kind": "todo", "tasks": [{"text": "Pick up the laundry", "when": ""}, {"text": "Buy five kilos of rice", "when": ""}]}}
+{"transcript": "um hello okay so the meeting went well I guess, Hannah liked the flow, I should send her the mockups", "expect": {"kind": "note", "tasks": [{"text": "Send Hannah the mockups", "when": ""}]}}
+{"transcript": "so like I just realized I have to renew my passport, it expires next month", "expect": {"kind": "todo", "tasks": [{"text": "Renew my passport", "when": ""}]}}
+{"transcript": "alright so groceries eggs milk bread and uh coffee", "expect": {"kind": "todo", "tasks": [{"text": "Buy eggs", "when": ""}, {"text": "Buy milk", "when": ""}, {"text": "Buy bread", "when": ""}, {"text": "Buy coffee", "when": ""}]}}
+{"transcript": "uh yeah so basically the landlord called, the water will be off tomorrow morning, I should fill some buckets tonight", "expect": {"kind": "note", "tasks": [{"text": "Fill some buckets", "when": "tonight"}]}}

@@ -1,4 +1,5 @@
 import '../utils/date_format.dart';
+import 'speech_cleanup.dart';
 import 'spend_parser.dart';
 import 'when_parser.dart';
 
@@ -74,7 +75,8 @@ class VoiceDraft {
 ///   …", "make it a list / note / expense".
 VoiceDraft shapeVoiceMemo(String transcript, {DateTime? now}) {
   final date = now ?? DateTime.now();
-  final command = _commands(transcript);
+  // Shape what was meant, not the ums and heys around it.
+  final command = _commands(cleanSpeech(transcript));
   final clauses = _clauses(command.text);
   final tasks = <String>[];
   final other = <String>[];
@@ -181,6 +183,14 @@ final _kindCommand = RegExp(
   r"[,;.]?\s*\b(?:make|save|turn)\s+(?:it|this)(?:\s+(?:into|as))?\s+(?:an?\s+)?(list|to-?do(?:\s+list)?|checklist|note|expenses?)\b[.!?]?|[,;.]?\s*\bas\s+an?\s+(list|to-?do\s+list|checklist|note|expense)\b[.!?]?",
   caseSensitive: false,
 );
+
+/// Whether [transcript] uses a spoken command ("new task…", "title is…",
+/// "make it a list"). The model was not trained on them, so these memos
+/// keep the rules draft.
+bool hasVoiceCommands(String transcript) {
+  final c = _commands(cleanSpeech(transcript));
+  return c.kind != null || c.title != null || c.text.contains(_taskMark);
+}
 
 ({String text, String? title, VoiceKind? kind}) _commands(String transcript) {
   var text = transcript;
@@ -326,7 +336,7 @@ List<String> _clauses(String transcript) {
         '',
       );
     }
-    if (_strip(s).isNotEmpty) out.add(s);
+    if (_strip(s).replaceAll(RegExp(r'[\s,.;:!?]'), '').isNotEmpty) out.add(s);
   }
   return out;
 }
@@ -343,6 +353,7 @@ final _cue = RegExp(
   r"|^(?:i\s+)?gotta\s+"
   r"|^(?:i\s+)?(?:should|must)\s+"
   r"|^(?:remember|remind\s+me)\s+to\s+"
+  r"|^(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?remind\s+me\s+to\s+"
   r"|^(?:don'?t|do\s+not)\s+forget\s+(?:to\s+)?"
   r"|^make\s+sure\s+(?:to\s+|i\s+)?"
   r"|^(?:i'?ll|i\s+will|i'?m\s+going\s+to|i\s+am\s+going\s+to|gonna)\s+"

@@ -34,7 +34,8 @@ class VoiceSpend {
 // ── amounts ───────────────────────────────────────────────────────────────
 
 final _amount = RegExp(
-  r"(?<![\w.])(?:(?<pre>₱|php|p|\$|usd|us\$)\s?)?"
+  // Not part of a clock time ("9:15") or a decimal.
+  r"(?<![\w.:])(?:(?<pre>₱|php|p|\$|usd|us\$)\s?)?"
   r"(?<num>\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)"
   r"(?<k>k\b)?"
   r"(?:\s?(?<post>pesos?|php|bucks|dollars?|usd))?(?![\w])",
@@ -43,7 +44,7 @@ final _amount = RegExp(
 
 /// Words that make a number a time, a date or a count, not money.
 final _notMoneyAfter = RegExp(
-  r"^\s*(?:am|pm|a\.m|p\.m|o'?clock|minutes?|mins?|hours?|hrs?|days?|weeks?|months?|years?|times|percent|%|st\b|nd\b|rd\b|th\b|kilos?|kg|km|people|items?|pieces?|pcs)",
+  r"^\s*(?:am|pm|a\.m|p\.m|o'?clock|minutes?|mins?|hours?|hrs?|days?|nights?|weeks?|months?|years?|kids?|adults?|pax|persons?|guests?|times|percent|%|st\b|nd\b|rd\b|th\b|kilos?|kg|km|people|items?|pieces?|pcs)",
   caseSensitive: false,
 );
 final _notMoneyBefore = RegExp(
@@ -63,6 +64,14 @@ final _thingAfter = RegExp(
   r"^\s+(?!(?:on|for|at|in|from|with|and|today|yesterday|pesos?|php|bucks|dollars?|usd)\b)[a-z]",
   caseSensitive: false,
 );
+final _notSpent = RegExp(
+  r"\b(?:need|needs|needed|bring|prepare|save|saving|budget|owe|owes|borrow|lend|lent|ask(?:ed)? for)\b",
+  caseSensitive: false,
+);
+final _spentWord = RegExp(
+  r"\b(?:spent|paid|bought|cost|costs|got paid|received|earned)\b",
+  caseSensitive: false,
+);
 final _incomeVerb = RegExp(
   r"\b(?:got paid|received|receive|earned|earn|salary|income|sold|refund(?:ed)?|sweldo|cashback)\b",
   caseSensitive: false,
@@ -74,7 +83,7 @@ List<VoiceSpend> parseSpends(String input) {
   // "two hundred fifty pesos" → "250 pesos": recognisers don't always
   // write numbers as digits. Only used for money, never the memo text.
   final clause = wordsToDigits(input);
-  final out = <VoiceSpend>[];
+  final found = <(RegExpMatch, String)>[];
   final words = clause.trim().split(RegExp(r'\s+'));
   for (final m in _amount.allMatches(clause)) {
     final before = clause.substring(0, m.start);
@@ -87,11 +96,24 @@ List<VoiceSpend> parseSpends(String input) {
     final hasVerb = _spendVerb.hasMatch(clause) || _incomeVerb.hasMatch(clause);
     final short = words.length <= 5;
     if (!hasCurrency && !hasVerb && !short) continue;
+    // "bought one for 450", "2 at 99 each": a count, the price comes next.
+    if (RegExp(
+      r'^\s*(?:pcs?|pieces?|x)?\s*(?:for|at|@)\s*(?:₱|php|\$)?\s*\d',
+      caseSensitive: false,
+    ).hasMatch(after)) {
+      continue;
+    }
+    // "9:15": the hour of a clock time.
+    if (after.startsWith(':')) continue;
+    // "they need 200 pesos", "I owe Sam 500": money mentioned, not spent.
+    if (_notSpent.hasMatch(before) && !_spentWord.hasMatch(clause)) continue;
     var number = m.namedGroup('num')!.replaceAll(',', '');
     final value = double.tryParse(number);
     if (value == null || value <= 0) continue;
     // A bare single digit with no currency is almost never money ("2 eggs").
-    if (!hasCurrency && value < 10 && !_spendVerb.hasMatch(before)) continue;
+    // A bare single digit is almost never money ("2 eggs", "on the 3rd, 2
+    // nights") unless a real spending word comes right before it.
+    if (!hasCurrency && value < 10 && !_spentWord.hasMatch(before)) continue;
     // "buy 12 eggs": a number between a buying word and a thing is a count.
     if (!hasCurrency &&
         _quantity.hasMatch(before) &&
@@ -101,49 +123,89 @@ List<VoiceSpend> parseSpends(String input) {
     if (m.namedGroup('k') != null) {
       number = (value * 1000).toStringAsFixed(value * 1000 % 1 == 0 ? 0 : 2);
     }
-    final income = _incomeVerb.hasMatch(clause);
-    final note = _describe(clause, m);
+    found.add((m, number));
+  }
+
+  // Each amount gets its own slice of the clause, so "spent 250 for
+  // foodpanda and I spent 465 for chicken" gives two descriptions, not two
+  // copies of the whole sentence.
+  final out = <VoiceSpend>[];
+  var start = 0;
+  for (var i = 0; i < found.length; i++) {
+    final (m, number) = found[i];
+    final end = i + 1 < found.length
+        ? _boundary(clause, m.end, found[i + 1].$1.start)
+        : clause.length;
+    final span = clause.substring(start, end);
+    final local = m.start - start;
+    final income = _incomeVerb.hasMatch(span);
     out.add(
       VoiceSpend(
         amount: number,
-        note: note,
+        note: _describe(span, local, local + (m.end - m.start)),
         category: income
             ? (RegExp(
                     r'\b(?:salary|sweldo|payday)\b',
                     caseSensitive: false,
-                  ).hasMatch(clause)
+                  ).hasMatch(span)
                   ? 'Salary'
                   : 'Income')
-            : categoryFor(clause),
+            : categoryFor(span),
         type: income ? 'income' : 'expense',
       ),
     );
+    start = end;
   }
   return out;
 }
 
-String _describe(String clause, RegExpMatch m) {
-  var s = clause.replaceRange(m.start, m.end, ' ');
-  s = s.replaceAll(
-    RegExp(
-      r"\b(?:i\s+)?(?:just\s+)?(?:spent|spend|paid|pay|bought|got paid|received|earned|cost|costs|it was|was|worth|about|around|like|for|on|pesos?|php|bucks|dollars?|usd|um+|uh+|so|okay|today|yesterday)\b",
-      caseSensitive: false,
-    ),
-    ' ',
-  );
+/// "… and I spent …" starts the next entry.
+final _nextSpend = RegExp(
+  r"(?:[,;.]\s*)?\b(?:and\s+)?(?:then\s+)?(?:i\s+)?(?:also\s+)?(?:just\s+)?(?:spent|paid|bought|got paid|received|earned)\b",
+  caseSensitive: false,
+);
+final _separator = RegExp(
+  r"[,;.]|\b(?:and|then|plus|also)\b",
+  caseSensitive: false,
+);
+
+/// Where the text between two amounts splits: before the next spending
+/// verb, else at the last comma or "and", else right after the first
+/// amount ("lunch 250 coffee 120").
+int _boundary(String clause, int from, int to) {
+  final gap = clause.substring(from, to);
+  final verb = _nextSpend.firstMatch(gap);
+  if (verb != null) return from + verb.start;
+  final seps = _separator.allMatches(gap).toList();
+  if (seps.isNotEmpty) return from + seps.last.start;
+  return from;
+}
+
+/// Words that say nothing about what the money was for.
+final _noise = RegExp(
+  r"\b(?:hey|hi|hello|okay|ok|so|um+|uh+|er+|like|basically|actually|really|just|i|i've|i'm|we|spent|spend|paid|pay|bought|got paid|received|earned|cost|costs|it was|was|worth|about|around|roughly|approximately|more or less|pesos?|php|bucks|dollars?|usd|today|yesterday|earlier|kanina|this morning|this afternoon|this evening|tonight|last night)\b",
+  caseSensitive: false,
+);
+
+/// Connectors that only dangle at the edges ("for Jollibee", "lunch at").
+final _edge = RegExp(
+  r"^(?:at|the|a|an|and|then|also|plus|for|on|to|from|with|in)\s+|\s+(?:at|the|a|an|and|then|also|plus|for|on|to|from|with|in)$",
+  caseSensitive: false,
+);
+
+String _describe(String span, int amountStart, int amountEnd) {
+  var s = span.replaceRange(amountStart, amountEnd, ' ');
+  // Any other amount left in the slice is not part of the description.
+  s = s.replaceAll(_amount, ' ').replaceAll(_noise, ' ');
   s = s
       .replaceAll(RegExp(r"[₱$,.;!?]"), ' ')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
-  // "at Jollibee" reads better than a dangling "at".
-  s = s.replaceFirst(
-    RegExp(r'^(?:at|the|a|an|and)\s+', caseSensitive: false),
-    '',
-  );
-  s = s.replaceFirst(
-    RegExp(r'\s+(?:at|the|a|an|and)$', caseSensitive: false),
-    '',
-  );
+  String prev;
+  do {
+    prev = s;
+    s = s.replaceAll(_edge, '').trim();
+  } while (s != prev);
   if (s.isEmpty) return '';
   return s[0].toUpperCase() + s.substring(1);
 }
@@ -175,6 +237,14 @@ const _categoryWords = <String, List<String>>{
     'takeout',
     'delivery',
     'foodpanda',
+    'food panda',
+    'potato corner',
+    'chicken',
+    'chooks',
+    'inasal',
+    'mang inasal',
+    'chowking',
+    'kfc',
     'grabfood',
     'drinks',
     'beer',
