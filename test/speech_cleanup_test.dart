@@ -164,6 +164,50 @@ void main() {
       expect(parseSpokenWhen('Third try, the 3rd time', now), isNull);
     });
 
+    test('"the morning" as a thing is not a time', () {
+      final m = parseSpokenWhen('Take the morning off work', now);
+      expect(m, isNull);
+      expect(
+        parseSpokenWhen('Call mom in the morning', now)!.when.partOfDay,
+        'morning',
+      );
+      expect(
+        parseSpokenWhen('Water the plants tomorrow morning', now)!.when.day,
+        DateTime(2026, 10, 25),
+      );
+    });
+
+    test('weeks, weekends and times said as events', () {
+      // Saturday Oct 24; use a Monday so "before" has days to go.
+      final mon = DateTime(2026, 10, 19, 10);
+      var w = parseSpokenWhen('Renew the insurance before the weekend', mon)!;
+      expect(w.text, 'Renew the insurance');
+      expect(w.when.day, DateTime(2026, 10, 23));
+      w = parseSpokenWhen('Pay my share of the internet before Friday', mon)!;
+      expect(w.text, 'Pay my share of the internet');
+      expect(w.when.day, DateTime(2026, 10, 23));
+      expect(
+        parseSpokenWhen('Book a physio this week', mon)!.when.day,
+        DateTime(2026, 10, 23),
+      );
+      expect(
+        parseSpokenWhen('Ping IT after lunch', mon)!.when.at,
+        DateTime(2026, 10, 19, 13),
+      );
+      expect(
+        parseSpokenWhen('Call mom after work', mon)!.when.at,
+        DateTime(2026, 10, 19, 18),
+      );
+      expect(
+        parseSpokenWhen(
+          'Send Bea the slides first thing tomorrow',
+          mon,
+        )!.when.at,
+        DateTime(2026, 10, 20, 9),
+      );
+      expect(parseSpokenWhen('Go over the weekend plan', mon), isNull);
+    });
+
     test('end of day is today at 5 PM', () {
       final w = parseSpokenWhen('Submit the timesheet before end of day', now)!;
       expect(w.text, 'Submit the timesheet');

@@ -100,10 +100,12 @@ final _dayPattern = RegExp(
   '(?<dat>(?:the\\s+)?day\\s+after\\s+tomorrow)'
   '|(?<tomorrow>tomorrow|tmrw|tomorow)'
   '|(?<today>today|tonight)'
-  '|(?<weekend>(?:this\\s+)?weekend)'
+  '|(?<weekend>(?:(?:before|by|over|until|till|for)\\s+)?(?:the\\s+|this\\s+)?weekend(?!\\s+(?:plans?|trip|getaway|schedule|shift|market|sale|edition|special)\\b))'
+  // "this week", "by the end of the week": the coming Friday.
+  '|(?<thisweek>(?:(?:by|before|until|till)\\s+)?(?:(?:the\\s+)?end\\s+of\\s+(?:the|this)\\s+week|this\\s+week))'
   '|(?<nextweek>next\\s+week)'
   '|(?<inn>in\\s+(?<n>\\d+|a|one|two|three|four|five|six|seven)\\s+(?<unit>days?|weeks?))'
-  '|(?:(?<mod>this|next|on|by|until|till)\\s+)?(?<wd>$_weekdayRe)'
+  '|(?:(?<mod>this|next|on|by|before|for|until|till)\\s+)?(?<wd>$_weekdayRe)'
   '|(?:on\\s+)?(?:the\\s+)?(?<d1>\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?<m1>$_monthRe)'
   '|(?:on\\s+)?(?<m2>$_monthRe)\\s+(?:the\\s+)?(?<d2>\\d{1,2})(?:st|nd|rd|th)?'
   // "on the 30th": the next time that day of the month comes round.
@@ -125,7 +127,13 @@ final _timePattern = RegExp(
   r'|(?:(?:at|by|around|before)\s+)?(?<h>\d{1,2})(?::(?<m>\d{2}))?\s*(?<ap>a\.?m\.?|p\.?m\.?)'
   r'|(?:at|by|around|before)\s+(?<h2>\d{1,2})(?::(?<m2>\d{2}))?(?!\s*(?:days?|weeks?|minutes?|hours?|percent|%|of\b))'
   r"|(?<o>\d{1,2})\s+o'?clock"
-  r'|(?:in\s+the\s+|this\s+)?(?<part>morning|afternoon|evening)'
+  // Times of day said as events: "after lunch", "after work", "first thing".
+  r'|(?<lunch>(?:after|at|before)\s+lunch|lunchtime)'
+  r'|(?<afterwork>after\s+work)'
+  r'|(?<first>first\s+thing(?:\s+in\s+the\s+morning)?)'
+  // "in the morning", "tomorrow morning" — but "take the morning off" or
+  // "every morning" is not a time.
+  r'|(?:in\s+the\s+|this\s+|(?<!\b(?:the|a|all|every|each|one|good|that)\s+))(?<part>morning|afternoon|evening)'
   r')\b',
   caseSensitive: false,
 );
@@ -211,6 +219,16 @@ WhenMatch? _parse(String task, DateTime now) {
     if (named != null) {
       hour = named == 'midnight' ? 0 : 12;
       minute = 0;
+    } else if (t.namedGroup('lunch') != null) {
+      final l = t.namedGroup('lunch')!.toLowerCase();
+      hour = l.startsWith('before') ? 11 : (l.startsWith('after') ? 13 : 12);
+      minute = 0;
+    } else if (t.namedGroup('afterwork') != null) {
+      hour = 18;
+      minute = 0;
+    } else if (t.namedGroup('first') != null) {
+      hour = 9;
+      minute = 0;
     } else if (t.namedGroup('h') != null) {
       hour = int.parse(t.namedGroup('h')!) % 12;
       minute = int.tryParse(t.namedGroup('m') ?? '') ?? 0;
@@ -242,8 +260,12 @@ WhenMatch? _parse(String task, DateTime now) {
   if (hour != null) part = null;
   final cleaned = text
       .replaceAll(RegExp(r'\s{2,}'), ' ')
+      // Prepositions the date phrase left behind: "… before the".
       .replaceFirst(
-        RegExp(r'\s+(?:on|at|by|for|this|until|till)$', caseSensitive: false),
+        RegExp(
+          r'(?:\s+(?:on|at|by|for|this|until|till|before|after|over|the))+$',
+          caseSensitive: false,
+        ),
         '',
       )
       .replaceFirst(RegExp(r'[\s,;-]+$'), '')
@@ -269,8 +291,17 @@ DateTime? _resolveDay(RegExpMatch d, DateTime today, DateTime now) {
   }
   if (d.namedGroup('today') != null) return today;
   if (d.namedGroup('weekend') != null) {
+    // "before the weekend": the Friday.
+    if (d.namedGroup('weekend')!.toLowerCase().startsWith('before')) {
+      return today.add(Duration(days: (DateTime.friday - today.weekday) % 7));
+    }
     // The coming Saturday (today, if it is Saturday).
     return today.add(Duration(days: (DateTime.saturday - today.weekday) % 7));
+  }
+  if (d.namedGroup('thisweek') != null) {
+    // The coming Friday; at the weekend, today.
+    final ahead = DateTime.friday - today.weekday;
+    return ahead >= 0 ? today.add(Duration(days: ahead)) : today;
   }
   if (d.namedGroup('nextweek') != null) {
     return today.add(Duration(days: 8 - today.weekday)); // next Monday

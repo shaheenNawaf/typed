@@ -73,6 +73,23 @@ void main() {
   });
 
   group('not money', () {
+    test('clock times and money that was not spent', () {
+      expect(
+        parseSpends('confirmation came through for the 14th at 9:15'),
+        isEmpty,
+      );
+      expect(
+        parseSpends("there's a field trip and they need 200 pesos and a slip"),
+        isEmpty,
+      );
+      expect(parseSpends('I owe Sam 500'), isEmpty);
+      // A spending word still makes it money.
+      expect(
+        parseSpends('I needed a charger so I bought one for 450'),
+        hasLength(1),
+      );
+    });
+
     test('times, dates and counts are ignored', () {
       expect(parseSpends('call the dentist at 3 pm'), isEmpty);
       expect(parseSpends('meeting on the 15th'), isEmpty);
@@ -118,11 +135,10 @@ void main() {
         final d = shape(said);
         expect(d.kind, VoiceKind.expense, reason: said);
         expect(d.spends.map((s) => s.amount), ['250', '465'], reason: said);
-        expect(
-          d.spends.map((s) => s.note.toLowerCase()),
-          ['food panda', 'chicken pecho and potato corner'],
-          reason: said,
-        );
+        expect(d.spends.map((s) => s.note.toLowerCase()), [
+          'food panda',
+          'chicken pecho and potato corner',
+        ], reason: said);
       }
     });
 

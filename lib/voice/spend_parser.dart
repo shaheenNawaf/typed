@@ -34,7 +34,8 @@ class VoiceSpend {
 // ── amounts ───────────────────────────────────────────────────────────────
 
 final _amount = RegExp(
-  r"(?<![\w.])(?:(?<pre>₱|php|p|\$|usd|us\$)\s?)?"
+  // Not part of a clock time ("9:15") or a decimal.
+  r"(?<![\w.:])(?:(?<pre>₱|php|p|\$|usd|us\$)\s?)?"
   r"(?<num>\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)"
   r"(?<k>k\b)?"
   r"(?:\s?(?<post>pesos?|php|bucks|dollars?|usd))?(?![\w])",
@@ -43,7 +44,7 @@ final _amount = RegExp(
 
 /// Words that make a number a time, a date or a count, not money.
 final _notMoneyAfter = RegExp(
-  r"^\s*(?:am|pm|a\.m|p\.m|o'?clock|minutes?|mins?|hours?|hrs?|days?|weeks?|months?|years?|times|percent|%|st\b|nd\b|rd\b|th\b|kilos?|kg|km|people|items?|pieces?|pcs)",
+  r"^\s*(?:am|pm|a\.m|p\.m|o'?clock|minutes?|mins?|hours?|hrs?|days?|nights?|weeks?|months?|years?|kids?|adults?|pax|persons?|guests?|times|percent|%|st\b|nd\b|rd\b|th\b|kilos?|kg|km|people|items?|pieces?|pcs)",
   caseSensitive: false,
 );
 final _notMoneyBefore = RegExp(
@@ -61,6 +62,14 @@ final _quantity = RegExp(
 );
 final _thingAfter = RegExp(
   r"^\s+(?!(?:on|for|at|in|from|with|and|today|yesterday|pesos?|php|bucks|dollars?|usd)\b)[a-z]",
+  caseSensitive: false,
+);
+final _notSpent = RegExp(
+  r"\b(?:need|needs|needed|bring|prepare|save|saving|budget|owe|owes|borrow|lend|lent|ask(?:ed)? for)\b",
+  caseSensitive: false,
+);
+final _spentWord = RegExp(
+  r"\b(?:spent|paid|bought|cost|costs|got paid|received|earned)\b",
   caseSensitive: false,
 );
 final _incomeVerb = RegExp(
@@ -87,11 +96,24 @@ List<VoiceSpend> parseSpends(String input) {
     final hasVerb = _spendVerb.hasMatch(clause) || _incomeVerb.hasMatch(clause);
     final short = words.length <= 5;
     if (!hasCurrency && !hasVerb && !short) continue;
+    // "bought one for 450", "2 at 99 each": a count, the price comes next.
+    if (RegExp(
+      r'^\s*(?:pcs?|pieces?|x)?\s*(?:for|at|@)\s*(?:₱|php|\$)?\s*\d',
+      caseSensitive: false,
+    ).hasMatch(after)) {
+      continue;
+    }
+    // "9:15": the hour of a clock time.
+    if (after.startsWith(':')) continue;
+    // "they need 200 pesos", "I owe Sam 500": money mentioned, not spent.
+    if (_notSpent.hasMatch(before) && !_spentWord.hasMatch(clause)) continue;
     var number = m.namedGroup('num')!.replaceAll(',', '');
     final value = double.tryParse(number);
     if (value == null || value <= 0) continue;
     // A bare single digit with no currency is almost never money ("2 eggs").
-    if (!hasCurrency && value < 10 && !_spendVerb.hasMatch(before)) continue;
+    // A bare single digit is almost never money ("2 eggs", "on the 3rd, 2
+    // nights") unless a real spending word comes right before it.
+    if (!hasCurrency && value < 10 && !_spentWord.hasMatch(before)) continue;
     // "buy 12 eggs": a number between a buying word and a thing is a count.
     if (!hasCurrency &&
         _quantity.hasMatch(before) &&

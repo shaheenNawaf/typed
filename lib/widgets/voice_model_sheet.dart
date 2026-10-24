@@ -26,14 +26,13 @@ class VoiceModelSheet extends StatefulWidget {
 
 class _VoiceModelSheetState extends State<VoiceModelSheet> {
   bool? _installed;
+  bool _update = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    VoiceModel.isInstalled().then((v) {
-      if (mounted) setState(() => _installed = v);
-    });
+    _refresh();
     // Reopened mid-download: follow the job already running.
     VoiceModel.progress.addListener(_onProgress);
   }
@@ -48,36 +47,55 @@ class _VoiceModelSheetState extends State<VoiceModelSheet> {
     if (!mounted) return;
     setState(() {});
     // A download started before this sheet opened has just ended.
-    if (VoiceModel.progress.value == null) {
-      VoiceModel.isInstalled().then((v) {
-        if (mounted) setState(() => _installed = v);
+    if (VoiceModel.progress.value == null) _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final installed = await VoiceModel.isInstalled();
+    final update = await VoiceModel.hasUpdate();
+    if (mounted) {
+      setState(() {
+        _installed = installed;
+        _update = update;
       });
     }
   }
 
   double? get _progress => VoiceModel.progress.value;
 
-  String get _size =>
-      VoiceModel.sizeBytes > 0
-          ? '${(VoiceModel.sizeBytes / 1e6).round()} MB'
-          : 'a few hundred MB';
+  String get _size => VoiceModel.sizeBytes > 0
+      ? '${(VoiceModel.sizeBytes / 1e6).round()} MB'
+      : 'a few hundred MB';
 
   Future<void> _download() async {
     setState(() => _error = null);
     try {
       await VoiceModel.download();
-      if (mounted) setState(() => _installed = true);
+      if (mounted) {
+        setState(() {
+          _installed = true;
+          _update = false;
+        });
+      }
     } catch (_) {
       if (mounted) {
-        setState(() => _error = 'The download stopped. Tap Download to pick '
-            'up where it left off.');
+        setState(
+          () => _error =
+              'The download stopped. Tap Download to pick '
+              'up where it left off.',
+        );
       }
     }
   }
 
   Future<void> _remove() async {
     await VoiceModel.remove();
-    if (mounted) setState(() => _installed = false);
+    if (mounted) {
+      setState(() {
+        _installed = false;
+        _update = false;
+      });
+    }
   }
 
   @override
@@ -153,9 +171,45 @@ class _VoiceModelSheetState extends State<VoiceModelSheet> {
                 ),
               ],
             ),
+            if (_update) ...[
+              const SizedBox(height: 12),
+              if (_error != null) ...[
+                Text(
+                  _error!,
+                  style: TextStyle(fontSize: 13, color: c.destructive),
+                ),
+                const SizedBox(height: 10),
+              ],
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'A better model is ready: cleaner tasks and titles. '
+                      '$_size; the old one is removed after.',
+                      style: TextStyle(fontSize: 13, color: c.muted),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  FilledButton(
+                    onPressed: _download,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: c.fg,
+                      foregroundColor: c.bg,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: const Text('Update'),
+                  ),
+                ],
+              ),
+            ],
           ] else ...[
             if (_error != null) ...[
-              Text(_error!, style: TextStyle(fontSize: 13, color: c.destructive)),
+              Text(
+                _error!,
+                style: TextStyle(fontSize: 13, color: c.destructive),
+              ),
               const SizedBox(height: 10),
             ],
             Row(
