@@ -211,7 +211,8 @@ void main() {
 
   testWidgets('the swipe-up tip shows until the sheet has been opened',
       (tester) async {
-    await pumpTab(tester, tab: 'home');
+    // Not on Home, where it sat on top of a card.
+    await pumpTab(tester, tab: 'notes');
     expect(find.text('Swipe up for more'), findsOneWidget);
 
     // The tip is itself a way in.

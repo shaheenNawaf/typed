@@ -824,36 +824,75 @@ String dueLabel(DateTime day, DateTime now) {
   return '${monthShort(d.month)} ${d.day}';
 }
 
-// ── continue ───────────────────────────────────────────────────────────────
+// ── recent ─────────────────────────────────────────────────────────────────
 
-/// The single note you were last working in — not a list to choose from.
-class HomeContinueCard extends StatelessWidget {
+/// One row in [HomeRecent].
+class RecentItem {
   final Note note;
   final IconData icon;
   final String? subtitle;
   final String when;
-  final VoidCallback onOpen;
 
-  const HomeContinueCard({
-    super.key,
+  const RecentItem({
     required this.note,
     required this.icon,
     required this.subtitle,
     required this.when,
+  });
+}
+
+/// The last few pages you worked in — notes, lists and voice memos — so
+/// Home always has something of yours to return to.
+class HomeRecent extends StatelessWidget {
+  final List<RecentItem> items;
+  final void Function(Note note) onOpen;
+  final VoidCallback onViewAll;
+
+  const HomeRecent({
+    super.key,
+    required this.items,
     required this.onOpen,
+    required this.onViewAll,
   });
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final title = note.title.isEmpty ? 'Untitled' : note.title;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const HomeLabel('PICK UP WHERE YOU LEFT OFF'),
+        HomeLabel(
+          'RECENT',
+          trailing: 'All notes',
+          onTrailingTap: onViewAll,
+          trailingSemantics: 'See all notes',
+        ),
         HomeCard(
-          onTap: onOpen,
-          semanticsLabel: 'Open $title',
+          padding: EdgeInsets.zero,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < items.length; i++) ...[
+                if (i > 0) Divider(height: 1, thickness: 1, color: c.border),
+                _row(context, items[i]),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _row(BuildContext context, RecentItem item) {
+    final c = context.colors;
+    final title = item.note.title.isEmpty ? 'Untitled' : item.note.title;
+    return Semantics(
+      button: true,
+      label: 'Open $title',
+      child: InkWell(
+        onTap: () => onOpen(item.note),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
           child: Row(
             children: [
               Container(
@@ -863,7 +902,7 @@ class HomeContinueCard extends StatelessWidget {
                   color: c.listBg,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(icon, size: 20, color: c.muted),
+                child: Icon(item.icon, size: 20, color: c.muted),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -880,10 +919,10 @@ class HomeContinueCard extends StatelessWidget {
                         color: c.fg,
                       ),
                     ),
-                    if (subtitle != null && subtitle!.isNotEmpty) ...[
+                    if (item.subtitle != null && item.subtitle!.isNotEmpty) ...[
                       const SizedBox(height: 3),
                       Text(
-                        subtitle!,
+                        item.subtitle!,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
@@ -897,13 +936,13 @@ class HomeContinueCard extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               Text(
-                when,
+                item.when,
                 style: TextStyle(fontSize: AppType.t12, color: c.muted),
               ),
             ],
           ),
         ),
-      ],
+      ),
     );
   }
 }

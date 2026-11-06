@@ -126,10 +126,13 @@ void main() {
     expect(find.text('buy milk'), findsOneWidget);
     expect(find.text('Do today'), findsOneWidget);
     expect(find.text('write spec'), findsNothing);
-    // One page to return to: the last written, not a task list or ledger.
-    expect(find.text('PICK UP WHERE YOU LEFT OFF'), findsOneWidget);
+    // Recent pages: notes and lists, never the money ledger.
+    expect(find.text('RECENT'), findsOneWidget);
     expect(find.text('Welcome to Typed'), findsOneWidget);
+    expect(find.text('1 of 2 done'), findsOneWidget);
     expect(find.text('Travel budget'), findsNothing);
+    // The swipe tip stays off Home.
+    expect(find.text('Swipe up for more'), findsNothing);
     // Money: spent since payday (no budget set).
     expect(find.text('UNTIL PAYDAY'), findsOneWidget);
     expect(find.textContaining('₱180 spent since'), findsOneWidget);
@@ -168,10 +171,10 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('New page'), findsOneWidget);
-    // One column: today and continue share a left edge.
+    // One column: today and recent share a left edge.
     final nextUpX = tester.getTopLeft(find.text('TODAY')).dx;
     final continueX =
-        tester.getTopLeft(find.text('PICK UP WHERE YOU LEFT OFF')).dx;
+        tester.getTopLeft(find.text('RECENT')).dx;
     expect((nextUpX - continueX).abs(), lessThan(1));
   });
 
@@ -342,7 +345,7 @@ void main() {
     );
   });
 
-  testWidgets('tapping the continue card opens the editor', (tester) async {
+  testWidgets('tapping a recent page opens the editor', (tester) async {
     await seedHome();
     await pumpHome(tester, surface: const Size(390, 844));
     await tester.pump();
@@ -354,11 +357,11 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     await tester.pump(const Duration(seconds: 1));
 
-    expect(find.text('PICK UP WHERE YOU LEFT OFF'), findsNothing);
+    expect(find.text('RECENT'), findsNothing);
     expect(find.byType(MobileNav), findsNothing);
   });
 
-  testWidgets('desktop continue tap opens the note in the three-pane editor',
+  testWidgets('desktop recent tap opens the note in the three-pane editor',
       (tester) async {
     await seedHome();
     // 1100px: desktop shell (>=1024) but below the 1200px context-panel
@@ -375,7 +378,7 @@ void main() {
     // in a status-listener setState that lands on the next pump.
     await tester.pump();
 
-    expect(find.text('PICK UP WHERE YOU LEFT OFF'), findsNothing);
+    expect(find.text('RECENT'), findsNothing);
     expect(find.byType(Editor), findsOneWidget);
   });
 

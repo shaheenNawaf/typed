@@ -2998,7 +2998,8 @@ class _HomeScreenState extends State<HomeScreen>
               : Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (_showDockHint) _buildDockHint(),
+                    if (_showDockHint && _currentTab != 'home')
+                      _buildDockHint(),
                     MobileNav(
                   currentTab: _currentTab,
                   onTabChanged: _onTabChanged,
@@ -3396,7 +3397,7 @@ class _HomeScreenState extends State<HomeScreen>
   Widget _buildHomeScreen() {
     final isDesktop = MediaQuery.of(context).size.width >= 1024;
     final now = HomeScreen.clock();
-    final continueNote = _continueNote();
+    final recent = _recentNotes();
     final plan = buildTodayPlan(notes, now);
     // At most one moment card at the top: payday's summary.
     final moment = _buildPaydayMoment(now);
@@ -3418,13 +3419,19 @@ class _HomeScreenState extends State<HomeScreen>
       else
         _buildToday(plan, now),
       if (moment == null) ?_buildHomeMoney(now),
-      if (continueNote != null)
-        HomeContinueCard(
-          note: continueNote,
-          icon: _noteIcon(continueNote),
-          subtitle: _continueSubtitle(continueNote),
-          when: _relativeTimeLabel(continueNote.updatedAt),
-          onOpen: () => Future.microtask(() => _selectNote(continueNote.id)),
+      if (recent.isNotEmpty)
+        HomeRecent(
+          items: [
+            for (final n in recent)
+              RecentItem(
+                note: n,
+                icon: _noteIcon(n),
+                subtitle: _recentSubtitle(n),
+                when: _relativeTimeLabel(n.updatedAt),
+              ),
+          ],
+          onOpen: (n) => Future.microtask(() => _selectNote(n.id)),
+          onViewAll: () => _onTabChanged('notes'),
         ),
       if (_resurfaceNote(now) case final old?)
         HomeResurfaceCard(
@@ -3647,24 +3654,40 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  /// The page most recently written in. Task lists and finance ledgers are
-  /// left out — Next Up and the money line already cover them, and showing
-  /// the same list twice splits attention. Guides are reference, not work.
-  Note? _continueNote() {
-    Note? best;
-    for (final n in notes) {
-      if (n.isArchived || n.isDeleted || n.tags.contains('guide')) continue;
-      if (n.type == 'todo' || isFinanceNote(n)) continue;
-      if (best == null || n.updatedAt.isAfter(best.updatedAt)) best = n;
-    }
-    return best;
+  /// The pages most recently worked in: notes, lists and voice memos.
+  /// Money ledgers live in the payday card; guides and the welcome note are
+  /// reference, not work.
+  List<Note> _recentNotes() {
+    final pool = notes
+        .where((n) =>
+            !n.isArchived &&
+            !n.isDeleted &&
+            !isSeedNote(n) &&
+            !isFinanceNote(n))
+        .toList()
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return pool.take(3).toList();
   }
 
-  IconData _noteIcon(Note note) => note.type == 'todo'
-      ? Icons.check_circle_outline
-      : isFinanceNote(note)
-          ? Icons.account_balance_wallet_outlined
+  IconData _noteIcon(Note note) => note.tags.contains('voice')
+      ? Icons.mic_none_rounded
+      : note.type == 'todo'
+          ? Icons.check_circle_outline
           : Icons.article_outlined;
+
+  /// "Voice memo · 0 of 2 done", "3 of 5 done", or a line of the text.
+  String? _recentSubtitle(Note note) {
+    String? body;
+    final counts = countChecklist(note.content);
+    if (note.type == 'todo' || counts.total > 0) {
+      if (counts.total > 0) body = '${counts.done} of ${counts.total} done';
+    } else {
+      final preview = _homeContentPreview(note.content);
+      if (preview.isNotEmpty) body = preview;
+    }
+    if (!note.tags.contains('voice')) return body;
+    return body == null ? 'Voice memo' : 'Voice memo · $body';
+  }
 
   /// Home capture -> a new note. A short single line becomes the title; a
   /// longer thought keeps its full text as the body under a trimmed title.
@@ -3908,58 +3931,6 @@ class _HomeScreenState extends State<HomeScreen>
         ],
       ),
     );
-  }
-
-  String? _continueSubtitle(Note note) {
-    if (isFinanceNote(note) && note.amounts.isNotEmpty) {
-      final counts = <String, int>{};
-      for (final e in note.amounts) {
-        final cur = e.currency ?? note.currency ?? 'PHP';
-        counts[cur] = (counts[cur] ?? 0) + 1;
-      }
-      var dominant = note.currency ?? 'PHP';
-      if (!counts.containsKey(dominant)) {
-        dominant = counts.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
-      }
-      var income = 0;
-      var expense = 0;
-      var count = 0;
-      final others = <String>{};
-      for (final e in note.amounts) {
-        final cur = e.currency ?? note.currency ?? 'PHP';
-        if (cur == dominant) {
-          // A monthly note holds both directions; adding them together
-          // showed ₱15,000 income + ₱180 spent as "₱15,180.00".
-          if ((e.type ?? note.type) == 'income') {
-            income += e.amount;
-          } else {
-            expense += e.amount;
-          }
-          count++;
-        } else {
-          others.add(cur);
-        }
-      }
-      final amount = income > 0 && expense > 0
-          ? 'Net ${formatMinorAmount(income - expense, dominant)}'
-          : formatMinorAmount(income + expense, dominant);
-      final excl = others.isEmpty ? '' : ' · excl. ${others.join(' · ')}';
-      return '$amount · $count '
-          '${count == 1 ? 'entry' : 'entries'}$excl';
-    }
-    if (note.type == 'todo' || note.title.toLowerCase().contains('todo')) {
-      final counts = countChecklist(note.content);
-      if (counts.total > 0) {
-        final progress = '${counts.done} of ${counts.total} done';
-        final next = firstOpenItem(note.content);
-        if (next == null) return progress;
-        final label = next.length > 40 ? '${next.substring(0, 40)}…' : next;
-        return '$label · $progress';
-      }
-      return null;
-    }
-    final preview = _homeContentPreview(note.content);
-    return preview.isEmpty ? null : preview;
   }
 
   /// Calendar-month finance totals for the home snapshot, scoped to the
