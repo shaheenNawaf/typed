@@ -6,6 +6,7 @@ import '../models/note.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_motion.dart';
+import '../utils/cutoff.dart';
 import '../utils/date_format.dart';
 import '../utils/finance_utils.dart';
 import 'task_row.dart';
@@ -1012,81 +1013,394 @@ class HomeResurfaceCard extends StatelessWidget {
   }
 }
 
-// ── money ──────────────────────────────────────────────────────────────────
+// ── money until payday ─────────────────────────────────────────────────────
 
-/// Money as one quiet line; the dashboard is a tap away when you want it.
-class HomeMoneyLine extends StatelessWidget {
-  final String monthLabel;
-  final bool hasData;
-  final String currency;
+/// "Will it last until payday?" — one figure: what's left until the next
+/// payday, a daily amount, and whether spending is on pace. Without a
+/// budget it says what has been spent since payday. The Finance tab is a
+/// tap away for everything else.
+class HomePaydayCard extends StatelessWidget {
+  final CutoffMoney money;
+  final DateTime now;
+  final VoidCallback onOpen;
+  final VoidCallback onSetBudget;
+
+  const HomePaydayCard({
+    super.key,
+    required this.money,
+    required this.now,
+    required this.onOpen,
+    required this.onSetBudget,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final cur = money.currency;
+    final big = TextStyle(
+      fontSize: 26,
+      fontWeight: FontWeight.w700,
+      letterSpacing: -0.6,
+      color: c.fg,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    final quiet = TextStyle(
+      fontSize: AppType.t15,
+      fontWeight: FontWeight.w400,
+      letterSpacing: 0,
+      color: c.muted,
+    );
+    final small = TextStyle(fontSize: 13, color: c.muted);
+    final payday = ordinal(money.cutoff.nextPayday.day);
+    final budget = money.budget;
+    final evening = now.hour >= 18 && money.todaySpent > 0;
+    final days = money.daysLeft;
+
+    final List<Widget> body;
+    if (budget == null) {
+      body = [
+        Text.rich(
+          TextSpan(
+            children: [
+              ...wholeMoneySpans(money.spent, cur, big),
+              TextSpan(
+                text:
+                    ' spent since ${monthShort(money.cutoff.start.month)} '
+                    '${money.cutoff.start.day}',
+                style: quiet,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                evening
+                    ? '${formatWholeAmount(money.todaySpent, cur)} logged today'
+                    : 'About ${formatWholeAmount(money.perDaySpent, cur)} a day '
+                          '· payday on the $payday',
+                style: small,
+              ),
+            ),
+            TextButton(
+              onPressed: onSetBudget,
+              style: TextButton.styleFrom(
+                foregroundColor: c.fg,
+                minimumSize: const Size(0, 36),
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                textStyle: const TextStyle(
+                  fontSize: AppType.t12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              child: const Text('Set a budget'),
+            ),
+          ],
+        ),
+      ];
+    } else {
+      final status = money.status;
+      final over = status == PaceStatus.overBudget;
+      final left = money.left!;
+      body = [
+        Text.rich(
+          TextSpan(
+            children: [
+              ...wholeMoneySpans(over ? -left : left, cur, big),
+              TextSpan(
+                text: over ? ' over budget' : ' left until the $payday',
+                style: quiet,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        PaceBar(
+          spent: money.spent,
+          budget: budget.amount,
+          ideal: money.ideal,
+          status: status,
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                evening
+                    ? '${formatWholeAmount(money.todaySpent, cur)} logged today'
+                    : over
+                    ? '$days ${days == 1 ? 'day' : 'days'} until payday'
+                    : 'About ${formatWholeAmount(money.perDayLeft!, cur)} a day '
+                          'for $days ${days == 1 ? 'day' : 'days'}',
+                style: small,
+              ),
+            ),
+            _paceBadge(context, money),
+          ],
+        ),
+      ];
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        HomeLabel(
+          'UNTIL PAYDAY',
+          trailing: 'Money',
+          onTrailingTap: onOpen,
+          trailingSemantics: 'Open Finance',
+        ),
+        HomeCard(
+          onTap: onOpen,
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: body,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _paceBadge(BuildContext context, CutoffMoney money) {
+    final c = context.colors;
+    final (String text, Color color, IconData? icon) = switch (money.status) {
+      PaceStatus.onPace => ('On pace', c.income, Icons.check_rounded),
+      PaceStatus.overPace => (
+        '${formatWholeAmount(money.spent - money.ideal!, money.currency)} over pace',
+        c.warning,
+        null,
+      ),
+      PaceStatus.overBudget => ('Over budget', c.expense, null),
+    };
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (icon != null) ...[
+          Icon(icon, size: 15, color: color),
+          const SizedBox(width: 3),
+        ],
+        Text(
+          text,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: color,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Spent against a budget, with a tick where an even pace would be today.
+class PaceBar extends StatelessWidget {
   final int spent;
+  final int budget;
+  final int? ideal;
+  final PaceStatus status;
+
+  const PaceBar({
+    super.key,
+    required this.spent,
+    required this.budget,
+    this.ideal,
+    this.status = PaceStatus.onPace,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final fill = budget <= 0 ? 1.0 : (spent / budget).clamp(0.0, 1.0);
+    final tick = ideal == null || budget <= 0
+        ? null
+        : (ideal! / budget).clamp(0.0, 1.0);
+    final color = switch (status) {
+      PaceStatus.onPace => c.fg.withValues(alpha: 0.85),
+      PaceStatus.overPace => c.warning,
+      PaceStatus.overBudget => c.expense,
+    };
+    return SizedBox(
+      height: 14,
+      child: LayoutBuilder(
+        builder: (context, box) {
+          final w = box.maxWidth;
+          return Stack(
+            alignment: Alignment.centerLeft,
+            children: [
+              Container(
+                height: 6,
+                decoration: BoxDecoration(
+                  color: c.fg.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+              Container(
+                width: w * fill,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+              ),
+              if (tick != null)
+                Positioned(
+                  left: (w * tick - 1).clamp(0.0, w - 2),
+                  child: Container(
+                    width: 2,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: c.accent,
+                      borderRadius: BorderRadius.circular(1),
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// On payday: how the last cutoff went, and a fresh start.
+class HomePaydaySummary extends StatelessWidget {
+  final CutoffMoney last;
+  final VoidCallback onStart;
+  final VoidCallback onLater;
   final VoidCallback onOpen;
 
-  const HomeMoneyLine({
+  const HomePaydaySummary({
     super.key,
-    required this.monthLabel,
-    required this.hasData,
-    required this.currency,
-    required this.spent,
+    required this.last,
+    required this.onStart,
+    required this.onLater,
     required this.onOpen,
   });
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    final strong = TextStyle(
-      fontSize: AppType.t15,
-      fontWeight: FontWeight.w600,
+    final cur = last.currency;
+    final budget = last.budget;
+    final left = last.left;
+    final big = TextStyle(
+      fontSize: 26,
+      fontWeight: FontWeight.w700,
+      letterSpacing: -0.6,
       color: c.fg,
     );
-    final quiet = TextStyle(fontSize: AppType.t15, color: c.muted);
-    return Semantics(
-      button: true,
-      label: hasData
-          ? '${formatMinorAmount(spent, currency)} spent in $monthLabel. '
-                'Open Finance'
-          : 'Nothing spent in $monthLabel yet. Open Finance',
-      excludeSemantics: true,
-      child: InkWell(
-        onTap: onOpen,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
-          child: Row(
+    final quiet = TextStyle(
+      fontSize: AppType.t15,
+      fontWeight: FontWeight.w400,
+      letterSpacing: 0,
+      color: c.muted,
+    );
+    final top = last.topCategory;
+    final detail = [
+      if (budget != null)
+        '${formatWholeAmount(last.spent, cur)} of '
+            '${formatWholeAmount(budget.amount, cur)}',
+      if (top != null) budget == null ? 'Most on $top' : 'most on $top',
+    ].join(' · ');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        HomeLabel(
+          'PAYDAY',
+          trailing: 'Money',
+          onTrailingTap: onOpen,
+          trailingSemantics: 'Open Finance',
+        ),
+        HomeCard(
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                Icons.account_balance_wallet_outlined,
-                size: 18,
-                color: c.muted,
+              Text(
+                'Last cutoff · ${last.cutoff.rangeLabel}',
+                style: TextStyle(fontSize: 13, color: c.muted),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text.rich(
-                  TextSpan(
-                    children: hasData
-                        ? [
-                            ...moneySpans(spent, currency, strong),
-                            TextSpan(
-                              text: ' spent in $monthLabel',
-                              style: quiet,
-                            ),
-                          ]
-                        : [
-                            TextSpan(
-                              text: 'Nothing spent in $monthLabel yet',
-                              style: quiet,
-                            ),
-                          ],
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+              const SizedBox(height: 2),
+              Text.rich(
+                TextSpan(
+                  children: left == null
+                      ? [
+                          ...wholeMoneySpans(last.spent, cur, big),
+                          TextSpan(text: ' spent', style: quiet),
+                        ]
+                      : left >= 0
+                      ? [
+                          ...wholeMoneySpans(
+                            left,
+                            cur,
+                            big.copyWith(color: c.income),
+                          ),
+                          TextSpan(text: ' kept', style: quiet),
+                        ]
+                      : [
+                          ...wholeMoneySpans(
+                            -left,
+                            cur,
+                            big.copyWith(color: c.warning),
+                          ),
+                          TextSpan(text: ' over', style: quiet),
+                        ],
                 ),
               ),
-              Icon(Icons.arrow_forward_rounded, size: 18, color: c.muted),
+              if (budget != null) ...[
+                const SizedBox(height: 10),
+                PaceBar(
+                  spent: last.spent,
+                  budget: budget.amount,
+                  status: left! >= 0
+                      ? PaceStatus.onPace
+                      : PaceStatus.overBudget,
+                ),
+              ],
+              if (detail.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(detail, style: TextStyle(fontSize: 13, color: c.muted)),
+              ],
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: [
+                  FilledButton(
+                    onPressed: onStart,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: c.fg,
+                      foregroundColor: c.surface,
+                      minimumSize: const Size(0, 40),
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                      shape: const StadiumBorder(),
+                      textStyle: const TextStyle(
+                        fontSize: AppType.t13_5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    child: Text(
+                      budget == null ? 'Set a budget' : 'Start new cutoff',
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: onLater,
+                    style: TextButton.styleFrom(
+                      foregroundColor: c.muted,
+                      minimumSize: const Size(0, 40),
+                      shape: const StadiumBorder(),
+                    ),
+                    child: const Text('Later'),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
-      ),
+      ],
     );
   }
 }

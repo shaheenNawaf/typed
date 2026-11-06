@@ -13,6 +13,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_motion.dart';
 import '../utils/backup.dart';
+import '../utils/cutoff.dart';
 import '../utils/date_format.dart';
 import '../utils/finance_utils.dart';
 import '../utils/id.dart';
@@ -28,6 +29,7 @@ import '../widgets/brand_mark.dart';
 import '../widgets/settings_sheet.dart';
 import '../widgets/sidebar.dart';
 import '../widgets/note_list.dart';
+import '../widgets/payday_dialogs.dart';
 import '../widgets/editor.dart';
 import '../widgets/mobile_nav.dart';
 import '../widgets/template_picker_sheet.dart';
@@ -98,6 +100,14 @@ class _HomeScreenState extends State<HomeScreen>
   /// What Home calls you ("Good evening, Sam"). Local only, optional.
   static const _displayNameKey = 'display_name_v1';
   String? _displayName;
+
+  /// Paydays and the optional budget per cutoff ("Until payday").
+  PaydaySettings _payday = PaydaySettings.standard;
+  CutoffBudget? _cutoffBudget;
+
+  /// The payday card was put away ("Later") on this local day.
+  static const _paydaySeenKey = 'payday_card_seen_v1';
+  int _paydaySeenDay = -1;
   int _resurfaceHiddenDay = -1;
   bool _showDockHint = false;
   bool _previewMode = false;
@@ -308,6 +318,23 @@ class _HomeScreenState extends State<HomeScreen>
         _doneToday = int.tryParse(doneRaw[1]) ?? 0;
       }
       _resurfaceHiddenDay = prefs.getInt(_resurfaceHiddenKey) ?? -1;
+      _paydaySeenDay = prefs.getInt(_paydaySeenKey) ?? -1;
+      try {
+        final pay = prefs.getString(PaydaySettings.prefsKey);
+        if (pay != null) {
+          _payday = PaydaySettings.fromJson(
+            jsonDecode(pay) as Map<String, dynamic>,
+          );
+        }
+        final budget = prefs.getString(CutoffBudget.prefsKey);
+        if (budget != null) {
+          _cutoffBudget = CutoffBudget.fromJson(
+            jsonDecode(budget) as Map<String, dynamic>,
+          );
+        }
+      } catch (_) {
+        // A damaged setting falls back to the 15th/30th and no budget.
+      }
       final name = prefs.getString(_displayNameKey)?.trim();
       _displayName = (name == null || name.isEmpty) ? null : name;
       final cats = prefs.getStringList('custom_categories') ?? [];
@@ -1730,6 +1757,12 @@ class _HomeScreenState extends State<HomeScreen>
       onVoiceModel: VoiceMemo.isSupported() && VoiceModel.isSupported()
           ? () => VoiceModelSheet.show(context)
           : null,
+      paydayLabel: _payday.label,
+      onPayday: _editPayday,
+      budgetLabel: _cutoffBudget == null
+          ? null
+          : formatWholeAmount(_cutoffBudget!.amount, _cutoffBudget!.currency),
+      onCutoffBudget: _editCutoffBudget,
     );
   }
 
@@ -3365,6 +3398,8 @@ class _HomeScreenState extends State<HomeScreen>
     final now = HomeScreen.clock();
     final continueNote = _continueNote();
     final plan = buildTodayPlan(notes, now);
+    // At most one moment card at the top: payday's summary.
+    final moment = _buildPaydayMoment(now);
 
     final blocks = <Widget>[
       _buildHomeIntro(now, plan),
@@ -3374,6 +3409,7 @@ class _HomeScreenState extends State<HomeScreen>
         onVoice: VoiceMemo.isSupported() ? _openVoiceMemo : null,
       ),
       if (notes.isEmpty) _buildHomeEmptyCta(),
+      ?moment,
       // Evening with nothing open: the empty Today gives way to one
       // optional prompt to set up tomorrow (the subline already says the
       // plate is clear — two "nothing here" cards would just repeat it).
@@ -3381,6 +3417,7 @@ class _HomeScreenState extends State<HomeScreen>
         HomeWindDown(onAdd: _captureTask)
       else
         _buildToday(plan, now),
+      if (moment == null) ?_buildHomeMoney(now),
       if (continueNote != null)
         HomeContinueCard(
           note: continueNote,
@@ -3397,7 +3434,6 @@ class _HomeScreenState extends State<HomeScreen>
           onOpen: () => Future.microtask(() => _selectNote(old.id)),
           onDismiss: _hideResurfaceToday,
         ),
-      _buildHomeMoney(now),
     ];
 
     final body = SingleChildScrollView(
@@ -3532,15 +3568,83 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _buildHomeMoney(DateTime now) {
-    final (hasData, spent, _, currency, _) = _monthFinanceTotals();
-    return HomeMoneyLine(
-      monthLabel: monthName(now.month),
-      hasData: hasData,
-      currency: currency,
-      spent: spent,
+  /// What's left until payday; hidden until money or a budget exists.
+  Widget? _buildHomeMoney(DateTime now) {
+    final money = cutoffMoney(
+      notes,
+      cutoffFor(_payday, now),
+      _cutoffBudget,
+      now,
+    );
+    if (!money.anyLogged && _cutoffBudget == null) return null;
+    return HomePaydayCard(
+      money: money,
+      now: now,
+      onOpen: () => _onTabChanged('finance'),
+      onSetBudget: _editCutoffBudget,
+    );
+  }
+
+  /// On payday, until put away: how the last cutoff went.
+  Widget? _buildPaydayMoment(DateTime now) {
+    if (!isPayday(_payday, now)) return null;
+    if (_paydaySeenDay == localEpochDay(now)) return null;
+    final last = cutoffMoney(
+      notes,
+      previousCutoff(_payday, cutoffFor(_payday, now)),
+      _cutoffBudget,
+      now,
+    );
+    if (last.spent == 0) return null;
+    return HomePaydaySummary(
+      last: last,
+      onStart: () {
+        _hidePaydayToday();
+        _editCutoffBudget();
+      },
+      onLater: _hidePaydayToday,
       onOpen: () => _onTabChanged('finance'),
     );
+  }
+
+  void _hidePaydayToday() {
+    final today = localEpochDay(HomeScreen.clock());
+    setState(() => _paydaySeenDay = today);
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setInt(_paydaySeenKey, today))
+          .catchError((_) => false),
+    );
+  }
+
+  Future<void> _editPayday() async {
+    final picked = await showPaydayPicker(context, _payday);
+    if (picked == null || !mounted) return;
+    setState(() => _payday = picked);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(PaydaySettings.prefsKey, jsonEncode(picked.toJson()));
+  }
+
+  Future<void> _editCutoffBudget() async {
+    final now = HomeScreen.clock();
+    final currency = _cutoffBudget?.currency ??
+        cutoffMoney(notes, cutoffFor(_payday, now), null, now).currency;
+    final choice = await showCutoffBudgetDialog(
+      context,
+      current: _cutoffBudget,
+      currency: currency,
+    );
+    if (choice == null || !mounted) return;
+    setState(() => _cutoffBudget = choice.budget);
+    final prefs = await SharedPreferences.getInstance();
+    if (choice.budget == null) {
+      await prefs.remove(CutoffBudget.prefsKey);
+    } else {
+      await prefs.setString(
+        CutoffBudget.prefsKey,
+        jsonEncode(choice.budget!.toJson()),
+      );
+    }
   }
 
   /// The page most recently written in. Task lists and finance ledgers are

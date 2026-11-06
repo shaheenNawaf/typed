@@ -130,9 +130,10 @@ void main() {
     expect(find.text('PICK UP WHERE YOU LEFT OFF'), findsOneWidget);
     expect(find.text('Welcome to Typed'), findsOneWidget);
     expect(find.text('Travel budget'), findsNothing);
-    // Money as one line.
-    expect(find.textContaining('180.00 spent in', findRichText: true),
-        findsOneWidget);
+    // Money: spent since payday (no budget set).
+    expect(find.text('UNTIL PAYDAY'), findsOneWidget);
+    expect(find.textContaining('₱180 spent since'), findsOneWidget);
+    expect(find.text('Set a budget'), findsOneWidget);
     // The old busy sections stay gone.
     for (final gone in [
       'PINNED',
@@ -157,8 +158,7 @@ void main() {
     expect(find.byType(Sidebar), findsOneWidget);
     expect(find.byType(MobileNav), findsNothing);
     expect(find.text('TODAY'), findsOneWidget);
-    expect(find.textContaining('180.00 spent in', findRichText: true),
-        findsOneWidget);
+    expect(find.textContaining('₱180 spent since'), findsOneWidget);
     // "New page" lives in the sidebar; Home adds no second create control.
     expect(
       find.descendant(
@@ -379,7 +379,7 @@ void main() {
     expect(find.byType(Editor), findsOneWidget);
   });
 
-  testWidgets('money line stays in the dominant currency', (tester) async {
+  testWidgets('money stays in the dominant currency', (tester) async {
     SharedPreferences.setMockInitialValues({
       'onboarded_v1': true,
       'onboarding_flow_complete_v1': true,
@@ -417,12 +417,88 @@ void main() {
     ]);
     await pumpHome(tester, surface: const Size(390, 844));
 
-    // ₱180.00 in the dominant currency; USD is never summed in (the old
+    // ₱180 in the dominant currency; USD is never summed in (the old
     // code produced '₱189.99').
-    expect(find.textContaining('180.00 spent in', findRichText: true),
-        findsOneWidget);
-    expect(find.textContaining('189.99', findRichText: true), findsNothing);
+    expect(find.textContaining('₱180 spent since'), findsOneWidget);
+    expect(find.textContaining('190'), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('with a budget, Home says what is left until payday',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'onboarded_v1': true,
+      'onboarding_flow_complete_v1': true,
+      'shell_state_v1': '{"filter":"home","tab":"home"}',
+      'cutoff_budget_v1': '{"amount":1000000,"currency":"PHP"}',
+    });
+    await NoteStorage().save(await fixtureNotes());
+    await pumpHome(tester, surface: const Size(390, 844));
+    expect(find.text('UNTIL PAYDAY'), findsOneWidget);
+    expect(find.textContaining('₱9,820 left until the'), findsOneWidget);
+    expect(find.textContaining(RegExp(r'^About ₱[\d,]+ a day for \d+ days?$')),
+        findsOneWidget);
+    expect(find.text('On pace'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('no money and no budget: no payday card', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'onboarded_v1': true,
+      'onboarding_flow_complete_v1': true,
+      'shell_state_v1': '{"filter":"home","tab":"home"}',
+    });
+    await NoteStorage().save([
+      Note(id: 'n', title: 'Plain', content: 'words', tags: const []),
+    ]);
+    await pumpHome(tester, surface: const Size(390, 844));
+    expect(find.text('UNTIL PAYDAY'), findsNothing);
+  });
+
+  testWidgets('on payday, the last cutoff is summed up until Later',
+      (tester) async {
+    final n = DateTime.now();
+    HomeScreen.clock = () => DateTime(n.year, n.month, 15, 12);
+    SharedPreferences.setMockInitialValues({
+      'onboarded_v1': true,
+      'onboarding_flow_complete_v1': true,
+      'shell_state_v1': '{"filter":"home","tab":"home"}',
+      'cutoff_budget_v1': '{"amount":1000000,"currency":"PHP"}',
+    });
+    await NoteStorage().save([
+      Note(
+        id: 'fin',
+        title: 'Spending',
+        content: '',
+        tags: const [],
+        type: 'expense',
+        currency: 'PHP',
+        amounts: [
+          MoneyEntry(
+            id: 'a',
+            amount: 882000,
+            category: 'Food',
+            date: DateTime(n.year, n.month, 5, 12),
+            type: 'expense',
+          ),
+        ],
+      ),
+    ]);
+    await pumpHome(tester, surface: const Size(390, 844));
+    expect(find.text('PAYDAY'), findsOneWidget);
+    expect(find.textContaining('₱1,180 kept'), findsOneWidget);
+    expect(find.text('₱8,820 of ₱10,000 · most on Food'), findsOneWidget);
+    // The summary stands in for the countdown on payday.
+    expect(find.text('UNTIL PAYDAY'), findsNothing);
+
+    await tester.tap(find.text('Later'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('PAYDAY'), findsNothing);
+    expect(find.text('UNTIL PAYDAY'), findsOneWidget);
+    expect(find.textContaining('₱10,000 left until the 30th'), findsOneWidget);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getInt('payday_card_seen_v1'), isNotNull);
   });
 
   testWidgets('home fits a 320px phone without overflow', (tester) async {
