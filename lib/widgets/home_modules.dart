@@ -339,9 +339,6 @@ class HomeToday extends StatefulWidget {
     required this.onViewAll,
   });
 
-  /// Rows shown under the focus card before "+N more".
-  static const maxRows = 6;
-
   @override
   State<HomeToday> createState() => _HomeTodayState();
 }
@@ -404,7 +401,13 @@ class _HomeTodayState extends State<HomeToday> {
               ),
               if (focus != null && plan.rest.isNotEmpty) ...[
                 Divider(height: 1, thickness: 1, color: c.border),
-                _rows(context, plan.rest),
+                HomeTaskRows(
+                  items: plan.rest,
+                  now: widget.now,
+                  reminders: widget.reminders,
+                  onOpen: widget.onOpen,
+                  onMore: widget.onViewAll,
+                ),
               ],
             ],
           ),
@@ -562,113 +565,6 @@ class _HomeTodayState extends State<HomeToday> {
     );
   }
 
-  // ── the rest of today ──
-
-  Widget _rows(BuildContext context, List<TodayItem> rest) {
-    final c = context.colors;
-    final shown = rest.take(HomeToday.maxRows).toList();
-    final hidden = rest.length - shown.length;
-    final children = <Widget>[];
-    TodayGroup? group;
-    for (final item in shown) {
-      if (item.group != group) {
-        group = item.group;
-        children.add(
-          Padding(
-            padding: EdgeInsets.fromLTRB(18, children.isEmpty ? 10 : 12, 18, 2),
-            child: Text(
-              kTodayGroupNames[group]!.toUpperCase(),
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.8,
-                color: c.muted,
-              ),
-            ),
-          ),
-        );
-      }
-      children.add(_row(context, item));
-    }
-    if (hidden > 0) {
-      children.add(
-        InkWell(
-          onTap: widget.onViewAll,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 10, 18, 10),
-            child: Text(
-              '+$hidden more',
-              style: TextStyle(fontSize: AppType.t13_5, color: c.muted),
-            ),
-          ),
-        ),
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: children,
-      ),
-    );
-  }
-
-  Widget _row(BuildContext context, TodayItem item) {
-    final c = context.colors;
-    final overdue = item.standing == TaskStanding.overdue;
-    final due = overdue ? dueLabel(item.when!.day, widget.now) : '';
-    final time = overdue
-        ? '${due[0].toUpperCase()}${due.substring(1)}'
-        : item.timeLabel;
-    final bell = widget.reminders.contains('${item.note.id}|${item.raw}');
-    return Semantics(
-      button: true,
-      label: [
-        item.text,
-        if (time.isNotEmpty) time,
-        if (bell) 'reminder set',
-      ].join(', '),
-      excludeSemantics: true,
-      child: InkWell(
-        onTap: () => widget.onOpen(item),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(18, 10, 18, 10),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  item.text,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: AppType.t15, color: c.fg),
-                ),
-              ),
-              if (time.isNotEmpty) ...[
-                const SizedBox(width: 10),
-                Text(
-                  time,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: overdue ? c.warning : c.muted,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                ),
-              ],
-              if (bell) ...[
-                const SizedBox(width: 6),
-                Icon(
-                  Icons.notifications_none_rounded,
-                  size: 16,
-                  color: c.accent,
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   // ── quiet day ──
 
   Widget _quiet(BuildContext context) {
@@ -814,6 +710,137 @@ class _HomeTodayState extends State<HomeToday> {
   }
 }
 
+/// Tasks grouped by time of day (Any time, Morning, Afternoon, Evening):
+/// text on the left, the time and a reminder bell on the right. Tapping a
+/// row opens its list.
+class HomeTaskRows extends StatelessWidget {
+  final List<TodayItem> items;
+  final DateTime now;
+  final Set<String> reminders;
+  final void Function(TodayItem item) onOpen;
+
+  /// Opens everything when rows are cut off ("+3 more").
+  final VoidCallback onMore;
+  final int maxRows;
+
+  const HomeTaskRows({
+    super.key,
+    required this.items,
+    required this.now,
+    this.reminders = const {},
+    required this.onOpen,
+    required this.onMore,
+    this.maxRows = 6,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final rest = items;
+    final c = context.colors;
+    final shown = rest.take(maxRows).toList();
+    final hidden = rest.length - shown.length;
+    final children = <Widget>[];
+    TodayGroup? group;
+    for (final item in shown) {
+      if (item.group != group) {
+        group = item.group;
+        children.add(
+          Padding(
+            padding: EdgeInsets.fromLTRB(18, children.isEmpty ? 10 : 12, 18, 2),
+            child: Text(
+              kTodayGroupNames[group]!.toUpperCase(),
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.8,
+                color: c.muted,
+              ),
+            ),
+          ),
+        );
+      }
+      children.add(_row(context, item));
+    }
+    if (hidden > 0) {
+      children.add(
+        InkWell(
+          onTap: onMore,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 10, 18, 10),
+            child: Text(
+              '+$hidden more',
+              style: TextStyle(fontSize: AppType.t13_5, color: c.muted),
+            ),
+          ),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
+      ),
+    );
+  }
+
+  Widget _row(BuildContext context, TodayItem item) {
+    final c = context.colors;
+    final overdue = item.standing == TaskStanding.overdue;
+    final due = overdue ? dueLabel(item.when!.day, now) : '';
+    final time = overdue
+        ? '${due[0].toUpperCase()}${due.substring(1)}'
+        : item.timeLabel;
+    final bell = reminders.contains('${item.note.id}|${item.raw}');
+    return Semantics(
+      button: true,
+      label: [
+        item.text,
+        if (time.isNotEmpty) time,
+        if (bell) 'reminder set',
+      ].join(', '),
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: () => onOpen(item),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 10, 18, 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  item.text,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: AppType.t15, color: c.fg),
+                ),
+              ),
+              if (time.isNotEmpty) ...[
+                const SizedBox(width: 10),
+                Text(
+                  time,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: overdue ? c.warning : c.muted,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+              if (bell) ...[
+                const SizedBox(width: 6),
+                Icon(
+                  Icons.notifications_none_rounded,
+                  size: 16,
+                  color: c.accent,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// "yesterday", "Tue" (within the week), "Nov 2" (earlier).
 String dueLabel(DateTime day, DateTime now) {
   final today = DateTime(now.year, now.month, now.day);
@@ -949,23 +976,176 @@ class HomeRecent extends StatelessWidget {
 
 // ── evening ────────────────────────────────────────────────────────────────
 
-/// After six, with nothing open: one gentle prompt to set up tomorrow, so
-/// the next day starts with something ready instead of a blank page. What
-/// you type lands in the Inbox; the prompt itself never nags or repeats.
-class HomeWindDown extends StatelessWidget {
-  final ValueChanged<String> onAdd;
+/// After six, what today didn't get to — moved to tomorrow in one tap, or
+/// left where it is. Never more than a gentle offer.
+class HomeLeftovers extends StatelessWidget {
+  final List<TodayItem> items;
+  final VoidCallback onMoveAll;
+  final VoidCallback onLeave;
+  final void Function(TodayItem item) onOpen;
 
-  const HomeWindDown({super.key, required this.onAdd});
+  const HomeLeftovers({
+    super.key,
+    required this.items,
+    required this.onMoveAll,
+    required this.onLeave,
+    required this.onOpen,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final c = context.colors;
+    final shown = items.take(4).toList();
+    final more = items.length - shown.length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const HomeLabel('FOR TOMORROW'),
+        const HomeLabel('LEFT FROM TODAY'),
         HomeCard(
-          padding: const EdgeInsets.fromLTRB(4, 2, 10, 2),
-          child: TaskAddRow(hint: 'Anything for tomorrow?', onSubmit: onAdd),
+          padding: EdgeInsets.zero,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const SizedBox(height: 6),
+              for (final item in shown)
+                InkWell(
+                  onTap: () => onOpen(item),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 8, 18, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          item.text,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: AppType.t15, color: c.fg),
+                        ),
+                        Text(
+                          item.note.title.isEmpty
+                              ? 'Untitled'
+                              : item.note.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: AppType.t12,
+                            color: c.muted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              if (more > 0)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 4, 18, 4),
+                  child: Text(
+                    '+$more more',
+                    style: TextStyle(fontSize: AppType.t13_5, color: c.muted),
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 8, 14, 14),
+                child: Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: [
+                    FilledButton(
+                      onPressed: () {
+                        HapticFeedback.selectionClick();
+                        onMoveAll();
+                      },
+                      style: FilledButton.styleFrom(
+                        backgroundColor: c.fg,
+                        foregroundColor: c.surface,
+                        minimumSize: const Size(0, 40),
+                        padding: const EdgeInsets.symmetric(horizontal: 18),
+                        shape: const StadiumBorder(),
+                        textStyle: const TextStyle(
+                          fontSize: AppType.t13_5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      child: const Text('Move to tomorrow'),
+                    ),
+                    TextButton(
+                      onPressed: onLeave,
+                      style: TextButton.styleFrom(
+                        foregroundColor: c.muted,
+                        minimumSize: const Size(0, 40),
+                        shape: const StadiumBorder(),
+                      ),
+                      child: const Text('Leave it'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Tomorrow at a glance, grouped like Today, with a line to add to it —
+/// so the next day starts with something ready instead of a blank page.
+class HomeTomorrow extends StatelessWidget {
+  final DateTime day;
+  final List<TodayItem> items;
+  final DateTime now;
+  final Set<String> reminders;
+  final void Function(TodayItem item) onOpen;
+  final VoidCallback onViewAll;
+  final ValueChanged<String> onAdd;
+
+  const HomeTomorrow({
+    super.key,
+    required this.day,
+    required this.items,
+    required this.now,
+    this.reminders = const {},
+    required this.onOpen,
+    required this.onViewAll,
+    required this.onAdd,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final label =
+        '${kWeekdayNamesShort[day.weekday - 1]}, ${monthShort(day.month)} '
+        '${day.day}';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        HomeLabel(
+          'TOMORROW · ${label.toUpperCase()}',
+          trailing: 'All tasks',
+          onTrailingTap: onViewAll,
+          trailingSemantics: 'See all tasks',
+        ),
+        HomeCard(
+          padding: EdgeInsets.zero,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (items.isNotEmpty)
+                HomeTaskRows(
+                  items: items,
+                  now: now,
+                  reminders: reminders,
+                  onOpen: onOpen,
+                  onMore: onViewAll,
+                ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 2, 10, 2),
+                child: TaskAddRow(
+                  hint: 'Add something for tomorrow',
+                  onSubmit: onAdd,
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );

@@ -108,6 +108,10 @@ class _HomeScreenState extends State<HomeScreen>
   /// The payday card was put away ("Later") on this local day.
   static const _paydaySeenKey = 'payday_card_seen_v1';
   int _paydaySeenDay = -1;
+
+  /// "Left from today" was waved off ("Leave it") on this local day.
+  static const _leftoverHiddenKey = 'leftover_dismissed_day_v1';
+  int _leftoverHiddenDay = -1;
   int _resurfaceHiddenDay = -1;
   bool _showDockHint = false;
   bool _previewMode = false;
@@ -319,6 +323,7 @@ class _HomeScreenState extends State<HomeScreen>
       }
       _resurfaceHiddenDay = prefs.getInt(_resurfaceHiddenKey) ?? -1;
       _paydaySeenDay = prefs.getInt(_paydaySeenKey) ?? -1;
+      _leftoverHiddenDay = prefs.getInt(_leftoverHiddenKey) ?? -1;
       try {
         final pay = prefs.getString(PaydaySettings.prefsKey);
         if (pay != null) {
@@ -3411,13 +3416,7 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       if (notes.isEmpty) _buildHomeEmptyCta(),
       ?moment,
-      // Evening with nothing open: the empty Today gives way to one
-      // optional prompt to set up tomorrow (the subline already says the
-      // plate is clear — two "nothing here" cards would just repeat it).
-      if (now.hour >= 18 && plan.isEmpty)
-        HomeWindDown(onAdd: _captureTask)
-      else
-        _buildToday(plan, now),
+      ..._buildDayBlocks(plan, now),
       if (moment == null) ?_buildHomeMoney(now),
       if (recent.isNotEmpty)
         HomeRecent(
@@ -3470,6 +3469,91 @@ class _HomeScreenState extends State<HomeScreen>
     return Container(
       color: context.colors.listBg,
       child: isDesktop ? body : SafeArea(bottom: false, child: body),
+    );
+  }
+
+  /// Today by day; after six, what's left and tomorrow — unless something
+  /// is still timed for later tonight, then Today stays on top.
+  List<Widget> _buildDayBlocks(TodayPlan plan, DateTime now) {
+    if (now.hour < 18) return [_buildToday(plan, now)];
+    final today = DateTime(now.year, now.month, now.day);
+    final tomorrow = today.add(const Duration(days: 1));
+    final tomorrowBlock = HomeTomorrow(
+      day: tomorrow,
+      items: plan.tomorrow,
+      now: now,
+      reminders: NotificationService.instance.taskReminderKeys.value,
+      onOpen: (item) => _selectNote(item.note.id),
+      onViewAll: () => _onTabChanged('tasks'),
+      onAdd: (text) => _captureTask(text, when: SpokenWhen(tomorrow)),
+    );
+    if (_laterTonight(plan, now)) return [_buildToday(plan, now), tomorrowBlock];
+    final left = _leftovers(plan, now);
+    return [
+      if (left.isNotEmpty)
+        HomeLeftovers(
+          items: left,
+          onMoveAll: () => _moveTasksToTomorrow(left),
+          onLeave: _hideLeftoversTonight,
+          onOpen: (item) => _selectNote(item.note.id),
+        ),
+      tomorrowBlock,
+    ];
+  }
+
+  bool _laterTonight(TodayPlan plan, DateTime now) =>
+      plan.dueToday.any((i) => i.hasTime && i.when!.at.isAfter(now));
+
+  /// What Today listed and didn't get done: overdue, due today, and the
+  /// undated tasks it showed on a busy day (not a quiet day's suggestions).
+  List<TodayItem> _leftovers(TodayPlan plan, DateTime now) {
+    if (_leftoverHiddenDay == localEpochDay(now)) return const [];
+    return [
+      ...plan.overdue,
+      ...plan.dueToday,
+      if (!plan.isQuiet) ...plan.undatedShown,
+    ];
+  }
+
+  void _hideLeftoversTonight() {
+    final today = localEpochDay(HomeScreen.clock());
+    setState(() => _leftoverHiddenDay = today);
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setInt(_leftoverHiddenKey, today))
+          .catchError((_) => false),
+    );
+  }
+
+  /// Moves every leftover to tomorrow (times and reminders kept); one Undo
+  /// puts them all back.
+  void _moveTasksToTomorrow(List<TodayItem> items) {
+    final now = HomeScreen.clock();
+    final tomorrow = DateTime(now.year, now.month, now.day + 1);
+    final moved = <(TodayItem, String)>[];
+    for (final item in items) {
+      final when = moveToDay(item.when, tomorrow);
+      final newRaw = withTaskDate(item.rawWithoutDate(now), when);
+      if (!_rewriteOpenTask(item.note, item.lineIndex, item.raw, newRaw)) {
+        continue;
+      }
+      if (NotificationService.instance.taskReminderKeys.value
+          .contains('${item.note.id}|${item.raw}')) {
+        _carryReminder(item.note, newRaw, when);
+      }
+      moved.add((item, newRaw));
+    }
+    if (moved.isEmpty) return;
+    _showSnackBar(
+      moved.length == 1
+          ? 'Moved to tomorrow'
+          : 'Moved ${moved.length} to tomorrow',
+      onUndo: () {
+        for (final (item, newRaw) in moved) {
+          final note = _noteById(item.note.id);
+          if (note != null) _rewriteOpenTask(note, -1, newRaw, item.raw);
+        }
+      },
     );
   }
 
@@ -3718,8 +3802,9 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// Home capture -> a task on the Inbox list (created on first use).
-  void _captureTask(String text) {
+  /// Home capture -> a task on the Inbox list (created on first use),
+  /// dated [when] if given (tomorrow's add row).
+  void _captureTask(String text, {SpokenWhen? when}) {
     Note? inbox;
     for (final n in notes) {
       if (n.type == 'todo' &&
@@ -3740,7 +3825,8 @@ class _HomeScreenState extends State<HomeScreen>
           type: 'todo',
         );
     final previous = target.content;
-    final line = '- [ ] ${text.replaceAll('\n', ' ').trim()}';
+    final line =
+        '- [ ] ${withTaskDate(text.replaceAll('\n', ' ').trim(), when)}';
     setState(() {
       if (created) notes.insert(0, target);
       target.content = previous.isEmpty || previous.endsWith('\n')
@@ -3750,7 +3836,7 @@ class _HomeScreenState extends State<HomeScreen>
     });
     _persistNow();
     _showSnackBar(
-      'Added to Inbox',
+      when == null ? 'Added to Inbox' : 'Added to tomorrow',
       // Undo removes only the line this capture added — restoring a
       // snapshot would also wipe tasks added or ticked since.
       onUndo: () {
@@ -3835,6 +3921,21 @@ class _HomeScreenState extends State<HomeScreen>
   ({String strong, String rest}) _homeSubline(TodayPlan plan, DateTime now) {
     final done = _doneTodayNow;
     String tasks(int n) => n == 1 ? '1 task' : '$n tasks';
+    if (now.hour >= 18 && !_laterTonight(plan, now)) {
+      final left = _leftovers(plan, now).length;
+      final doneText = done > 0 ? '$done done today.' : '';
+      if (left > 0) {
+        return done > 0
+            ? (strong: doneText, rest: ' $left left over.')
+            : (strong: '$left left over', rest: ' from today.');
+      }
+      final tail = plan.tomorrow.isNotEmpty
+          ? 'Here’s tomorrow.'
+          : 'Nothing set for tomorrow yet.';
+      return done > 0
+          ? (strong: doneText, rest: ' $tail')
+          : (strong: '', rest: tail);
+    }
     if (plan.isQuiet) {
       if (done > 0) {
         return (
