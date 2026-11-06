@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../home/today_plan.dart';
+import '../home/week_recap.dart';
 import '../models/money_entry.dart';
 import '../models/note.dart';
 import '../models/budget.dart';
@@ -93,6 +94,15 @@ class _HomeScreenState extends State<HomeScreen>
   static const _doneTodayKey = 'done_today_v1';
   int _doneToday = 0;
   int _doneTodayDay = -1;
+
+  /// Tasks finished per local epoch day, for Monday's look back. Kept for
+  /// five weeks.
+  static const _doneLogKey = 'done_log_v1';
+  final Map<int, int> _doneLog = {};
+
+  /// Monday's recap was hidden on this local day.
+  static const _recapHiddenKey = 'recap_hidden_v1';
+  int _recapHiddenDay = -1;
 
   /// "From your notes": hidden for the rest of the day with "Not today".
   static const _resurfaceHiddenKey = 'resurface_hidden_day_v1';
@@ -321,6 +331,18 @@ class _HomeScreenState extends State<HomeScreen>
         _doneTodayDay = int.tryParse(doneRaw[0]) ?? -1;
         _doneToday = int.tryParse(doneRaw[1]) ?? 0;
       }
+      try {
+        final log = jsonDecode(prefs.getString(_doneLogKey) ?? '{}') as Map;
+        log.forEach((day, count) {
+          final d = int.tryParse('$day');
+          if (d != null && count is int) _doneLog[d] = count;
+        });
+      } catch (_) {}
+      // Builds before the log kept only today's count; start from it.
+      if (_doneTodayDay >= 0 && _doneToday > 0) {
+        _doneLog.putIfAbsent(_doneTodayDay, () => _doneToday);
+      }
+      _recapHiddenDay = prefs.getInt(_recapHiddenKey) ?? -1;
       _resurfaceHiddenDay = prefs.getInt(_resurfaceHiddenKey) ?? -1;
       _paydaySeenDay = prefs.getInt(_paydaySeenKey) ?? -1;
       _leftoverHiddenDay = prefs.getInt(_leftoverHiddenKey) ?? -1;
@@ -2145,6 +2167,16 @@ class _HomeScreenState extends State<HomeScreen>
       _doneToday = 0;
     }
     _doneToday = (_doneToday + (nowDone ? 1 : -1)).clamp(0, 9999);
+    _doneLog[today] = _doneToday;
+    _doneLog.removeWhere((day, _) => day < today - 35);
+    final log = jsonEncode({
+      for (final e in _doneLog.entries) '${e.key}': e.value,
+    });
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setString(_doneLogKey, log))
+          .catchError((_) => false),
+    );
     final value = '$_doneTodayDay:$_doneToday';
     unawaited(
       SharedPreferences.getInstance()
@@ -3404,11 +3436,18 @@ class _HomeScreenState extends State<HomeScreen>
     final now = HomeScreen.clock();
     final recent = _recentNotes();
     final plan = buildTodayPlan(notes, now);
-    // At most one moment card at the top: payday's summary.
-    final moment = _buildPaydayMoment(now);
+    // At most one moment card at the top: payday's summary, else Monday's
+    // look back at last week.
+    final payday = _buildPaydayMoment(now);
+    final moment = payday ?? _buildWeekRecapMoment(now);
+    final lead = moment == null || now.hour >= 18
+        ? ''
+        : payday != null
+            ? 'Payday. '
+            : 'New week. ';
 
     final blocks = <Widget>[
-      _buildHomeIntro(now, plan),
+      _buildHomeIntro(now, plan, lead: lead),
       HomeCaptureBar(
         onSaveNote: _captureNote,
         onAddTask: _captureTask,
@@ -3698,6 +3737,25 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  /// Mondays: last week at a glance, unless hidden or there was nothing.
+  Widget? _buildWeekRecapMoment(DateTime now) {
+    if (now.weekday != DateTime.monday) return null;
+    if (_recapHiddenDay == localEpochDay(now)) return null;
+    final recap = buildWeekRecap(notes, _doneLog, now);
+    if (!recap.hasActivity) return null;
+    return HomeWeekRecap(recap: recap, onHide: _hideRecapThisWeek);
+  }
+
+  void _hideRecapThisWeek() {
+    final today = localEpochDay(HomeScreen.clock());
+    setState(() => _recapHiddenDay = today);
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setInt(_recapHiddenKey, today))
+          .catchError((_) => false),
+    );
+  }
+
   void _hidePaydayToday() {
     final today = localEpochDay(HomeScreen.clock());
     setState(() => _paydaySeenDay = today);
@@ -3971,7 +4029,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   /// Greeting, date, and one line about the day — nothing else competes
   /// with the first glance.
-  Widget _buildHomeIntro(DateTime now, TodayPlan plan) {
+  Widget _buildHomeIntro(DateTime now, TodayPlan plan, {String lead = ''}) {
     final subline = _homeSubline(plan, now);
     final greeting = now.hour < 12
         ? 'Good morning'
@@ -4014,6 +4072,7 @@ class _HomeScreenState extends State<HomeScreen>
             child: Text.rich(
               TextSpan(
                 children: [
+                  if (lead.isNotEmpty) TextSpan(text: lead),
                   if (subline.strong.isNotEmpty)
                     TextSpan(
                       text: subline.strong,
@@ -4025,7 +4084,7 @@ class _HomeScreenState extends State<HomeScreen>
                   TextSpan(text: subline.rest),
                 ],
               ),
-              key: ValueKey('${subline.strong}${subline.rest}'),
+              key: ValueKey('$lead${subline.strong}${subline.rest}'),
               style: TextStyle(fontSize: AppType.t15, color: c.muted),
             ),
           ),

@@ -226,4 +226,52 @@ void main() {
     expect(find.textContaining('TOMORROW ·'), findsOneWidget);
     expect(find.text('LEFT FROM TODAY'), findsNothing);
   });
+
+  testWidgets('on Monday, last week is looked back on until hidden',
+      (tester) async {
+    final n = DateTime.now();
+    final monday = DateTime(n.year, n.month, n.day - (n.weekday - 1), 10);
+    HomeScreen.clock = () => monday;
+    final lastWeek = monday.subtract(const Duration(days: 5));
+    await pumpHome(tester, [
+      Note(
+        id: 'w',
+        title: 'Written last week',
+        content: 'words',
+        tags: const [],
+        createdAt: lastWeek,
+        updatedAt: lastWeek,
+      ),
+      Note(
+        id: 'v',
+        title: 'Supplier call',
+        content: 'They deliver by the 20th.',
+        tags: const ['voice'],
+        createdAt: lastWeek,
+        updatedAt: lastWeek,
+      ),
+    ]);
+    expect(find.textContaining('LAST WEEK ·'), findsOneWidget);
+    expect(find.text('—'), findsOneWidget); // no task count kept yet
+    expect(find.text('voice memo'), findsOneWidget);
+    expect(find.text('Nothing spent last week.'), findsOneWidget);
+    expect(find.textContaining('New week. '), findsOneWidget);
+
+    await tester.tap(find.text('Hide'));
+    await tester.pump();
+    expect(find.textContaining('LAST WEEK ·'), findsNothing);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getInt('recap_hidden_v1'), isNotNull);
+  });
+
+  testWidgets('finished tasks are logged by day for the recap',
+      (tester) async {
+    await pumpHome(tester, [list('- [ ] one — ${dayLabel()}\n')]);
+    await tester.tap(find.text('Done'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump(const Duration(milliseconds: 600));
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('done_log_v1'), contains(':1'));
+  });
 }

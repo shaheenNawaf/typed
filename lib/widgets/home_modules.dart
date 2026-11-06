@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../home/today_plan.dart';
+import '../home/week_recap.dart';
 import '../models/note.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_metrics.dart';
@@ -1615,6 +1616,174 @@ class HomePaydaySummary extends StatelessWidget {
                     child: const Text('Later'),
                   ),
                 ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── week recap ─────────────────────────────────────────────────────────────
+
+/// Monday's look back: three counts, spending by day (the biggest day
+/// marked), and one sentence on the money. Hide puts it away for the week.
+class HomeWeekRecap extends StatelessWidget {
+  final WeekRecap recap;
+  final VoidCallback onHide;
+
+  const HomeWeekRecap({super.key, required this.recap, required this.onHide});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final r = recap;
+    final range = r.start.month == r.end.month
+        ? '${monthShort(r.start.month)} ${r.start.day} – ${r.end.day}'
+        : '${monthShort(r.start.month)} ${r.start.day} – '
+              '${monthShort(r.end.month)} ${r.end.day}';
+    final spent = r.spent;
+    final biggest = r.biggestDay;
+    final maxDay = r.spentByDay.fold(0, (a, b) => a > b ? a : b);
+
+    Widget stat(String value, String label) => Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+        decoration: BoxDecoration(
+          color: c.listBg,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          children: [
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.4,
+                color: c.fg,
+              ),
+            ),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11.5, color: c.muted),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    final sentence = <InlineSpan>[
+      if (spent > 0) ...[
+        ...wholeMoneySpans(
+          spent,
+          r.currency,
+          TextStyle(color: c.fg, fontWeight: FontWeight.w600),
+        ),
+        TextSpan(
+          text: ' spent.',
+          style: TextStyle(color: c.fg, fontWeight: FontWeight.w600),
+        ),
+        if (r.risingCategory != null) ...[
+          TextSpan(text: ' ${r.risingCategory} '),
+          TextSpan(
+            text: '↑ ${formatWholeAmount(r.risingBy, r.currency)}',
+            style: TextStyle(color: c.warning, fontWeight: FontWeight.w600),
+          ),
+          const TextSpan(text: ' vs the week before.'),
+        ],
+        if (biggest != null)
+          TextSpan(text: ' Most on ${kWeekdayNames[biggest]}.'),
+      ] else
+        const TextSpan(text: 'Nothing spent last week.'),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        HomeLabel(
+          'LAST WEEK · ${range.toUpperCase()}',
+          trailing: 'Hide',
+          onTrailingTap: onHide,
+          trailingSemantics: 'Hide until next week',
+          trailingIcon: false,
+        ),
+        HomeCard(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  stat(
+                    r.tasksDone == null ? '—' : '${r.tasksDone}',
+                    'tasks done',
+                  ),
+                  const SizedBox(width: 8),
+                  stat('${r.notes}', r.notes == 1 ? 'note' : 'notes'),
+                  const SizedBox(width: 8),
+                  stat(
+                    '${r.voiceMemos}',
+                    r.voiceMemos == 1 ? 'voice memo' : 'voice memos',
+                  ),
+                ],
+              ),
+              if (spent > 0) ...[
+                const SizedBox(height: 14),
+                SizedBox(
+                  height: 44,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      for (var i = 0; i < 7; i++) ...[
+                        if (i > 0) const SizedBox(width: 6),
+                        Expanded(
+                          child: Container(
+                            height: maxDay == 0
+                                ? 4
+                                : 4 + 40 * r.spentByDay[i] / maxDay,
+                            decoration: BoxDecoration(
+                              color: i == biggest
+                                  ? c.fg.withValues(alpha: 0.8)
+                                  : c.fg.withValues(alpha: 0.16),
+                              borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(4),
+                                bottom: Radius.circular(2),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    for (var i = 0; i < 7; i++) ...[
+                      if (i > 0) const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          kWeekdayNames[i][0],
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 10, color: c.muted),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+              const SizedBox(height: 10),
+              Text.rich(
+                TextSpan(children: sentence),
+                style: TextStyle(
+                  fontSize: AppType.t13_5,
+                  height: 1.4,
+                  color: c.muted,
+                ),
               ),
             ],
           ),
