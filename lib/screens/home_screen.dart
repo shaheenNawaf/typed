@@ -498,7 +498,12 @@ class _HomeScreenState extends State<HomeScreen>
       _setFilter('finance');
     } else if (intentAction.startsWith('open:')) {
       final id = intentAction.substring(5);
-      if (notes.any((n) => n.id == id)) _selectNote(id);
+      if (id == '__finance__') {
+        // The Today widget's money row.
+        _handleIntentAction('finance');
+      } else if (notes.any((n) => n.id == id)) {
+        _selectNote(id);
+      }
     } else if (intentAction.startsWith('toggle:')) {
       // "toggle:<id>:<encodedText>[:<doneAtTap>]" — the done-at-tap flag is
       // set by the widget; a replayed stale dispatch whose target line is
@@ -3772,6 +3777,7 @@ class _HomeScreenState extends State<HomeScreen>
     setState(() => _payday = picked);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(PaydaySettings.prefsKey, jsonEncode(picked.toJson()));
+    _persistNow(); // the Today widget counts down to the new payday
   }
 
   Future<void> _editCutoffBudget() async {
@@ -3794,6 +3800,7 @@ class _HomeScreenState extends State<HomeScreen>
         jsonEncode(choice.budget!.toJson()),
       );
     }
+    _persistNow(); // refreshes the Today widget's money line
   }
 
   /// The pages most recently worked in: notes, lists and voice memos.

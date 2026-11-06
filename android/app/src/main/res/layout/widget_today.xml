@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Today: the same order as Home (overdue, then by time), tick-able, with
+     money until payday. Counts and money live inside the collection (first
+     and last rows): Android 16 can leave a collection widget's static views
+     stale, while collection rebinds always land. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_today_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="4dp"
+        android:paddingBottom="6dp">
+
+        <ImageView
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:contentDescription="@string/widget_app_name"
+            android:src="@drawable/ic_typed" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:layout_weight="1"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.02"
+            android:text="@string/widget_today_title"
+            android:textColor="@color/widget_fg"
+            android:textSize="13sp" />
+
+        <FrameLayout
+            android:id="@+id/widget_today_voice"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:background="@drawable/widget_round_bg"
+            android:clickable="true"
+            android:contentDescription="@string/voice_memo"
+            android:focusable="true">
+
+            <ImageView
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_gravity="center"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_mic"
+                android:tint="@color/widget_fg" />
+        </FrameLayout>
+
+        <FrameLayout
+            android:id="@+id/widget_today_new"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:layout_marginStart="6dp"
+            android:background="@drawable/widget_round_bg"
+            android:clickable="true"
+            android:contentDescription="@string/widget_new_note"
+            android:focusable="true">
+
+            <ImageView
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_gravity="center"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_plus"
+                android:tint="@color/widget_fg" />
+        </FrameLayout>
+    </LinearLayout>
+
+    <ListView
+        android:id="@+id/widget_today_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:divider="@android:color/transparent"
+        android:dividerHeight="0dp"
+        android:overScrollMode="ifContentScrolls"
+        android:scrollbars="none" />
+
+    <TextView
+        android:id="@+id/widget_today_empty"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fontFamily="sans-serif"
+        android:gravity="center"
+        android:text="@string/widget_today_empty"
+        android:textColor="@color/widget_muted"
+        android:textSize="13sp"
+        android:visibility="gone" />
+</LinearLayout>

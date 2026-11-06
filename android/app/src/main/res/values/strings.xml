@@ -50,4 +50,8 @@
         <item quantity="other">days</item>
     </plurals>
     <string name="widget_streak_description_a11y">%1$d-day writing streak</string>
+    <string name="widget_label_today">Today</string>
+    <string name="widget_today_title">Today</string>
+    <string name="widget_today_description">Today’s tasks in Home’s order, and money until payday</string>
+    <string name="widget_today_empty">Nothing due today. Tap + to add something.</string>
 </resources>

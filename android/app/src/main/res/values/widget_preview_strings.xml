@@ -19,4 +19,9 @@
     <string name="preview_todo_2" translatable="false">Book dentist appointment</string>
     <string name="preview_todo_3" translatable="false">Buy milk and eggs</string>
     <string name="preview_todo_4" translatable="false">Water the plants</string>
+    <string name="preview_today_summary" translatable="false">Friday · 3 for today</string>
+    <string name="preview_today_1" translatable="false">Pay Meralco</string>
+    <string name="preview_today_2" translatable="false">Call the dentist</string>
+    <string name="preview_today_money" translatable="false">₱5,340 until the 15th</string>
+    <string name="preview_today_money_sub" translatable="false">About ₱593 a day · on pace</string>
 </resources>
