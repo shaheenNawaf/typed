@@ -49,27 +49,21 @@ class WidgetActionActivity : Activity() {
 
 object WidgetTodoStore {
     private const val TODO_KEY = "flutter.widget_todo_v1"
+    private const val TODAY_KEY = TodayRemoteViewsService.ITEMS_KEY
 
     /** Read (and cleared) by Dart; keep in sync with HomeScreen. */
     private const val PENDING_KEY = "flutter.widget_pending_toggles_v1"
 
     fun toggle(context: Context, noteId: String, text: String, doneAtTap: Boolean) {
         val prefs = context.getSharedPreferences(WidgetHelper.PREFS_NAME, Context.MODE_PRIVATE)
+        // The same task may show in both the To-do and Today widgets; it
+        // flips in each so neither shows a stale state.
         val items = parseArray(prefs.getString(TODO_KEY, null))
-        var flipped = false
-        for (i in 0 until items.length()) {
-            val item = items.optJSONObject(i) ?: continue
-            if (item.optString("id") == noteId &&
-                item.optString("text") == text &&
-                item.optBoolean("done", false) == doneAtTap
-            ) {
-                item.put("done", !doneAtTap)
-                flipped = true
-                break
-            }
-        }
+        val today = parseArray(prefs.getString(TODAY_KEY, null))
+        val flippedTodo = flip(items, noteId, text, doneAtTap)
+        val flippedToday = flip(today, noteId, text, doneAtTap)
         // No row in the tapped state: a launcher replaying a stale click.
-        if (!flipped) return
+        if (!flippedTodo && !flippedToday) return
 
         val pending = parseArray(prefs.getString(PENDING_KEY, null)).put(
             JSONObject()
@@ -80,12 +74,31 @@ object WidgetTodoStore {
         // commit, not apply: the process may die right after finish().
         prefs.edit()
             .putString(TODO_KEY, items.toString())
+            .putString(TODAY_KEY, today.toString())
             .putString(PENDING_KEY, pending.toString())
             .commit()
 
         val manager = AppWidgetManager.getInstance(context)
         val ids = manager.getAppWidgetIds(ComponentName(context, TodoListWidget::class.java))
         if (ids.isNotEmpty()) manager.notifyAppWidgetViewDataChanged(ids, R.id.widget_todo_list)
+        val todayIds = manager.getAppWidgetIds(ComponentName(context, TodayWidget::class.java))
+        if (todayIds.isNotEmpty()) {
+            manager.notifyAppWidgetViewDataChanged(todayIds, R.id.widget_today_list)
+        }
+    }
+
+    private fun flip(items: JSONArray, noteId: String, text: String, doneAtTap: Boolean): Boolean {
+        for (i in 0 until items.length()) {
+            val item = items.optJSONObject(i) ?: continue
+            if (item.optString("id") == noteId &&
+                item.optString("text") == text &&
+                item.optBoolean("done", false) == doneAtTap
+            ) {
+                item.put("done", !doneAtTap)
+                return true
+            }
+        }
+        return false
     }
 
     private fun parseArray(raw: String?): JSONArray =

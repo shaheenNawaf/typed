@@ -7,4 +7,5 @@
     <color name="widget_accent">#E0634F</color>
     <color name="widget_income">#3CA06B</color>
     <color name="widget_track">#2A2F35</color>
+    <color name="widget_warning">#E8B451</color>
 </resources>

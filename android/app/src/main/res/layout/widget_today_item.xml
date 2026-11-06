@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/today_item_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:clickable="true"
+    android:focusable="true"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="4dp"
+    android:paddingTop="7dp"
+    android:paddingEnd="4dp"
+    android:paddingBottom="7dp">
+
+    <ImageView
+        android:id="@+id/today_item_check"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:contentDescription="@string/widget_incomplete"
+        android:src="@drawable/ic_check_empty" />
+
+    <TextView
+        android:id="@+id/today_item_text"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:fontFamily="sans-serif"
+        android:maxLines="1"
+        android:textColor="@color/widget_fg"
+        android:textSize="14sp" />
+
+    <TextView
+        android:id="@+id/today_item_when"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:fontFamily="sans-serif"
+        android:maxLines="1"
+        android:textColor="@color/widget_muted"
+        android:textSize="12sp" />
+</LinearLayout>

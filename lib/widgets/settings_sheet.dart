@@ -23,6 +23,13 @@ class SettingsSheet extends StatelessWidget {
   /// Opens "Smarter voice memos"; null where the model can't run.
   final VoidCallback? onVoiceModel;
 
+  /// When pay arrives ("15th and 30th") and the budget per cutoff
+  /// ("₱10,000"; null when none). Home counts down to payday with these.
+  final String? paydayLabel;
+  final VoidCallback? onPayday;
+  final String? budgetLabel;
+  final VoidCallback? onCutoffBudget;
+
   const SettingsSheet({
     super.key,
     required this.onExport,
@@ -35,6 +42,10 @@ class SettingsSheet extends StatelessWidget {
     this.displayName,
     this.onEditName,
     this.onVoiceModel,
+    this.paydayLabel,
+    this.onPayday,
+    this.budgetLabel,
+    this.onCutoffBudget,
   });
 
   static Future<void> show(
@@ -49,6 +60,10 @@ class SettingsSheet extends StatelessWidget {
     String? displayName,
     VoidCallback? onEditName,
     VoidCallback? onVoiceModel,
+    String? paydayLabel,
+    VoidCallback? onPayday,
+    String? budgetLabel,
+    VoidCallback? onCutoffBudget,
   }) {
     return showModalBottomSheet(
       context: context,
@@ -72,6 +87,10 @@ class SettingsSheet extends StatelessWidget {
           displayName: displayName,
           onEditName: onEditName,
           onVoiceModel: onVoiceModel,
+          paydayLabel: paydayLabel,
+          onPayday: onPayday,
+          budgetLabel: budgetLabel,
+          onCutoffBudget: onCutoffBudget,
         ),
       ),
     );
@@ -165,6 +184,26 @@ class SettingsSheet extends StatelessWidget {
                   ),
                 ),
               ),
+              if (onPayday != null)
+                _Option(
+                  icon: Icons.event_repeat_outlined,
+                  label: 'Payday: ${paydayLabel ?? '15th and 30th'}',
+                  onTap: () {
+                    Navigator.pop(context);
+                    onPayday!();
+                  },
+                ),
+              if (onCutoffBudget != null)
+                _Option(
+                  icon: Icons.savings_outlined,
+                  label: budgetLabel == null
+                      ? 'Set a budget per cutoff'
+                      : 'Budget per cutoff: $budgetLabel',
+                  onTap: () {
+                    Navigator.pop(context);
+                    onCutoffBudget!();
+                  },
+                ),
               _Option(
                 icon: Icons.table_chart_outlined,
                 label: 'Export finance (CSV)',

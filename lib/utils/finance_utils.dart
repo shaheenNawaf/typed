@@ -172,3 +172,21 @@ List<TextSpan> moneySpans(int minor, String? currency, TextStyle? style) {
 }
 
 
+
+/// Whole units, no decimals: 534000 PHP -> "₱5,340". For glanceable
+/// figures (Home's payday card), where centavos are noise.
+String formatWholeAmount(int minor, String? currency) {
+  final major = minorToMajor(minor.abs(), currency).round();
+  final sign = minor < 0 && major != 0 ? '−' : '';
+  return '$sign${currencySymbol(currency)}${formatNumber(major.toDouble(), decimals: 0)}';
+}
+
+/// [formatWholeAmount] as spans, with the symbol in a font that has ₱.
+List<TextSpan> wholeMoneySpans(int minor, String? currency, TextStyle? style) {
+  final major = minorToMajor(minor.abs(), currency).round();
+  return [
+    if (minor < 0 && major != 0) TextSpan(text: '−', style: style),
+    currencySpan(currency, style),
+    TextSpan(text: formatNumber(major.toDouble(), decimals: 0), style: style),
+  ];
+}

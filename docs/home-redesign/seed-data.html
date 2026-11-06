@@ -1,0 +1,44 @@
+<!doctype html><meta charset="utf-8"><script>
+// Seeds the web build with the prototype's "Friday morning" data, dated
+// relative to today: an overdue bill, two voice-memo reminders today, an
+// undated task, recent notes, one older note, and spending since payday.
+// Serve build/web with this file and frame.html next to it, then open
+// seed-data.html (add #tall for a 1500px-tall frame).
+const now = new Date();
+const ago = (h) => new Date(now.getTime() - h * 3600e3).toISOString();
+const dayOff = (n) => { const d = new Date(now); d.setDate(d.getDate() + n); return d; };
+const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const label = (n, time) => { const d = dayOff(n); return `${WD[d.getDay()]}, ${MO[d.getMonth()]} ${d.getDate()}${time ? ', ' + time : ''}`; };
+// Last payday (15th or end of month) and the days since.
+const payday = now.getDate() >= 15 ? 15 : 0;
+const sincePay = (k) => { const d = new Date(now.getFullYear(), now.getMonth(), payday + 1 + k, 12); return d > now ? now.toISOString() : d.toISOString(); };
+let n = 0;
+const e = (amt, cat, k, note, type = 'expense') => ({ id: 'm' + (++n), amount: amt * 100, category: cat, date: sincePay(k), note, paymentMethod: null, currency: null, type, isRecurring: false, recurInterval: null, recurEnd: null, lastGenerated: null });
+const note = (o) => Object.assign({ tags: [], imagePaths: [], isArchived: false, isDeleted: false, type: 'text', currency: null, isPinned: false, viewedAt: null, amounts: [], createdAt: ago(24 * 50) }, o);
+const notes = [
+  note({ id: 'n1', title: 'Today', type: 'todo', tags: ['todo', 'voice'], updatedAt: ago(1),
+    content: `- [ ] Call the dentist — ${label(0, '2 PM')}\n- [ ] Pick up Mia from ballet — ${label(0, '5:30 PM')}\n` }),
+  note({ id: 'n2', title: 'Notes from the supplier call', tags: ['voice'], updatedAt: ago(2),
+    content: 'They can deliver the chairs by the 20th. Price holds if we confirm this week. Ask about the extra cushions.' }),
+  note({ id: 'n3', title: 'Errands', type: 'todo', tags: ['todo'], updatedAt: ago(3),
+    content: `- [ ] Pay Meralco — ${label(-1)}\n- [ ] Buy eggs\n- [x] Take the bins out\n` }),
+  note({ id: 'n4', title: 'Garden plan', updatedAt: ago(26),
+    content: 'Tomatoes along the back fence, herbs in the raised bed by the door, and move the compost to the shady corner.' }),
+  note({ id: 'n5', title: 'Ideas for the shop', updatedAt: ago(24 * 40),
+    content: 'A loyalty card where the tenth coffee is free. Start with paper stamps before building anything, and see if regulars actually use it.' }),
+  note({ id: 'f1', title: MO[now.getMonth()] + ' ' + now.getFullYear(), type: 'expense', tags: [], currency: 'PHP', content: '', updatedAt: ago(5),
+    amounts: [e(300, 'Load', 0, 'Globe load'), e(1450, 'Groceries', 1, 'Puregold'), e(250, 'Food', 2, 'Lunch'),
+              e(180, 'Transport', 2, 'Grab home'), e(465, 'Food', 3, 'Foodpanda'), e(160, 'Food', 4, 'Coffee'),
+              e(620, 'Health', 4, 'Mercury Drug'), e(1235, 'Food', 5, 'Dinner with the barkada')] }),
+];
+const set = (k, v) => localStorage.setItem('flutter.' + k, JSON.stringify(v));
+localStorage.clear();
+set('notes_v1', JSON.stringify(notes));
+set('onboarded_v1', true);
+set('onboarding_flow_complete_v1', true);
+set('display_name_v1', 'Shaheen');
+set('shell_state_v1', JSON.stringify({ filter: 'home', tab: 'home' }));
+set('cutoff_budget_v1', JSON.stringify({ amount: 1000000, currency: 'PHP' }));
+location.replace(location.hash === '#tall' ? 'frame-tall.html' : 'frame.html');
+</script>

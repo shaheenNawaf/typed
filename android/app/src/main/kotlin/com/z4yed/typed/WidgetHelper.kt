@@ -145,6 +145,7 @@ object WidgetHelper {
         updateCollectionWidgetHeaders(context)
         notifyCollectionDataChanged(context, RecentNotesWidget::class.java, R.id.widget_recent_list)
         notifyCollectionDataChanged(context, TodoListWidget::class.java, R.id.widget_todo_list)
+        notifyCollectionDataChanged(context, TodayWidget::class.java, R.id.widget_today_list)
     }
 
     /**
@@ -160,6 +161,7 @@ object WidgetHelper {
         updateNonCollectionWidgets(context)
         notifyCollectionDataChanged(context, RecentNotesWidget::class.java, R.id.widget_recent_list)
         notifyCollectionDataChanged(context, TodoListWidget::class.java, R.id.widget_todo_list)
+        notifyCollectionDataChanged(context, TodayWidget::class.java, R.id.widget_today_list)
     }
 
     /**
@@ -230,6 +232,9 @@ object WidgetHelper {
         }
         for (id in mgr.getAppWidgetIds(ComponentName(context, TodoListWidget::class.java))) {
             TodoListWidget.updateWidget(context, mgr, id)
+        }
+        for (id in mgr.getAppWidgetIds(ComponentName(context, TodayWidget::class.java))) {
+            TodayWidget.updateWidget(context, mgr, id)
         }
     }
 

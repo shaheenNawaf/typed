@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../home/today_plan.dart';
+import '../home/week_recap.dart';
 import '../models/money_entry.dart';
 import '../models/note.dart';
 import '../models/budget.dart';
@@ -12,6 +14,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_motion.dart';
 import '../utils/backup.dart';
+import '../utils/cutoff.dart';
 import '../utils/date_format.dart';
 import '../utils/finance_utils.dart';
 import '../utils/id.dart';
@@ -21,11 +24,13 @@ import '../utils/note_storage.dart';
 import '../utils/notifications.dart';
 import '../utils/onboarding.dart';
 import '../utils/recurrence.dart';
+import '../utils/task_dates.dart';
 import '../utils/templates.dart';
 import '../widgets/brand_mark.dart';
 import '../widgets/settings_sheet.dart';
 import '../widgets/sidebar.dart';
 import '../widgets/note_list.dart';
+import '../widgets/payday_dialogs.dart';
 import '../widgets/editor.dart';
 import '../widgets/mobile_nav.dart';
 import '../widgets/template_picker_sheet.dart';
@@ -43,6 +48,7 @@ import '../voice/voice_model.dart';
 import '../voice/transcriber.dart';
 import '../voice/spend_parser.dart';
 import '../voice/voice_shaper.dart';
+import '../voice/when_parser.dart';
 import 'onboarding_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -89,12 +95,33 @@ class _HomeScreenState extends State<HomeScreen>
   int _doneToday = 0;
   int _doneTodayDay = -1;
 
+  /// Tasks finished per local epoch day, for Monday's look back. Kept for
+  /// five weeks.
+  static const _doneLogKey = 'done_log_v1';
+  final Map<int, int> _doneLog = {};
+
+  /// Monday's recap was hidden on this local day.
+  static const _recapHiddenKey = 'recap_hidden_v1';
+  int _recapHiddenDay = -1;
+
   /// "From your notes": hidden for the rest of the day with "Not today".
   static const _resurfaceHiddenKey = 'resurface_hidden_day_v1';
 
   /// What Home calls you ("Good evening, Sam"). Local only, optional.
   static const _displayNameKey = 'display_name_v1';
   String? _displayName;
+
+  /// Paydays and the optional budget per cutoff ("Until payday").
+  PaydaySettings _payday = PaydaySettings.standard;
+  CutoffBudget? _cutoffBudget;
+
+  /// The payday card was put away ("Later") on this local day.
+  static const _paydaySeenKey = 'payday_card_seen_v1';
+  int _paydaySeenDay = -1;
+
+  /// "Left from today" was waved off ("Leave it") on this local day.
+  static const _leftoverHiddenKey = 'leftover_dismissed_day_v1';
+  int _leftoverHiddenDay = -1;
   int _resurfaceHiddenDay = -1;
   bool _showDockHint = false;
   bool _previewMode = false;
@@ -133,6 +160,15 @@ class _HomeScreenState extends State<HomeScreen>
       duration: const Duration(milliseconds: 1200),
     )..repeat();
     _loadAndHandleIntent();
+    NotificationService.instance.taskReminderKeys.addListener(_onReminders);
+    unawaited(
+      NotificationService.instance.loadTaskReminderKeys().catchError((_) {}),
+    );
+  }
+
+  /// Bells on Today's rows follow the stored reminders.
+  void _onReminders() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -203,6 +239,7 @@ class _HomeScreenState extends State<HomeScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     HardwareKeyboard.instance.removeHandler(_onHardwareKey);
+    NotificationService.instance.taskReminderKeys.removeListener(_onReminders);
     _shimmer.dispose();
     _persistTimer?.cancel();
     _shellTimer?.cancel();
@@ -294,7 +331,37 @@ class _HomeScreenState extends State<HomeScreen>
         _doneTodayDay = int.tryParse(doneRaw[0]) ?? -1;
         _doneToday = int.tryParse(doneRaw[1]) ?? 0;
       }
+      try {
+        final log = jsonDecode(prefs.getString(_doneLogKey) ?? '{}') as Map;
+        log.forEach((day, count) {
+          final d = int.tryParse('$day');
+          if (d != null && count is int) _doneLog[d] = count;
+        });
+      } catch (_) {}
+      // Builds before the log kept only today's count; start from it.
+      if (_doneTodayDay >= 0 && _doneToday > 0) {
+        _doneLog.putIfAbsent(_doneTodayDay, () => _doneToday);
+      }
+      _recapHiddenDay = prefs.getInt(_recapHiddenKey) ?? -1;
       _resurfaceHiddenDay = prefs.getInt(_resurfaceHiddenKey) ?? -1;
+      _paydaySeenDay = prefs.getInt(_paydaySeenKey) ?? -1;
+      _leftoverHiddenDay = prefs.getInt(_leftoverHiddenKey) ?? -1;
+      try {
+        final pay = prefs.getString(PaydaySettings.prefsKey);
+        if (pay != null) {
+          _payday = PaydaySettings.fromJson(
+            jsonDecode(pay) as Map<String, dynamic>,
+          );
+        }
+        final budget = prefs.getString(CutoffBudget.prefsKey);
+        if (budget != null) {
+          _cutoffBudget = CutoffBudget.fromJson(
+            jsonDecode(budget) as Map<String, dynamic>,
+          );
+        }
+      } catch (_) {
+        // A damaged setting falls back to the 15th/30th and no budget.
+      }
       final name = prefs.getString(_displayNameKey)?.trim();
       _displayName = (name == null || name.isEmpty) ? null : name;
       final cats = prefs.getStringList('custom_categories') ?? [];
@@ -431,7 +498,12 @@ class _HomeScreenState extends State<HomeScreen>
       _setFilter('finance');
     } else if (intentAction.startsWith('open:')) {
       final id = intentAction.substring(5);
-      if (notes.any((n) => n.id == id)) _selectNote(id);
+      if (id == '__finance__') {
+        // The Today widget's money row.
+        _handleIntentAction('finance');
+      } else if (notes.any((n) => n.id == id)) {
+        _selectNote(id);
+      }
     } else if (intentAction.startsWith('toggle:')) {
       // "toggle:<id>:<encodedText>[:<doneAtTap>]" — the done-at-tap flag is
       // set by the widget; a replayed stale dispatch whose target line is
@@ -1717,6 +1789,12 @@ class _HomeScreenState extends State<HomeScreen>
       onVoiceModel: VoiceMemo.isSupported() && VoiceModel.isSupported()
           ? () => VoiceModelSheet.show(context)
           : null,
+      paydayLabel: _payday.label,
+      onPayday: _editPayday,
+      budgetLabel: _cutoffBudget == null
+          ? null
+          : formatWholeAmount(_cutoffBudget!.amount, _cutoffBudget!.currency),
+      onCutoffBudget: _editCutoffBudget,
     );
   }
 
@@ -2094,6 +2172,16 @@ class _HomeScreenState extends State<HomeScreen>
       _doneToday = 0;
     }
     _doneToday = (_doneToday + (nowDone ? 1 : -1)).clamp(0, 9999);
+    _doneLog[today] = _doneToday;
+    _doneLog.removeWhere((day, _) => day < today - 35);
+    final log = jsonEncode({
+      for (final e in _doneLog.entries) '${e.key}': e.value,
+    });
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setString(_doneLogKey, log))
+          .catchError((_) => false),
+    );
     final value = '$_doneTodayDay:$_doneToday';
     unawaited(
       SharedPreferences.getInstance()
@@ -2952,7 +3040,8 @@ class _HomeScreenState extends State<HomeScreen>
               : Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (_showDockHint) _buildDockHint(),
+                    if (_showDockHint && _currentTab != 'home')
+                      _buildDockHint(),
                     MobileNav(
                   currentTab: _currentTab,
                   onTabChanged: _onTabChanged,
@@ -3350,30 +3439,42 @@ class _HomeScreenState extends State<HomeScreen>
   Widget _buildHomeScreen() {
     final isDesktop = MediaQuery.of(context).size.width >= 1024;
     final now = HomeScreen.clock();
-    final continueNote = _continueNote();
+    final recent = _recentNotes();
+    final plan = buildTodayPlan(notes, now);
+    // At most one moment card at the top: payday's summary, else Monday's
+    // look back at last week.
+    final payday = _buildPaydayMoment(now);
+    final moment = payday ?? _buildWeekRecapMoment(now);
+    final lead = moment == null || now.hour >= 18
+        ? ''
+        : payday != null
+            ? 'Payday. '
+            : 'New week. ';
 
     final blocks = <Widget>[
-      _buildHomeIntro(now),
+      _buildHomeIntro(now, plan, lead: lead),
       HomeCaptureBar(
         onSaveNote: _captureNote,
         onAddTask: _captureTask,
         onVoice: VoiceMemo.isSupported() ? _openVoiceMemo : null,
       ),
       if (notes.isEmpty) _buildHomeEmptyCta(),
-      // Evening with nothing open: the empty Next up gives way to one
-      // optional prompt to set up tomorrow (the subline already says the
-      // plate is clear — two "nothing here" cards would just repeat it).
-      if (now.hour >= 18 && _upNextItems().isEmpty)
-        HomeWindDown(onAdd: _captureTask)
-      else
-        _buildNextUp(),
-      if (continueNote != null)
-        HomeContinueCard(
-          note: continueNote,
-          icon: _noteIcon(continueNote),
-          subtitle: _continueSubtitle(continueNote),
-          when: _relativeTimeLabel(continueNote.updatedAt),
-          onOpen: () => Future.microtask(() => _selectNote(continueNote.id)),
+      ?moment,
+      ..._buildDayBlocks(plan, now),
+      if (moment == null) ?_buildHomeMoney(now),
+      if (recent.isNotEmpty)
+        HomeRecent(
+          items: [
+            for (final n in recent)
+              RecentItem(
+                note: n,
+                icon: _noteIcon(n),
+                subtitle: _recentSubtitle(n),
+                when: _relativeTimeLabel(n.updatedAt),
+              ),
+          ],
+          onOpen: (n) => Future.microtask(() => _selectNote(n.id)),
+          onViewAll: () => _onTabChanged('notes'),
         ),
       if (_resurfaceNote(now) case final old?)
         HomeResurfaceCard(
@@ -3383,7 +3484,6 @@ class _HomeScreenState extends State<HomeScreen>
           onOpen: () => Future.microtask(() => _selectNote(old.id)),
           onDismiss: _hideResurfaceToday,
         ),
-      _buildHomeMoney(now),
     ];
 
     final body = SingleChildScrollView(
@@ -3416,28 +3516,98 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// Every open checklist line across lists, freshest list first.
-  List<UpNextItem> _upNextItems() {
-    final lists = notes
-        .where((n) => !n.isArchived && !n.isDeleted && !isSeedNote(n))
-        .toList()
-      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+  /// Today by day; after six, what's left and tomorrow — unless something
+  /// is still timed for later tonight, then Today stays on top.
+  List<Widget> _buildDayBlocks(TodayPlan plan, DateTime now) {
+    if (now.hour < 18) return [_buildToday(plan, now)];
+    final today = DateTime(now.year, now.month, now.day);
+    final tomorrow = today.add(const Duration(days: 1));
+    final tomorrowBlock = HomeTomorrow(
+      day: tomorrow,
+      items: plan.tomorrow,
+      now: now,
+      reminders: NotificationService.instance.taskReminderKeys.value,
+      onOpen: (item) => _selectNote(item.note.id),
+      onViewAll: () => _onTabChanged('tasks'),
+      onAdd: (text) => _captureTask(text, when: SpokenWhen(tomorrow)),
+    );
+    if (_laterTonight(plan, now)) return [_buildToday(plan, now), tomorrowBlock];
+    final left = _leftovers(plan, now);
     return [
-      for (final note in lists)
-        for (final item in parseChecklist(note.content))
-          if (!item.done && item.text.isNotEmpty)
-            UpNextItem(
-              note: note,
-              lineIndex: item.lineIndex,
-              text: stripInlineMarkdown(item.text),
-            ),
+      if (left.isNotEmpty)
+        HomeLeftovers(
+          items: left,
+          onMoveAll: () => _moveTasksToTomorrow(left),
+          onLeave: _hideLeftoversTonight,
+          onOpen: (item) => _selectNote(item.note.id),
+        ),
+      tomorrowBlock,
     ];
   }
 
-  Widget _buildNextUp() {
-    return HomeNextUp(
-      items: _upNextItems(),
+  bool _laterTonight(TodayPlan plan, DateTime now) =>
+      plan.dueToday.any((i) => i.hasTime && i.when!.at.isAfter(now));
+
+  /// What Today listed and didn't get done: overdue, due today, and the
+  /// undated tasks it showed on a busy day (not a quiet day's suggestions).
+  List<TodayItem> _leftovers(TodayPlan plan, DateTime now) {
+    if (_leftoverHiddenDay == localEpochDay(now)) return const [];
+    return [
+      ...plan.overdue,
+      ...plan.dueToday,
+      if (!plan.isQuiet) ...plan.undatedShown,
+    ];
+  }
+
+  void _hideLeftoversTonight() {
+    final today = localEpochDay(HomeScreen.clock());
+    setState(() => _leftoverHiddenDay = today);
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setInt(_leftoverHiddenKey, today))
+          .catchError((_) => false),
+    );
+  }
+
+  /// Moves every leftover to tomorrow (times and reminders kept); one Undo
+  /// puts them all back.
+  void _moveTasksToTomorrow(List<TodayItem> items) {
+    final now = HomeScreen.clock();
+    final tomorrow = DateTime(now.year, now.month, now.day + 1);
+    final moved = <(TodayItem, String)>[];
+    for (final item in items) {
+      final when = moveToDay(item.when, tomorrow);
+      final newRaw = withTaskDate(item.rawWithoutDate(now), when);
+      if (!_rewriteOpenTask(item.note, item.lineIndex, item.raw, newRaw)) {
+        continue;
+      }
+      if (NotificationService.instance.taskReminderKeys.value
+          .contains('${item.note.id}|${item.raw}')) {
+        _carryReminder(item.note, newRaw, when);
+      }
+      moved.add((item, newRaw));
+    }
+    if (moved.isEmpty) return;
+    _showSnackBar(
+      moved.length == 1
+          ? 'Moved to tomorrow'
+          : 'Moved ${moved.length} to tomorrow',
+      onUndo: () {
+        for (final (item, newRaw) in moved) {
+          final note = _noteById(item.note.id);
+          if (note != null) _rewriteOpenTask(note, -1, newRaw, item.raw);
+        }
+      },
+    );
+  }
+
+  Widget _buildToday(TodayPlan plan, DateTime now) {
+    final today = DateTime(now.year, now.month, now.day);
+    return HomeToday(
+      plan: plan,
+      now: now,
       doneToday: _doneTodayNow,
+      reminders: NotificationService.instance.taskReminderKeys.value,
       onComplete: (item) {
         _toggleChecklistItem(item.note, item.lineIndex, true);
         _showSnackBar(
@@ -3446,45 +3616,227 @@ class _HomeScreenState extends State<HomeScreen>
           // removed above it), so the old index could untick another task.
           onUndo: () => _toggleChecklistByContent(
             item.note.id,
-            item.text,
+            item.raw,
             expectedDone: true,
           ),
         );
       },
+      onTomorrow: (item) => _moveTaskToDay(
+        item,
+        today.add(const Duration(days: 1)),
+        'Moved to tomorrow',
+      ),
+      onDoToday: (item) => _moveTaskToDay(item, today, 'Added to today'),
       onOpen: (item) => _selectNote(item.note.id),
       onViewAll: () => _onTabChanged('tasks'),
     );
   }
 
-  Widget _buildHomeMoney(DateTime now) {
-    final (hasData, spent, _, currency, _) = _monthFinanceTotals();
-    return HomeMoneyLine(
-      monthLabel: monthName(now.month),
-      hasData: hasData,
-      currency: currency,
-      spent: spent,
+  /// Rewrites a task's date to [day] (keeping its time), carries its
+  /// reminder along, and offers Undo.
+  void _moveTaskToDay(TodayItem item, DateTime day, String message) {
+    final now = HomeScreen.clock();
+    final text = item.rawWithoutDate(now);
+    final newWhen = moveToDay(item.when, day);
+    final newRaw = withTaskDate(text, newWhen);
+    if (!_rewriteOpenTask(item.note, item.lineIndex, item.raw, newRaw)) {
+      return;
+    }
+    final hadReminder = NotificationService.instance.taskReminderKeys.value
+        .contains('${item.note.id}|${item.raw}');
+    if (hadReminder) _carryReminder(item.note, newRaw, newWhen);
+    _showSnackBar(
+      message,
+      onUndo: () {
+        final note = _noteById(item.note.id);
+        if (note == null) return;
+        if (_rewriteOpenTask(note, -1, newRaw, item.raw) &&
+            hadReminder &&
+            item.when != null) {
+          _carryReminder(note, item.raw, item.when!);
+        }
+      },
+    );
+  }
+
+  /// Replaces an open task's text, by line index when it still matches,
+  /// else by content (the list may have changed). False when it's gone.
+  bool _rewriteOpenTask(Note note, int lineIndex, String from, String to) {
+    final lines = note.content.split('\n');
+    final open = RegExp(r'^(\s*[-*+]\s+\[ \]\s+)(.*)$');
+    bool matches(int i) {
+      final m = open.firstMatch(lines[i]);
+      return m != null && m.group(2)!.trim() == from.trim();
+    }
+
+    var at = lineIndex >= 0 && lineIndex < lines.length && matches(lineIndex)
+        ? lineIndex
+        : -1;
+    if (at == -1) {
+      for (var i = 0; i < lines.length && at == -1; i++) {
+        if (matches(i)) at = i;
+      }
+    }
+    if (at == -1) return false;
+    final prefix = open.firstMatch(lines[at])!.group(1)!;
+    lines[at] = '$prefix$to';
+    setState(() {
+      note.content = lines.join('\n');
+      note.updatedAt = DateTime.now();
+    });
+    _persistNow();
+    return true;
+  }
+
+  /// A moved task keeps its reminder: a new one at the new time (the old
+  /// one is cancelled when reminders are reconciled, as its line is gone).
+  void _carryReminder(Note note, String line, SpokenWhen when) {
+    unawaited(
+      NotificationService.instance
+          .scheduleTaskReminder(
+            noteId: note.id,
+            noteTitle: note.title,
+            line: line,
+            at: when.at,
+          )
+          .catchError((_) => false),
+    );
+  }
+
+  /// What's left until payday; hidden until money or a budget exists.
+  Widget? _buildHomeMoney(DateTime now) {
+    final money = cutoffMoney(
+      notes,
+      cutoffFor(_payday, now),
+      _cutoffBudget,
+      now,
+    );
+    if (!money.anyLogged && _cutoffBudget == null) return null;
+    return HomePaydayCard(
+      money: money,
+      now: now,
+      onOpen: () => _onTabChanged('finance'),
+      onSetBudget: _editCutoffBudget,
+    );
+  }
+
+  /// On payday, until put away: how the last cutoff went.
+  Widget? _buildPaydayMoment(DateTime now) {
+    if (!isPayday(_payday, now)) return null;
+    if (_paydaySeenDay == localEpochDay(now)) return null;
+    final last = cutoffMoney(
+      notes,
+      previousCutoff(_payday, cutoffFor(_payday, now)),
+      _cutoffBudget,
+      now,
+    );
+    if (last.spent == 0) return null;
+    return HomePaydaySummary(
+      last: last,
+      onStart: () {
+        _hidePaydayToday();
+        _editCutoffBudget();
+      },
+      onLater: _hidePaydayToday,
       onOpen: () => _onTabChanged('finance'),
     );
   }
 
-  /// The page most recently written in. Task lists and finance ledgers are
-  /// left out — Next Up and the money line already cover them, and showing
-  /// the same list twice splits attention. Guides are reference, not work.
-  Note? _continueNote() {
-    Note? best;
-    for (final n in notes) {
-      if (n.isArchived || n.isDeleted || n.tags.contains('guide')) continue;
-      if (n.type == 'todo' || isFinanceNote(n)) continue;
-      if (best == null || n.updatedAt.isAfter(best.updatedAt)) best = n;
-    }
-    return best;
+  /// Mondays: last week at a glance, unless hidden or there was nothing.
+  Widget? _buildWeekRecapMoment(DateTime now) {
+    if (now.weekday != DateTime.monday) return null;
+    if (_recapHiddenDay == localEpochDay(now)) return null;
+    final recap = buildWeekRecap(notes, _doneLog, now);
+    if (!recap.hasActivity) return null;
+    return HomeWeekRecap(recap: recap, onHide: _hideRecapThisWeek);
   }
 
-  IconData _noteIcon(Note note) => note.type == 'todo'
-      ? Icons.check_circle_outline
-      : isFinanceNote(note)
-          ? Icons.account_balance_wallet_outlined
+  void _hideRecapThisWeek() {
+    final today = localEpochDay(HomeScreen.clock());
+    setState(() => _recapHiddenDay = today);
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setInt(_recapHiddenKey, today))
+          .catchError((_) => false),
+    );
+  }
+
+  void _hidePaydayToday() {
+    final today = localEpochDay(HomeScreen.clock());
+    setState(() => _paydaySeenDay = today);
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setInt(_paydaySeenKey, today))
+          .catchError((_) => false),
+    );
+  }
+
+  Future<void> _editPayday() async {
+    final picked = await showPaydayPicker(context, _payday);
+    if (picked == null || !mounted) return;
+    setState(() => _payday = picked);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(PaydaySettings.prefsKey, jsonEncode(picked.toJson()));
+    _persistNow(); // the Today widget counts down to the new payday
+  }
+
+  Future<void> _editCutoffBudget() async {
+    final now = HomeScreen.clock();
+    final currency = _cutoffBudget?.currency ??
+        cutoffMoney(notes, cutoffFor(_payday, now), null, now).currency;
+    final choice = await showCutoffBudgetDialog(
+      context,
+      current: _cutoffBudget,
+      currency: currency,
+    );
+    if (choice == null || !mounted) return;
+    setState(() => _cutoffBudget = choice.budget);
+    final prefs = await SharedPreferences.getInstance();
+    if (choice.budget == null) {
+      await prefs.remove(CutoffBudget.prefsKey);
+    } else {
+      await prefs.setString(
+        CutoffBudget.prefsKey,
+        jsonEncode(choice.budget!.toJson()),
+      );
+    }
+    _persistNow(); // refreshes the Today widget's money line
+  }
+
+  /// The pages most recently worked in: notes, lists and voice memos.
+  /// Money ledgers live in the payday card; guides and the welcome note are
+  /// reference, not work.
+  List<Note> _recentNotes() {
+    final pool = notes
+        .where((n) =>
+            !n.isArchived &&
+            !n.isDeleted &&
+            !isSeedNote(n) &&
+            !isFinanceNote(n))
+        .toList()
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return pool.take(3).toList();
+  }
+
+  IconData _noteIcon(Note note) => note.tags.contains('voice')
+      ? Icons.mic_none_rounded
+      : note.type == 'todo'
+          ? Icons.check_circle_outline
           : Icons.article_outlined;
+
+  /// "Voice memo · 0 of 2 done", "3 of 5 done", or a line of the text.
+  String? _recentSubtitle(Note note) {
+    String? body;
+    final counts = countChecklist(note.content);
+    if (note.type == 'todo' || counts.total > 0) {
+      if (counts.total > 0) body = '${counts.done} of ${counts.total} done';
+    } else {
+      final preview = _homeContentPreview(note.content);
+      if (preview.isNotEmpty) body = preview;
+    }
+    if (!note.tags.contains('voice')) return body;
+    return body == null ? 'Voice memo' : 'Voice memo · $body';
+  }
 
   /// Home capture -> a new note. A short single line becomes the title; a
   /// longer thought keeps its full text as the body under a trimmed title.
@@ -3515,8 +3867,9 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// Home capture -> a task on the Inbox list (created on first use).
-  void _captureTask(String text) {
+  /// Home capture -> a task on the Inbox list (created on first use),
+  /// dated [when] if given (tomorrow's add row).
+  void _captureTask(String text, {SpokenWhen? when}) {
     Note? inbox;
     for (final n in notes) {
       if (n.type == 'todo' &&
@@ -3537,7 +3890,8 @@ class _HomeScreenState extends State<HomeScreen>
           type: 'todo',
         );
     final previous = target.content;
-    final line = '- [ ] ${text.replaceAll('\n', ' ').trim()}';
+    final line =
+        '- [ ] ${withTaskDate(text.replaceAll('\n', ' ').trim(), when)}';
     setState(() {
       if (created) notes.insert(0, target);
       target.content = previous.isEmpty || previous.endsWith('\n')
@@ -3547,7 +3901,7 @@ class _HomeScreenState extends State<HomeScreen>
     });
     _persistNow();
     _showSnackBar(
-      'Added to Inbox',
+      when == null ? 'Added to Inbox' : 'Added to tomorrow',
       // Undo removes only the line this capture added — restoring a
       // snapshot would also wipe tasks added or ticked since.
       onUndo: () {
@@ -3626,24 +3980,64 @@ class _HomeScreenState extends State<HomeScreen>
     return years == 1 ? 'a year ago' : '$years years ago';
   }
 
-  /// One sentence that knows the day: what you've finished, what's waiting,
-  /// or that there's room to write. Encouraging, never a nag.
-  String _homeSubline() {
+  /// One sentence that knows the day: what's due, what you've finished, or
+  /// that there's room to write. Encouraging, never a nag. The first part
+  /// is set in the foreground colour.
+  ({String strong, String rest}) _homeSubline(TodayPlan plan, DateTime now) {
     final done = _doneTodayNow;
-    final open = _upNextItems().length;
     String tasks(int n) => n == 1 ? '1 task' : '$n tasks';
-    if (done > 0 && open == 0) {
-      return 'You finished ${tasks(done)} today. Nothing else waiting.';
+    if (now.hour >= 18 && !_laterTonight(plan, now)) {
+      final left = _leftovers(plan, now).length;
+      final doneText = done > 0 ? '$done done today.' : '';
+      if (left > 0) {
+        return done > 0
+            ? (strong: doneText, rest: ' $left left over.')
+            : (strong: '$left left over', rest: ' from today.');
+      }
+      final tail = plan.tomorrow.isNotEmpty
+          ? 'Here’s tomorrow.'
+          : 'Nothing set for tomorrow yet.';
+      return done > 0
+          ? (strong: doneText, rest: ' $tail')
+          : (strong: '', rest: tail);
     }
-    if (done > 0) return '${tasks(done)} done today. Keep the momentum.';
-    if (open == 0) return 'Nothing on your plate. A good moment to write.';
-    if (open == 1) return 'One thing waiting for you.';
-    return '$open things waiting. One at a time.';
+    if (plan.isQuiet) {
+      if (done > 0) {
+        return (
+          strong: 'You finished ${tasks(done)} today.',
+          rest: ' Nothing else due.',
+        );
+      }
+      if (plan.undated.isEmpty) {
+        return (
+          strong: '',
+          rest: 'Nothing on your plate. A good moment to write.',
+        );
+      }
+      return (strong: '', rest: 'Nothing due today. A good day to write.');
+    }
+    final over = plan.overdue.length;
+    final left = plan.forToday + over;
+    if (done > 0) return (strong: '$left left today.', rest: ' $done done.');
+    final yesterday = DateTime(now.year, now.month, now.day - 1);
+    final allYesterday = plan.overdue.every((i) => i.when!.day == yesterday);
+    final overText = allYesterday ? '$over from yesterday' : '$over overdue';
+    if (plan.forToday == 0) {
+      return (
+        strong: allYesterday ? '$over left from yesterday.' : '$over overdue.',
+        rest: '',
+      );
+    }
+    return (
+      strong: '${plan.forToday} for today',
+      rest: over == 0 ? '.' : ', $overText.',
+    );
   }
 
   /// Greeting, date, and one line about the day — nothing else competes
   /// with the first glance.
-  Widget _buildHomeIntro(DateTime now) {
+  Widget _buildHomeIntro(DateTime now, TodayPlan plan, {String lead = ''}) {
+    final subline = _homeSubline(plan, now);
     final greeting = now.hour < 12
         ? 'Good morning'
         : now.hour < 18
@@ -3682,67 +4076,28 @@ class _HomeScreenState extends State<HomeScreen>
           const SizedBox(height: 6),
           AnimatedSwitcher(
             duration: AppMotion.duration(context, AppMotion.base),
-            child: Text(
-              _homeSubline(),
-              key: ValueKey(_homeSubline()),
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  if (lead.isNotEmpty) TextSpan(text: lead),
+                  if (subline.strong.isNotEmpty)
+                    TextSpan(
+                      text: subline.strong,
+                      style: TextStyle(
+                        color: c.fg,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  TextSpan(text: subline.rest),
+                ],
+              ),
+              key: ValueKey('$lead${subline.strong}${subline.rest}'),
               style: TextStyle(fontSize: AppType.t15, color: c.muted),
             ),
           ),
         ],
       ),
     );
-  }
-
-  String? _continueSubtitle(Note note) {
-    if (isFinanceNote(note) && note.amounts.isNotEmpty) {
-      final counts = <String, int>{};
-      for (final e in note.amounts) {
-        final cur = e.currency ?? note.currency ?? 'PHP';
-        counts[cur] = (counts[cur] ?? 0) + 1;
-      }
-      var dominant = note.currency ?? 'PHP';
-      if (!counts.containsKey(dominant)) {
-        dominant = counts.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
-      }
-      var income = 0;
-      var expense = 0;
-      var count = 0;
-      final others = <String>{};
-      for (final e in note.amounts) {
-        final cur = e.currency ?? note.currency ?? 'PHP';
-        if (cur == dominant) {
-          // A monthly note holds both directions; adding them together
-          // showed ₱15,000 income + ₱180 spent as "₱15,180.00".
-          if ((e.type ?? note.type) == 'income') {
-            income += e.amount;
-          } else {
-            expense += e.amount;
-          }
-          count++;
-        } else {
-          others.add(cur);
-        }
-      }
-      final amount = income > 0 && expense > 0
-          ? 'Net ${formatMinorAmount(income - expense, dominant)}'
-          : formatMinorAmount(income + expense, dominant);
-      final excl = others.isEmpty ? '' : ' · excl. ${others.join(' · ')}';
-      return '$amount · $count '
-          '${count == 1 ? 'entry' : 'entries'}$excl';
-    }
-    if (note.type == 'todo' || note.title.toLowerCase().contains('todo')) {
-      final counts = countChecklist(note.content);
-      if (counts.total > 0) {
-        final progress = '${counts.done} of ${counts.total} done';
-        final next = firstOpenItem(note.content);
-        if (next == null) return progress;
-        final label = next.length > 40 ? '${next.substring(0, 40)}…' : next;
-        return '$label · $progress';
-      }
-      return null;
-    }
-    final preview = _homeContentPreview(note.content);
-    return preview.isEmpty ? null : preview;
   }
 
   /// Calendar-month finance totals for the home snapshot, scoped to the

@@ -6,6 +6,13 @@ import 'package:typed/models/note.dart';
 import 'package:typed/screens/home_screen.dart';
 import 'package:typed/theme/palettes.dart';
 import 'package:typed/utils/note_storage.dart';
+import 'package:typed/voice/when_parser.dart';
+
+/// A day as a task line writes it ("Sat, Nov 7"), [addDays] from today.
+String dayLabel([int addDays = 0]) {
+  final n = DateTime.now();
+  return SpokenWhen(DateTime(n.year, n.month, n.day + addDays)).label;
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -53,14 +60,24 @@ void main() {
       );
 
   testWidgets('the subline speaks to the day', (tester) async {
+    await pumpHome(tester, [
+      list('- [ ] a — ${dayLabel()}\n- [ ] b — ${dayLabel()}\n'
+          '- [ ] c — ${dayLabel(-1)}\n'),
+    ]);
+    expect(find.text('2 for today, 1 from yesterday.'), findsOneWidget);
+  });
+
+  testWidgets('a day with only undated tasks says nothing is due',
+      (tester) async {
     await pumpHome(tester, [list('- [ ] a\n- [ ] b\n')]);
-    expect(find.text('2 things waiting. One at a time.'), findsOneWidget);
+    expect(find.text('Nothing due today. A good day to write.'),
+        findsOneWidget);
   });
 
   testWidgets('finishing tasks is acknowledged, not just emptied',
       (tester) async {
-    await pumpHome(tester, [list('- [ ] only one\n')]);
-    expect(find.text('One thing waiting for you.'), findsOneWidget);
+    await pumpHome(tester, [list('- [ ] only one — ${dayLabel()}\n')]);
+    expect(find.text('1 for today.'), findsOneWidget);
 
     await tester.tap(find.text('Done'));
     await tester.pump();
@@ -70,7 +87,7 @@ void main() {
     expect(find.text('All clear.'), findsOneWidget);
     expect(find.text('You finished 1 task today.'), findsOneWidget);
     expect(
-      find.text('You finished 1 task today. Nothing else waiting.'),
+      find.text('You finished 1 task today. Nothing else due.'),
       findsOneWidget,
     );
   });
@@ -140,26 +157,121 @@ void main() {
         () => DateTime(today.year, today.month, today.day, 20);
     await pumpHome(tester, [list('- [x] done already\n')]);
 
-    expect(find.text('FOR TOMORROW'), findsOneWidget);
-    expect(find.text('NEXT UP'), findsNothing);
-    final field = find.widgetWithText(TextField, 'Anything for tomorrow?');
+    expect(find.textContaining('TOMORROW ·'), findsOneWidget);
+    expect(find.text('TODAY'), findsNothing);
+    expect(find.text('LEFT FROM TODAY'), findsNothing);
+    expect(find.text('Nothing set for tomorrow yet.'), findsOneWidget);
+    final field =
+        find.widgetWithText(TextField, 'Add something for tomorrow');
     await tester.enterText(field, 'Water the plants');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    // It went to the Inbox, so tomorrow's Next up has it ready.
-    expect(find.textContaining('Added to Inbox'), findsOneWidget);
+    // Dated for tomorrow in the Inbox, so it's listed under Tomorrow.
+    expect(find.textContaining('Added to tomorrow'), findsOneWidget);
     expect(find.text('Water the plants'), findsOneWidget);
+    expect(find.text('Here’s tomorrow.'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 2));
+    final saved = await tester.runAsync(() => NoteStorage().loadResult());
+    final inbox = saved!.items.singleWhere((n) => n.title == 'Inbox');
+    expect(inbox.content, '- [ ] Water the plants — ${dayLabel(1)}\n');
   });
 
-  testWidgets('the evening prompt stays away while tasks are open',
+  testWidgets('in the evening, what today left moves to tomorrow',
       (tester) async {
     final today = DateTime.now();
     HomeScreen.clock =
         () => DateTime(today.year, today.month, today.day, 20);
-    await pumpHome(tester, [list('- [ ] still open\n')]);
-    expect(find.text('FOR TOMORROW'), findsNothing);
+    await pumpHome(tester, [list('- [ ] still open — ${dayLabel()}\n')]);
+    expect(find.text('LEFT FROM TODAY'), findsOneWidget);
     expect(find.text('still open'), findsOneWidget);
+    expect(find.text('1 left over from today.'), findsOneWidget);
+
+    await tester.tap(find.text('Move to tomorrow'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('LEFT FROM TODAY'), findsNothing);
+    expect(find.textContaining('Moved to tomorrow'), findsOneWidget);
+    // Now it's tomorrow's.
+    expect(find.text('still open'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 2));
+    final saved = await tester.runAsync(() => NoteStorage().loadResult());
+    expect(saved!.items.single.content, '- [ ] still open — ${dayLabel(1)}\n');
+  });
+
+  testWidgets('Leave it puts the leftovers away for the night',
+      (tester) async {
+    final today = DateTime.now();
+    HomeScreen.clock =
+        () => DateTime(today.year, today.month, today.day, 20);
+    await pumpHome(tester, [list('- [ ] still open — ${dayLabel()}\n')]);
+    await tester.tap(find.text('Leave it'));
+    await tester.pump();
+    expect(find.text('LEFT FROM TODAY'), findsNothing);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getInt('leftover_dismissed_day_v1'), isNotNull);
+  });
+
+  testWidgets('something timed later tonight keeps Today on top',
+      (tester) async {
+    final now = DateTime.now();
+    HomeScreen.clock = () => DateTime(now.year, now.month, now.day, 20);
+    final tonight =
+        SpokenWhen(DateTime(now.year, now.month, now.day), hour: 21).label;
+    await pumpHome(tester, [list('- [ ] Call Lola — $tonight\n')]);
+    expect(find.text('TODAY'), findsOneWidget);
+    expect(find.text('Call Lola'), findsOneWidget);
+    expect(find.textContaining('TOMORROW ·'), findsOneWidget);
+    expect(find.text('LEFT FROM TODAY'), findsNothing);
+  });
+
+  testWidgets('on Monday, last week is looked back on until hidden',
+      (tester) async {
+    final n = DateTime.now();
+    final monday = DateTime(n.year, n.month, n.day - (n.weekday - 1), 10);
+    HomeScreen.clock = () => monday;
+    final lastWeek = monday.subtract(const Duration(days: 5));
+    await pumpHome(tester, [
+      Note(
+        id: 'w',
+        title: 'Written last week',
+        content: 'words',
+        tags: const [],
+        createdAt: lastWeek,
+        updatedAt: lastWeek,
+      ),
+      Note(
+        id: 'v',
+        title: 'Supplier call',
+        content: 'They deliver by the 20th.',
+        tags: const ['voice'],
+        createdAt: lastWeek,
+        updatedAt: lastWeek,
+      ),
+    ]);
+    expect(find.textContaining('LAST WEEK ·'), findsOneWidget);
+    expect(find.text('—'), findsOneWidget); // no task count kept yet
+    expect(find.text('voice memo'), findsOneWidget);
+    expect(find.text('Nothing spent last week.'), findsOneWidget);
+    expect(find.textContaining('New week. '), findsOneWidget);
+
+    await tester.tap(find.text('Hide'));
+    await tester.pump();
+    expect(find.textContaining('LAST WEEK ·'), findsNothing);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getInt('recap_hidden_v1'), isNotNull);
+  });
+
+  testWidgets('finished tasks are logged by day for the recap',
+      (tester) async {
+    await pumpHome(tester, [list('- [ ] one — ${dayLabel()}\n')]);
+    await tester.tap(find.text('Done'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump(const Duration(milliseconds: 600));
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('done_log_v1'), contains(':1'));
   });
 }

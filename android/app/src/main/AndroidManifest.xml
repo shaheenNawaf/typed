@@ -118,6 +118,18 @@
         </receiver>
 
         <receiver
+            android:name=".TodayWidget"
+            android:exported="true"
+            android:label="@string/widget_label_today">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_today_info"/>
+        </receiver>
+
+        <receiver
             android:name=".TodoListWidget"
             android:exported="true"
             android:label="@string/widget_label_todo">
@@ -155,6 +167,11 @@
 
         <service
             android:name=".RecentNotesRemoteViewsService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
+
+        <service
+            android:name=".TodayRemoteViewsService"
             android:exported="false"
             android:permission="android.permission.BIND_REMOTEVIEWS" />
 

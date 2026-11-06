@@ -1,9 +1,11 @@
 import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../home/today_plan.dart';
 import '../models/budget.dart';
 import '../models/money_entry.dart';
 import '../models/note.dart';
+import 'cutoff.dart';
 import 'date_format.dart';
 import 'finance_utils.dart';
 import 'markdown_display.dart';
@@ -86,6 +88,8 @@ class NoteStorage {
   static const _budgetsKey = 'budgets_v1';
   static const _widgetRecentKey = 'widget_recent_v1';
   static const _widgetTodoKey = 'widget_todo_v1';
+  static const _widgetTodayItemsKey = 'widget_today_items_v1';
+  static const _widgetTodayMoneyKey = 'widget_today_money_v1';
   static const _channel = MethodChannel('com.z4yed.typed/widget');
 
   final _writeQueue = _WriteQueue();
@@ -127,6 +131,75 @@ class NoteStorage {
     });
   }
 
+  /// The Today widget: Home's Today list and money until payday. Dates go
+  /// out absolute (local epoch days), and tomorrow's tasks ride along, so
+  /// the widget sorts out what is overdue or due after midnight on its own.
+  Future<void> _writeTodayPayload(
+    SharedPreferences prefs,
+    List<Note> notes,
+    DateTime now,
+  ) async {
+    final plan = buildTodayPlan(notes, now);
+    Map<String, dynamic> row(TodayItem i) {
+      final w = i.when;
+      return {
+        'id': i.note.id,
+        // Matched against the note line when ticked (as the To-do widget's).
+        'text': stripInlineMarkdown(i.raw),
+        'title': i.text,
+        'done': false,
+        'day': w == null ? -1 : localEpochDay(w.day),
+        if (w?.hour != null) 'hour': w!.hour,
+        if (w?.hour != null) 'minute': w!.minute ?? 0,
+        if (w?.partOfDay != null) 'part': w!.partOfDay,
+      };
+    }
+
+    await prefs.setString(
+      _widgetTodayItemsKey,
+      jsonEncode([
+        for (final i in [
+          ...plan.overdue,
+          ...plan.dueToday,
+          ...plan.tomorrow,
+          ...plan.undated.take(3),
+        ])
+          row(i),
+      ]),
+    );
+
+    var payday = PaydaySettings.standard;
+    CutoffBudget? budget;
+    try {
+      final pay = prefs.getString(PaydaySettings.prefsKey);
+      if (pay != null) {
+        payday = PaydaySettings.fromJson(jsonDecode(pay) as Map<String, dynamic>);
+      }
+      final b = prefs.getString(CutoffBudget.prefsKey);
+      if (b != null) {
+        budget = CutoffBudget.fromJson(jsonDecode(b) as Map<String, dynamic>);
+      }
+    } catch (_) {}
+    final cutoff = cutoffFor(payday, now);
+    final money = cutoffMoney(notes, cutoff, budget, now);
+    await prefs.setString(
+      _widgetTodayMoneyKey,
+      !money.anyLogged && budget == null
+          ? '{}'
+          : jsonEncode({
+              'symbol': currencySymbol(money.currency),
+              'decimals': currencyDecimals(money.currency),
+              'budget': budget?.amount ?? -1,
+              'spent': money.spent,
+              'start': localEpochDay(cutoff.start),
+              'next': localEpochDay(cutoff.nextPayday),
+              'nextDay': cutoff.nextPayday.day,
+              'startLabel':
+                  '${monthShort(cutoff.start.month)} ${cutoff.start.day}',
+            }),
+    );
+  }
+
   Future<void> _writeWidgetPayload(
     SharedPreferences prefs,
     List<Note> notes,
@@ -157,6 +230,7 @@ class NoteStorage {
       }
     }
     await prefs.setString(_widgetTodoKey, jsonEncode(todo));
+    await _writeTodayPayload(prefs, notes, DateTime.now());
 
     final budgets = _budgetsFromPrefs(prefs);
     final now = DateTime.now();

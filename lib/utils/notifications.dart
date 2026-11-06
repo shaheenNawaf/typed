@@ -69,6 +69,34 @@ class NotificationService {
 
   final _plugin = FlutterLocalNotificationsPlugin();
   bool _initialized = false;
+
+  /// `noteId|line` for every task with a reminder still to come. Home shows
+  /// a bell for these and carries the reminder when a task moves day.
+  final taskReminderKeys = ValueNotifier<Set<String>>(const {});
+
+  /// Reads [taskReminderKeys] from storage; safe where the plugin can't run.
+  Future<void> loadTaskReminderKeys() async {
+    final prefs = await SharedPreferences.getInstance();
+    _publishTaskReminders(_loadTaskReminders(prefs));
+  }
+
+  /// Task-reminder records are read, changed and written back; two of those
+  /// at once (a moved task scheduling while a sync tidies up) would lose one.
+  Future<void> _taskQueue = Future.value();
+  Future<T> _serialTasks<T>(Future<T> Function() run) {
+    final result = _taskQueue.then((_) => run());
+    _taskQueue = result.then((_) {}, onError: (_) {});
+    return result;
+  }
+
+  void _publishTaskReminders(List<Map<String, dynamic>> all) {
+    final now = DateTime.now();
+    taskReminderKeys.value = {
+      for (final r in all)
+        if (DateTime.tryParse(r['at'] as String? ?? '')?.isAfter(now) ?? false)
+          '${r['noteId']}|${r['line']}',
+    };
+  }
   DateTime? _lastBudgetAlertCheck;
 
   static Future<void> initialize() => instance._initialize();
@@ -242,11 +270,19 @@ class NotificationService {
     } catch (_) {
       return false;
     }
-    final prefs = await SharedPreferences.getInstance();
-    final all = _loadTaskReminders(prefs)
-      ..removeWhere((r) => r['id'] == id)
-      ..add({'id': id, 'noteId': noteId, 'line': line, 'at': at.toIso8601String()});
-    await prefs.setString(_taskKey, jsonEncode(all));
+    await _serialTasks(() async {
+      final prefs = await SharedPreferences.getInstance();
+      final all = _loadTaskReminders(prefs)
+        ..removeWhere((r) => r['id'] == id)
+        ..add({
+          'id': id,
+          'noteId': noteId,
+          'line': line,
+          'at': at.toIso8601String(),
+        });
+      await prefs.setString(_taskKey, jsonEncode(all));
+      _publishTaskReminders(all);
+    });
     return true;
   }
 
@@ -265,7 +301,10 @@ class NotificationService {
 
   /// Cancels reminders whose task was ticked, edited away, deleted, or
   /// whose note is gone; forgets ones already past.
-  Future<void> _reconcileTaskReminders(List<Note> notes) async {
+  Future<void> _reconcileTaskReminders(List<Note> notes) =>
+      _serialTasks(() => _reconcileTaskRemindersNow(notes));
+
+  Future<void> _reconcileTaskRemindersNow(List<Note> notes) async {
     final prefs = await SharedPreferences.getInstance();
     final all = _loadTaskReminders(prefs);
     if (all.isEmpty) return;
@@ -287,6 +326,7 @@ class NotificationService {
       }
     }
     await prefs.setString(_taskKey, jsonEncode(keep));
+    _publishTaskReminders(keep);
   }
 
   Future<void> sync({
