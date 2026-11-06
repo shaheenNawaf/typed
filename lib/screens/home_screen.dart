@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../home/today_plan.dart';
 import '../models/money_entry.dart';
 import '../models/note.dart';
 import '../models/budget.dart';
@@ -21,6 +22,7 @@ import '../utils/note_storage.dart';
 import '../utils/notifications.dart';
 import '../utils/onboarding.dart';
 import '../utils/recurrence.dart';
+import '../utils/task_dates.dart';
 import '../utils/templates.dart';
 import '../widgets/brand_mark.dart';
 import '../widgets/settings_sheet.dart';
@@ -43,6 +45,7 @@ import '../voice/voice_model.dart';
 import '../voice/transcriber.dart';
 import '../voice/spend_parser.dart';
 import '../voice/voice_shaper.dart';
+import '../voice/when_parser.dart';
 import 'onboarding_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -133,6 +136,15 @@ class _HomeScreenState extends State<HomeScreen>
       duration: const Duration(milliseconds: 1200),
     )..repeat();
     _loadAndHandleIntent();
+    NotificationService.instance.taskReminderKeys.addListener(_onReminders);
+    unawaited(
+      NotificationService.instance.loadTaskReminderKeys().catchError((_) {}),
+    );
+  }
+
+  /// Bells on Today's rows follow the stored reminders.
+  void _onReminders() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -203,6 +215,7 @@ class _HomeScreenState extends State<HomeScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     HardwareKeyboard.instance.removeHandler(_onHardwareKey);
+    NotificationService.instance.taskReminderKeys.removeListener(_onReminders);
     _shimmer.dispose();
     _persistTimer?.cancel();
     _shellTimer?.cancel();
@@ -3351,22 +3364,23 @@ class _HomeScreenState extends State<HomeScreen>
     final isDesktop = MediaQuery.of(context).size.width >= 1024;
     final now = HomeScreen.clock();
     final continueNote = _continueNote();
+    final plan = buildTodayPlan(notes, now);
 
     final blocks = <Widget>[
-      _buildHomeIntro(now),
+      _buildHomeIntro(now, plan),
       HomeCaptureBar(
         onSaveNote: _captureNote,
         onAddTask: _captureTask,
         onVoice: VoiceMemo.isSupported() ? _openVoiceMemo : null,
       ),
       if (notes.isEmpty) _buildHomeEmptyCta(),
-      // Evening with nothing open: the empty Next up gives way to one
+      // Evening with nothing open: the empty Today gives way to one
       // optional prompt to set up tomorrow (the subline already says the
       // plate is clear — two "nothing here" cards would just repeat it).
-      if (now.hour >= 18 && _upNextItems().isEmpty)
+      if (now.hour >= 18 && plan.isEmpty)
         HomeWindDown(onAdd: _captureTask)
       else
-        _buildNextUp(),
+        _buildToday(plan, now),
       if (continueNote != null)
         HomeContinueCard(
           note: continueNote,
@@ -3416,28 +3430,13 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// Every open checklist line across lists, freshest list first.
-  List<UpNextItem> _upNextItems() {
-    final lists = notes
-        .where((n) => !n.isArchived && !n.isDeleted && !isSeedNote(n))
-        .toList()
-      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-    return [
-      for (final note in lists)
-        for (final item in parseChecklist(note.content))
-          if (!item.done && item.text.isNotEmpty)
-            UpNextItem(
-              note: note,
-              lineIndex: item.lineIndex,
-              text: stripInlineMarkdown(item.text),
-            ),
-    ];
-  }
-
-  Widget _buildNextUp() {
-    return HomeNextUp(
-      items: _upNextItems(),
+  Widget _buildToday(TodayPlan plan, DateTime now) {
+    final today = DateTime(now.year, now.month, now.day);
+    return HomeToday(
+      plan: plan,
+      now: now,
       doneToday: _doneTodayNow,
+      reminders: NotificationService.instance.taskReminderKeys.value,
       onComplete: (item) {
         _toggleChecklistItem(item.note, item.lineIndex, true);
         _showSnackBar(
@@ -3446,13 +3445,90 @@ class _HomeScreenState extends State<HomeScreen>
           // removed above it), so the old index could untick another task.
           onUndo: () => _toggleChecklistByContent(
             item.note.id,
-            item.text,
+            item.raw,
             expectedDone: true,
           ),
         );
       },
+      onTomorrow: (item) => _moveTaskToDay(
+        item,
+        today.add(const Duration(days: 1)),
+        'Moved to tomorrow',
+      ),
+      onDoToday: (item) => _moveTaskToDay(item, today, 'Added to today'),
       onOpen: (item) => _selectNote(item.note.id),
       onViewAll: () => _onTabChanged('tasks'),
+    );
+  }
+
+  /// Rewrites a task's date to [day] (keeping its time), carries its
+  /// reminder along, and offers Undo.
+  void _moveTaskToDay(TodayItem item, DateTime day, String message) {
+    final now = HomeScreen.clock();
+    final text = item.rawWithoutDate(now);
+    final newWhen = moveToDay(item.when, day);
+    final newRaw = withTaskDate(text, newWhen);
+    if (!_rewriteOpenTask(item.note, item.lineIndex, item.raw, newRaw)) {
+      return;
+    }
+    final hadReminder = NotificationService.instance.taskReminderKeys.value
+        .contains('${item.note.id}|${item.raw}');
+    if (hadReminder) _carryReminder(item.note, newRaw, newWhen);
+    _showSnackBar(
+      message,
+      onUndo: () {
+        final note = _noteById(item.note.id);
+        if (note == null) return;
+        if (_rewriteOpenTask(note, -1, newRaw, item.raw) &&
+            hadReminder &&
+            item.when != null) {
+          _carryReminder(note, item.raw, item.when!);
+        }
+      },
+    );
+  }
+
+  /// Replaces an open task's text, by line index when it still matches,
+  /// else by content (the list may have changed). False when it's gone.
+  bool _rewriteOpenTask(Note note, int lineIndex, String from, String to) {
+    final lines = note.content.split('\n');
+    final open = RegExp(r'^(\s*[-*+]\s+\[ \]\s+)(.*)$');
+    bool matches(int i) {
+      final m = open.firstMatch(lines[i]);
+      return m != null && m.group(2)!.trim() == from.trim();
+    }
+
+    var at = lineIndex >= 0 && lineIndex < lines.length && matches(lineIndex)
+        ? lineIndex
+        : -1;
+    if (at == -1) {
+      for (var i = 0; i < lines.length && at == -1; i++) {
+        if (matches(i)) at = i;
+      }
+    }
+    if (at == -1) return false;
+    final prefix = open.firstMatch(lines[at])!.group(1)!;
+    lines[at] = '$prefix$to';
+    setState(() {
+      note.content = lines.join('\n');
+      note.updatedAt = DateTime.now();
+    });
+    _persistNow();
+    return true;
+  }
+
+  /// A moved task keeps its reminder: a new one at the new time (the old
+  /// one is cancelled when reminders are reconciled, as its line is gone).
+  void _carryReminder(Note note, String line, SpokenWhen when) {
+    unawaited(
+      NotificationService.instance
+          .scheduleTaskReminder(
+            noteId: note.id,
+            noteTitle: note.title,
+            line: line,
+            at: when.at,
+          )
+          .catchError((_) => false),
     );
   }
 
@@ -3626,24 +3702,49 @@ class _HomeScreenState extends State<HomeScreen>
     return years == 1 ? 'a year ago' : '$years years ago';
   }
 
-  /// One sentence that knows the day: what you've finished, what's waiting,
-  /// or that there's room to write. Encouraging, never a nag.
-  String _homeSubline() {
+  /// One sentence that knows the day: what's due, what you've finished, or
+  /// that there's room to write. Encouraging, never a nag. The first part
+  /// is set in the foreground colour.
+  ({String strong, String rest}) _homeSubline(TodayPlan plan, DateTime now) {
     final done = _doneTodayNow;
-    final open = _upNextItems().length;
     String tasks(int n) => n == 1 ? '1 task' : '$n tasks';
-    if (done > 0 && open == 0) {
-      return 'You finished ${tasks(done)} today. Nothing else waiting.';
+    if (plan.isQuiet) {
+      if (done > 0) {
+        return (
+          strong: 'You finished ${tasks(done)} today.',
+          rest: ' Nothing else due.',
+        );
+      }
+      if (plan.undated.isEmpty) {
+        return (
+          strong: '',
+          rest: 'Nothing on your plate. A good moment to write.',
+        );
+      }
+      return (strong: '', rest: 'Nothing due today. A good day to write.');
     }
-    if (done > 0) return '${tasks(done)} done today. Keep the momentum.';
-    if (open == 0) return 'Nothing on your plate. A good moment to write.';
-    if (open == 1) return 'One thing waiting for you.';
-    return '$open things waiting. One at a time.';
+    final over = plan.overdue.length;
+    final left = plan.forToday + over;
+    if (done > 0) return (strong: '$left left today.', rest: ' $done done.');
+    final yesterday = DateTime(now.year, now.month, now.day - 1);
+    final allYesterday = plan.overdue.every((i) => i.when!.day == yesterday);
+    final overText = allYesterday ? '$over from yesterday' : '$over overdue';
+    if (plan.forToday == 0) {
+      return (
+        strong: allYesterday ? '$over left from yesterday.' : '$over overdue.',
+        rest: '',
+      );
+    }
+    return (
+      strong: '${plan.forToday} for today',
+      rest: over == 0 ? '.' : ', $overText.',
+    );
   }
 
   /// Greeting, date, and one line about the day — nothing else competes
   /// with the first glance.
-  Widget _buildHomeIntro(DateTime now) {
+  Widget _buildHomeIntro(DateTime now, TodayPlan plan) {
+    final subline = _homeSubline(plan, now);
     final greeting = now.hour < 12
         ? 'Good morning'
         : now.hour < 18
@@ -3682,9 +3783,21 @@ class _HomeScreenState extends State<HomeScreen>
           const SizedBox(height: 6),
           AnimatedSwitcher(
             duration: AppMotion.duration(context, AppMotion.base),
-            child: Text(
-              _homeSubline(),
-              key: ValueKey(_homeSubline()),
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  if (subline.strong.isNotEmpty)
+                    TextSpan(
+                      text: subline.strong,
+                      style: TextStyle(
+                        color: c.fg,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  TextSpan(text: subline.rest),
+                ],
+              ),
+              key: ValueKey('${subline.strong}${subline.rest}'),
               style: TextStyle(fontSize: AppType.t15, color: c.muted),
             ),
           ),

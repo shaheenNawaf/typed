@@ -10,6 +10,13 @@ import 'package:typed/utils/note_storage.dart';
 import 'package:typed/widgets/mobile_nav.dart';
 import 'package:typed/widgets/sidebar.dart';
 import 'package:typed/widgets/editor.dart';
+import 'package:typed/voice/when_parser.dart';
+
+/// A day as a task line writes it ("Sat, Nov 7"), [addDays] from today.
+String todayLabel([int addDays = 0]) {
+  final n = DateTime.now();
+  return SpokenWhen(DateTime(n.year, n.month, n.day + addDays)).label;
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -113,10 +120,11 @@ void main() {
 
     expect(find.textContaining('Good '), findsOneWidget);
     expect(find.text('What’s on your mind?'), findsOneWidget);
-    // One task, not a list.
-    expect(find.text('NEXT UP'), findsOneWidget);
+    // Nothing dated: a quiet Today that offers the undated task.
+    expect(find.text('TODAY'), findsOneWidget);
+    expect(find.text('Nothing due today.'), findsOneWidget);
     expect(find.text('buy milk'), findsOneWidget);
-    expect(find.text('in Todo list'), findsOneWidget);
+    expect(find.text('Do today'), findsOneWidget);
     expect(find.text('write spec'), findsNothing);
     // One page to return to: the last written, not a task list or ledger.
     expect(find.text('PICK UP WHERE YOU LEFT OFF'), findsOneWidget);
@@ -132,7 +140,7 @@ void main() {
       'UP NEXT',
       'WRITING',
       'QUICK ACTIONS',
-      'TODAY',
+      'NEXT UP',
       'THIS MONTH',
     ]) {
       expect(find.text(gone), findsNothing, reason: gone);
@@ -148,7 +156,7 @@ void main() {
 
     expect(find.byType(Sidebar), findsOneWidget);
     expect(find.byType(MobileNav), findsNothing);
-    expect(find.text('NEXT UP'), findsOneWidget);
+    expect(find.text('TODAY'), findsOneWidget);
     expect(find.textContaining('180.00 spent in', findRichText: true),
         findsOneWidget);
     // "New page" lives in the sidebar; Home adds no second create control.
@@ -160,14 +168,101 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('New page'), findsOneWidget);
-    // One column: next up and continue share a left edge.
-    final nextUpX = tester.getTopLeft(find.text('NEXT UP')).dx;
+    // One column: today and continue share a left edge.
+    final nextUpX = tester.getTopLeft(find.text('TODAY')).dx;
     final continueX =
         tester.getTopLeft(find.text('PICK UP WHERE YOU LEFT OFF')).dx;
     expect((nextUpX - continueX).abs(), lessThan(1));
   });
 
-  testWidgets('next up: Done ticks it in place, Later sets it aside',
+  testWidgets('today: Done ticks it in place, Tomorrow moves its date',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'onboarded_v1': true,
+      'onboarding_flow_complete_v1': true,
+      'shell_state_v1': '{"filter":"home","tab":"home"}',
+    });
+    final today = todayLabel();
+    await NoteStorage().save([
+      Note(
+        id: 'todo1',
+        title: 'Errands',
+        content: '- [ ] first thing — $today\n'
+            '- [ ] second thing — $today\n'
+            '- [ ] third thing — $today\n',
+        tags: ['todo'],
+        type: 'todo',
+      ),
+    ]);
+    await pumpHome(tester, surface: const Size(390, 844));
+
+    // The first is the focus; the others are listed under it, no dates.
+    expect(find.text('first thing'), findsOneWidget);
+    expect(find.text('second thing'), findsOneWidget);
+    expect(find.textContaining(' — '), findsNothing);
+    expect(find.text('3 for today.'), findsOneWidget);
+
+    await tester.tap(find.text('Tomorrow'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    expect(find.text('first thing'), findsNothing);
+    expect(find.textContaining('Moved to tomorrow'), findsOneWidget);
+
+    await tester.tap(find.text('Done'));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(find.text('third thing'), findsOneWidget);
+    // Snackbars queue (a pending Undo is never dropped): "Done" follows
+    // once "Moved to tomorrow" has had its turn.
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.textContaining('Done: second thing'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 2));
+    final saved = await tester.runAsync(() => NoteStorage().loadResult());
+    final todo = saved!.items.singleWhere((n) => n.id == 'todo1');
+    expect(todo.content, contains('- [x] second thing — $today'));
+    expect(todo.content, contains('- [ ] first thing — ${todayLabel(1)}'));
+  });
+
+  testWidgets('today: Undo puts a moved task back', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'onboarded_v1': true,
+      'onboarding_flow_complete_v1': true,
+      'shell_state_v1': '{"filter":"home","tab":"home"}',
+    });
+    await NoteStorage().save([
+      Note(
+        id: 'todo1',
+        title: 'Errands',
+        content: '- [ ] Pay Meralco — ${todayLabel(-1)}\n'
+            '- [ ] Call — ${todayLabel()}\n',
+        tags: ['todo'],
+        type: 'todo',
+      ),
+    ]);
+    await pumpHome(tester, surface: const Size(390, 844));
+    // Overdue comes first, marked as such.
+    expect(find.text('Pay Meralco'), findsOneWidget);
+    expect(find.text('Due yesterday'), findsOneWidget);
+    expect(find.text('1 for today, 1 from yesterday.'), findsOneWidget);
+
+    await tester.tap(find.text('Tomorrow'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.tap(find.text('Undo'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(find.text('Due yesterday'), findsOneWidget);
+
+    await tester.pump(const Duration(seconds: 2));
+    final saved = await tester.runAsync(() => NoteStorage().loadResult());
+    final todo = saved!.items.singleWhere((n) => n.id == 'todo1');
+    expect(todo.content, contains('- [ ] Pay Meralco — ${todayLabel(-1)}'));
+  });
+
+  testWidgets('today: a quiet day can take on an undated task',
       (tester) async {
     SharedPreferences.setMockInitialValues({
       'onboarded_v1': true,
@@ -178,40 +273,28 @@ void main() {
       Note(
         id: 'todo1',
         title: 'Errands',
-        content: '- [ ] first thing\n- [ ] second thing\n- [ ] third thing\n',
+        content: '- [ ] Buy eggs\n',
         tags: ['todo'],
         type: 'todo',
       ),
     ]);
     await pumpHome(tester, surface: const Size(390, 844));
+    expect(find.text('1 task in your lists has no date.'), findsOneWidget);
 
-    expect(find.text('first thing'), findsOneWidget);
-    expect(find.text('second thing'), findsNothing);
-    expect(find.text('1 of 3'), findsOneWidget);
-
-    await tester.tap(find.text('Later'));
-    // First frame starts the swap; the timed pump runs it to the end.
+    await tester.tap(find.text('Do today'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
-    await tester.pump();
-    expect(find.text('second thing'), findsOneWidget);
-    expect(find.text('first thing'), findsNothing);
-
-    await tester.tap(find.text('Done'));
-    await tester.pump(const Duration(milliseconds: 600));
-    await tester.pump(const Duration(milliseconds: 600));
-    expect(find.text('third thing'), findsOneWidget);
-    expect(find.text('1 of 2'), findsOneWidget);
-    expect(find.textContaining('Done: second thing'), findsOneWidget);
+    // Now it's today's task: the focus card, with Done.
+    expect(find.text('Done'), findsOneWidget);
+    expect(find.text('Buy eggs'), findsOneWidget);
 
     await tester.pump(const Duration(seconds: 2));
     final saved = await tester.runAsync(() => NoteStorage().loadResult());
     final todo = saved!.items.singleWhere((n) => n.id == 'todo1');
-    expect(todo.content, contains('- [x] second thing'));
-    expect(todo.content, contains('- [ ] first thing'));
+    expect(todo.content, '- [ ] Buy eggs — ${todayLabel()}\n');
   });
 
-  testWidgets('next up says so when nothing is waiting', (tester) async {
+  testWidgets('today says so when nothing is waiting', (tester) async {
     SharedPreferences.setMockInitialValues({
       'onboarded_v1': true,
       'onboarding_flow_complete_v1': true,
@@ -237,7 +320,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(find.byTooltip('Add as task'));
     await tester.pump(const Duration(milliseconds: 600));
-    // Inbox is now the freshest list, so its task is the one shown.
+    // Inbox is now the freshest list, so its task is offered first.
     expect(find.text('Call the landlord'), findsOneWidget);
     expect(find.textContaining('Added to Inbox'), findsOneWidget);
 
@@ -352,15 +435,16 @@ void main() {
       Note(
         id: 'todo1',
         title: 'A list with a rather long name that will not fit',
-        content: '- [ ] A long task that goes on well past one line of text\n'
-            '- [ ] another\n',
+        content: '- [ ] A long task that goes on well past one line of text'
+            ' — ${todayLabel()}\n'
+            '- [ ] another — ${todayLabel()}\n',
         tags: ['todo'],
         type: 'todo',
       ),
     ]);
     await pumpHome(tester, surface: const Size(320, 640));
     expect(find.text('Done'), findsOneWidget);
-    expect(find.text('Later'), findsOneWidget);
+    expect(find.text('Tomorrow'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

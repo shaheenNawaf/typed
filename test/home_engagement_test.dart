@@ -6,6 +6,13 @@ import 'package:typed/models/note.dart';
 import 'package:typed/screens/home_screen.dart';
 import 'package:typed/theme/palettes.dart';
 import 'package:typed/utils/note_storage.dart';
+import 'package:typed/voice/when_parser.dart';
+
+/// A day as a task line writes it ("Sat, Nov 7"), [addDays] from today.
+String dayLabel([int addDays = 0]) {
+  final n = DateTime.now();
+  return SpokenWhen(DateTime(n.year, n.month, n.day + addDays)).label;
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -53,14 +60,24 @@ void main() {
       );
 
   testWidgets('the subline speaks to the day', (tester) async {
+    await pumpHome(tester, [
+      list('- [ ] a — ${dayLabel()}\n- [ ] b — ${dayLabel()}\n'
+          '- [ ] c — ${dayLabel(-1)}\n'),
+    ]);
+    expect(find.text('2 for today, 1 from yesterday.'), findsOneWidget);
+  });
+
+  testWidgets('a day with only undated tasks says nothing is due',
+      (tester) async {
     await pumpHome(tester, [list('- [ ] a\n- [ ] b\n')]);
-    expect(find.text('2 things waiting. One at a time.'), findsOneWidget);
+    expect(find.text('Nothing due today. A good day to write.'),
+        findsOneWidget);
   });
 
   testWidgets('finishing tasks is acknowledged, not just emptied',
       (tester) async {
-    await pumpHome(tester, [list('- [ ] only one\n')]);
-    expect(find.text('One thing waiting for you.'), findsOneWidget);
+    await pumpHome(tester, [list('- [ ] only one — ${dayLabel()}\n')]);
+    expect(find.text('1 for today.'), findsOneWidget);
 
     await tester.tap(find.text('Done'));
     await tester.pump();
@@ -70,7 +87,7 @@ void main() {
     expect(find.text('All clear.'), findsOneWidget);
     expect(find.text('You finished 1 task today.'), findsOneWidget);
     expect(
-      find.text('You finished 1 task today. Nothing else waiting.'),
+      find.text('You finished 1 task today. Nothing else due.'),
       findsOneWidget,
     );
   });
@@ -141,7 +158,7 @@ void main() {
     await pumpHome(tester, [list('- [x] done already\n')]);
 
     expect(find.text('FOR TOMORROW'), findsOneWidget);
-    expect(find.text('NEXT UP'), findsNothing);
+    expect(find.text('TODAY'), findsNothing);
     final field = find.widgetWithText(TextField, 'Anything for tomorrow?');
     await tester.enterText(field, 'Water the plants');
     await tester.testTextInput.receiveAction(TextInputAction.done);

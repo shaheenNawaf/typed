@@ -1,16 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../home/today_plan.dart';
 import '../models/note.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_metrics.dart';
 import '../theme/app_motion.dart';
+import '../utils/date_format.dart';
 import '../utils/finance_utils.dart';
 import 'task_row.dart';
 
-/// Home's modules, built for focus. Each block holds ONE thing — one place
-/// to capture, one task, one note to return to, one line of money — so
-/// there is always a single obvious next step and nothing competes with it.
+/// Home's modules, built for focus. Each block holds one kind of thing — a
+/// place to capture, today's tasks with one first, what's left until
+/// payday — so there is always a single obvious next step.
 /// (Attention-friendly patterns: one primary action, one task at a time,
 /// progressive disclosure, no urgency mechanics like streak-loss nags.)
 
@@ -302,62 +304,51 @@ class _HomeCaptureBarState extends State<HomeCaptureBar> {
   }
 }
 
-// ── next up ────────────────────────────────────────────────────────────────
+// ── today ──────────────────────────────────────────────────────────────────
 
-/// One open checklist line.
-class UpNextItem {
-  final Note note;
-  final int lineIndex;
-  final String text;
-
-  const UpNextItem({
-    required this.note,
-    required this.lineIndex,
-    required this.text,
-  });
-
-  String get key => '${note.id}:$lineIndex';
-}
-
-/// One task at a time. The whole list never shows here — just the next
-/// thing, a big target to finish it, and "Later" to set it aside for now
-/// (session only; nothing is changed). Finishing slides the next one in.
-class HomeNextUp extends StatefulWidget {
-  final List<UpNextItem> items;
-  final void Function(UpNextItem item) onComplete;
-  final void Function(UpNextItem item) onOpen;
-  final VoidCallback onViewAll;
+/// Today: the one task to do first (overdue, then by time), with the rest
+/// of the day under it grouped by time of day. On a quiet day it says so
+/// and offers a couple of undated tasks to take on.
+class HomeToday extends StatefulWidget {
+  final TodayPlan plan;
+  final DateTime now;
 
   /// Tasks finished today; turns the empty state into an acknowledgement.
   final int doneToday;
 
-  const HomeNextUp({
+  /// `noteId|line` for tasks with a reminder (a bell on their row).
+  final Set<String> reminders;
+
+  final void Function(TodayItem item) onComplete;
+  final void Function(TodayItem item) onTomorrow;
+  final void Function(TodayItem item) onDoToday;
+  final void Function(TodayItem item) onOpen;
+  final VoidCallback onViewAll;
+
+  const HomeToday({
     super.key,
-    required this.items,
+    required this.plan,
+    required this.now,
     this.doneToday = 0,
+    this.reminders = const {},
     required this.onComplete,
+    required this.onTomorrow,
+    required this.onDoToday,
     required this.onOpen,
     required this.onViewAll,
   });
 
+  /// Rows shown under the focus card before "+N more".
+  static const maxRows = 6;
+
   @override
-  State<HomeNextUp> createState() => _HomeNextUpState();
+  State<HomeToday> createState() => _HomeTodayState();
 }
 
-class _HomeNextUpState extends State<HomeNextUp> {
-  /// Set aside with "Later" this session; they come back after the rest.
-  final _later = <String>[];
+class _HomeTodayState extends State<HomeToday> {
   String? _completing;
 
-  List<UpNextItem> get _ordered {
-    final now = widget.items.where((i) => !_later.contains(i.key)).toList();
-    final later = [
-      for (final key in _later) ...widget.items.where((i) => i.key == key),
-    ];
-    return [...now, ...later];
-  }
-
-  Future<void> _complete(UpNextItem item) async {
+  Future<void> _complete(TodayItem item) async {
     if (_completing != null) return;
     HapticFeedback.selectionClick();
     setState(() => _completing = item.key);
@@ -368,104 +359,67 @@ class _HomeNextUpState extends State<HomeNextUp> {
     // the tick must land. The callback belongs to the still-mounted shell.
     widget.onComplete(item);
     if (!mounted) return;
-    setState(() {
-      _completing = null;
-      _later.remove(item.key);
-    });
-  }
-
-  void _setAside(UpNextItem item) {
-    HapticFeedback.selectionClick();
-    setState(() {
-      _later
-        ..remove(item.key)
-        ..add(item.key);
-    });
+    setState(() => _completing = null);
   }
 
   @override
   Widget build(BuildContext context) {
-    final ordered = _ordered;
-    final current = ordered.isEmpty ? null : ordered.first;
-    final remaining = ordered.length;
+    final c = context.colors;
+    final plan = widget.plan;
+    final focus = plan.focus;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         HomeLabel(
-          'NEXT UP',
-          trailing: remaining > 1 ? '1 of $remaining' : null,
-          onTrailingTap: remaining > 0 ? widget.onViewAll : null,
+          'TODAY',
+          trailing: plan.isEmpty ? null : 'All tasks',
+          onTrailingTap: plan.isEmpty ? null : widget.onViewAll,
           trailingSemantics: 'See all tasks',
         ),
-        AnimatedSwitcher(
-          duration: AppMotion.duration(context, AppMotion.base),
-          switchInCurve: Curves.easeOut,
-          switchOutCurve: Curves.easeIn,
-          transitionBuilder: (child, animation) =>
-              FadeTransition(opacity: animation, child: child),
-          layoutBuilder: (current, previous) => Stack(
-            alignment: Alignment.topCenter,
-            children: [...previous, ?current],
-          ),
-          child: current == null
-              ? _allClear(context)
-              : KeyedSubtree(
-                  key: ValueKey(current.key),
-                  child: _taskCard(context, current, remaining),
+        HomeCard(
+          padding: EdgeInsets.zero,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              AnimatedSwitcher(
+                duration: AppMotion.duration(context, AppMotion.base),
+                switchInCurve: Curves.easeOut,
+                switchOutCurve: Curves.easeIn,
+                transitionBuilder: (child, animation) =>
+                    FadeTransition(opacity: animation, child: child),
+                layoutBuilder: (current, previous) => Stack(
+                  alignment: Alignment.topCenter,
+                  children: [...previous, ?current],
                 ),
+                child: focus == null
+                    ? KeyedSubtree(
+                        key: const ValueKey('quiet'),
+                        child: _quiet(context),
+                      )
+                    : KeyedSubtree(
+                        key: ValueKey(focus.key),
+                        child: _focusCard(context, focus),
+                      ),
+              ),
+              if (focus != null && plan.rest.isNotEmpty) ...[
+                Divider(height: 1, thickness: 1, color: c.border),
+                _rows(context, plan.rest),
+              ],
+            ],
+          ),
         ),
       ],
     );
   }
 
-  Widget _allClear(BuildContext context) {
-    final c = context.colors;
-    return HomeCard(
-      key: const ValueKey('clear'),
-      child: Row(
-        children: [
-          Icon(Icons.task_alt_rounded, size: 22, color: c.income),
-          const SizedBox(width: 12),
-          Expanded(
-            child: widget.doneToday > 0
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'All clear.',
-                        style: TextStyle(
-                          fontSize: AppType.t15,
-                          fontWeight: FontWeight.w600,
-                          color: c.fg,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        widget.doneToday == 1
-                            ? 'You finished 1 task today.'
-                            : 'You finished ${widget.doneToday} tasks today.',
-                        style: TextStyle(
-                          fontSize: AppType.t13_5,
-                          color: c.muted,
-                        ),
-                      ),
-                    ],
-                  )
-                : Text(
-                    'Nothing waiting on you.',
-                    style: TextStyle(fontSize: AppType.t15, color: c.muted),
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
+  // ── focus card ──
 
-  Widget _taskCard(BuildContext context, UpNextItem item, int remaining) {
+  Widget _focusCard(BuildContext context, TodayItem item) {
     final c = context.colors;
     final done = _completing == item.key;
     final listName = item.note.title.isEmpty ? 'Untitled' : item.note.title;
-    return HomeCard(
+    final chip = _chip(context, item);
+    return Padding(
       padding: const EdgeInsets.fromLTRB(10, 10, 14, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -508,14 +462,22 @@ class _HomeNextUpState extends State<HomeNextUp> {
                           ),
                         ),
                         const SizedBox(height: 4),
-                        Text(
-                          'in $listName',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: AppType.t12,
-                            color: c.muted,
-                          ),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            ?chip,
+                            Text(
+                              'in $listName',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: AppType.t12,
+                                color: c.muted,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -547,16 +509,20 @@ class _HomeNextUpState extends State<HomeNextUp> {
                   ),
                   child: const Text('Done'),
                 ),
-                if (remaining > 1)
-                  TextButton(
-                    onPressed: done ? null : () => _setAside(item),
-                    style: TextButton.styleFrom(
-                      foregroundColor: c.muted,
-                      minimumSize: const Size(0, 40),
-                      shape: const StadiumBorder(),
-                    ),
-                    child: const Text('Later'),
+                TextButton(
+                  onPressed: done
+                      ? null
+                      : () {
+                          HapticFeedback.selectionClick();
+                          widget.onTomorrow(item);
+                        },
+                  style: TextButton.styleFrom(
+                    foregroundColor: c.muted,
+                    minimumSize: const Size(0, 40),
+                    shape: const StadiumBorder(),
                   ),
+                  child: const Text('Tomorrow'),
+                ),
               ],
             ),
           ),
@@ -564,6 +530,297 @@ class _HomeNextUpState extends State<HomeNextUp> {
       ),
     );
   }
+
+  /// "Due yesterday" (overdue), "2:00 PM" (timed), "Today" (dated, no time).
+  Widget? _chip(BuildContext context, TodayItem item) {
+    final c = context.colors;
+    final (String text, Color color) = switch (item.standing) {
+      TaskStanding.overdue => (
+        'Due ${dueLabel(item.when!.day, widget.now)}',
+        c.warning,
+      ),
+      TaskStanding.today when item.hasTime => (item.timeLabel, c.accent),
+      TaskStanding.today => ('Today', c.accent),
+      _ => ('', c.muted),
+    };
+    if (text.isEmpty) return null;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w600,
+          color: color,
+        ),
+      ),
+    );
+  }
+
+  // ── the rest of today ──
+
+  Widget _rows(BuildContext context, List<TodayItem> rest) {
+    final c = context.colors;
+    final shown = rest.take(HomeToday.maxRows).toList();
+    final hidden = rest.length - shown.length;
+    final children = <Widget>[];
+    TodayGroup? group;
+    for (final item in shown) {
+      if (item.group != group) {
+        group = item.group;
+        children.add(
+          Padding(
+            padding: EdgeInsets.fromLTRB(18, children.isEmpty ? 10 : 12, 18, 2),
+            child: Text(
+              kTodayGroupNames[group]!.toUpperCase(),
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.8,
+                color: c.muted,
+              ),
+            ),
+          ),
+        );
+      }
+      children.add(_row(context, item));
+    }
+    if (hidden > 0) {
+      children.add(
+        InkWell(
+          onTap: widget.onViewAll,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 10, 18, 10),
+            child: Text(
+              '+$hidden more',
+              style: TextStyle(fontSize: AppType.t13_5, color: c.muted),
+            ),
+          ),
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
+      ),
+    );
+  }
+
+  Widget _row(BuildContext context, TodayItem item) {
+    final c = context.colors;
+    final overdue = item.standing == TaskStanding.overdue;
+    final due = overdue ? dueLabel(item.when!.day, widget.now) : '';
+    final time = overdue
+        ? '${due[0].toUpperCase()}${due.substring(1)}'
+        : item.timeLabel;
+    final bell = widget.reminders.contains('${item.note.id}|${item.raw}');
+    return Semantics(
+      button: true,
+      label: [
+        item.text,
+        if (time.isNotEmpty) time,
+        if (bell) 'reminder set',
+      ].join(', '),
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: () => widget.onOpen(item),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 10, 18, 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  item.text,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: AppType.t15, color: c.fg),
+                ),
+              ),
+              if (time.isNotEmpty) ...[
+                const SizedBox(width: 10),
+                Text(
+                  time,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: overdue ? c.warning : c.muted,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+              if (bell) ...[
+                const SizedBox(width: 6),
+                Icon(
+                  Icons.notifications_none_rounded,
+                  size: 16,
+                  color: c.accent,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── quiet day ──
+
+  Widget _quiet(BuildContext context) {
+    final c = context.colors;
+    final plan = widget.plan;
+    final done = widget.doneToday;
+    final undated = plan.undated.length;
+    final String title;
+    final String? sub;
+    if (done > 0) {
+      title = 'All clear.';
+      sub = done == 1
+          ? 'You finished 1 task today.'
+          : 'You finished $done tasks today.';
+    } else if (undated > 0) {
+      title = 'Nothing due today.';
+      sub = undated == 1
+          ? '1 task in your lists has no date.'
+          : '$undated tasks in your lists have no date.';
+    } else {
+      title = 'Nothing waiting on you.';
+      sub = null;
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(18),
+          child: Row(
+            children: [
+              Icon(Icons.task_alt_rounded, size: 22, color: c.income),
+              const SizedBox(width: 12),
+              Expanded(
+                child: sub == null
+                    ? Text(
+                        title,
+                        style: TextStyle(fontSize: AppType.t15, color: c.muted),
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: TextStyle(
+                              fontSize: AppType.t15,
+                              fontWeight: FontWeight.w600,
+                              color: c.fg,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            sub,
+                            style: TextStyle(
+                              fontSize: AppType.t13_5,
+                              color: c.muted,
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+            ],
+          ),
+        ),
+        for (final item in plan.undated.take(2)) ...[
+          Divider(height: 1, thickness: 1, color: c.border),
+          _suggestion(context, item),
+        ],
+      ],
+    );
+  }
+
+  /// An undated task offered for today: tick it off, or take it on.
+  Widget _suggestion(BuildContext context, TodayItem item) {
+    final c = context.colors;
+    final done = _completing == item.key;
+    final listName = item.note.title.isEmpty ? 'Untitled' : item.note.title;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(6, 4, 12, 4),
+      child: Row(
+        children: [
+          TaskCheck(
+            done: done,
+            semanticsLabel: 'Complete ${item.text}',
+            onTap: () => _complete(item),
+          ),
+          Expanded(
+            child: InkWell(
+              onTap: () => widget.onOpen(item),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item.text,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: AppType.t15,
+                        color: done ? c.muted : c.fg,
+                        decoration: done
+                            ? TextDecoration.lineThrough
+                            : TextDecoration.none,
+                        decorationColor: c.muted,
+                      ),
+                    ),
+                    Text(
+                      listName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: AppType.t12, color: c.muted),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton(
+            onPressed: done
+                ? null
+                : () {
+                    HapticFeedback.selectionClick();
+                    widget.onDoToday(item);
+                  },
+            style: OutlinedButton.styleFrom(
+              foregroundColor: c.fg,
+              side: BorderSide(color: c.border),
+              minimumSize: const Size(0, 34),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              shape: const StadiumBorder(),
+              textStyle: const TextStyle(
+                fontSize: AppType.t12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            child: const Text('Do today'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "yesterday", "Tue" (within the week), "Nov 2" (earlier).
+String dueLabel(DateTime day, DateTime now) {
+  final today = DateTime(now.year, now.month, now.day);
+  final d = DateTime(day.year, day.month, day.day);
+  final ago = today.difference(d).inDays;
+  if (ago == 1) return 'yesterday';
+  if (ago > 1 && ago < 7) return kWeekdayNamesShort[d.weekday - 1];
+  return '${monthShort(d.month)} ${d.day}';
 }
 
 // ── continue ───────────────────────────────────────────────────────────────
