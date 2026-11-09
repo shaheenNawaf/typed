@@ -30,7 +30,7 @@ import '../widgets/brand_mark.dart';
 import '../widgets/settings_sheet.dart';
 import '../widgets/sidebar.dart';
 import '../widgets/note_list.dart';
-import '../widgets/payday_dialogs.dart';
+import '../widgets/payday_sheets.dart';
 import '../widgets/editor.dart';
 import '../widgets/mobile_nav.dart';
 import '../widgets/template_picker_sheet.dart';
@@ -3772,7 +3772,11 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _editPayday() async {
-    final picked = await showPaydayPicker(context, _payday);
+    final picked = await showPaydaySheet(
+      context,
+      _payday,
+      now: HomeScreen.clock(),
+    );
     if (picked == null || !mounted) return;
     setState(() => _payday = picked);
     final prefs = await SharedPreferences.getInstance();
@@ -3782,12 +3786,22 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _editCutoffBudget() async {
     final now = HomeScreen.clock();
-    final currency = _cutoffBudget?.currency ??
-        cutoffMoney(notes, cutoffFor(_payday, now), null, now).currency;
-    final choice = await showCutoffBudgetDialog(
+    final cutoff = cutoffFor(_payday, now);
+    final currency =
+        _cutoffBudget?.currency ?? cutoffMoney(notes, cutoff, null, now).currency;
+    final last = cutoffMoney(
+      notes,
+      previousCutoff(_payday, cutoff),
+      null,
+      now,
+      currency: currency,
+    );
+    final choice = await showCutoffBudgetSheet(
       context,
       current: _cutoffBudget,
       currency: currency,
+      cutoffDays: cutoff.totalDays,
+      lastSpent: last.spent,
     );
     if (choice == null || !mounted) return;
     setState(() => _cutoffBudget = choice.budget);

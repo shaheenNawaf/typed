@@ -101,6 +101,44 @@ class HomeLabel extends StatelessWidget {
   }
 }
 
+/// A quiet secondary action: ink words on a soft pill, the same look as a
+/// chosen [QuietChoice] option ("Do today", "Set a budget").
+class SoftPill extends StatelessWidget {
+  final String label;
+  final VoidCallback? onPressed;
+
+  const SoftPill({super.key, required this.label, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final enabled = onPressed != null;
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: c.fg.withValues(alpha: 0.07),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: enabled ? c.fg : c.muted,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// The calm surface every Home (and Finance) block sits on: radius 18, a
 /// hairline border, no shadow.
 class HomeCard extends StatelessWidget {
@@ -685,25 +723,14 @@ class _HomeTodayState extends State<HomeToday> {
             ),
           ),
           const SizedBox(width: 8),
-          OutlinedButton(
+          SoftPill(
+            label: 'Do today',
             onPressed: done
                 ? null
                 : () {
                     HapticFeedback.selectionClick();
                     widget.onDoToday(item);
                   },
-            style: OutlinedButton.styleFrom(
-              foregroundColor: c.fg,
-              side: BorderSide(color: c.border),
-              minimumSize: const Size(0, 34),
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              shape: const StadiumBorder(),
-              textStyle: const TextStyle(
-                fontSize: AppType.t12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            child: const Text('Do today'),
           ),
         ],
       ),
@@ -1304,19 +1331,7 @@ class HomePaydayCard extends StatelessWidget {
                 style: small,
               ),
             ),
-            TextButton(
-              onPressed: onSetBudget,
-              style: TextButton.styleFrom(
-                foregroundColor: c.fg,
-                minimumSize: const Size(0, 36),
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                textStyle: const TextStyle(
-                  fontSize: AppType.t12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              child: const Text('Set a budget'),
-            ),
+            SoftPill(label: 'Set a budget', onPressed: onSetBudget),
           ],
         ),
       ];
