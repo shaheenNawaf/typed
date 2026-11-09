@@ -201,13 +201,15 @@ class CutoffMoney {
 }
 
 /// Totals [cutoff]'s expenses up to [asOf] (inclusive). Sample data never
-/// counts. Without a budget, the currency is the one most spent in.
+/// counts. The currency is the budget's, else [currency], else the one most
+/// spent in.
 CutoffMoney cutoffMoney(
   List<Note> notes,
   Cutoff cutoff,
   CutoffBudget? budget,
-  DateTime asOf,
-) {
+  DateTime asOf, {
+  String? currency,
+}) {
   final day = _day(asOf).isAfter(cutoff.end) ? cutoff.end : _day(asOf);
   final from = cutoff.start;
   final until = day.add(const Duration(days: 1));
@@ -229,20 +231,20 @@ CutoffMoney cutoffMoney(
       cats[e.category] = (cats[e.category] ?? 0) + e.amount;
     }
   }
-  var currency = budget?.currency;
-  if (currency == null) {
-    currency = 'PHP';
+  var picked = budget?.currency ?? currency;
+  if (picked == null) {
+    picked = 'PHP';
     var best = -1;
     byCurrency.forEach((cur, total) {
       if (total > best) {
         best = total;
-        currency = cur;
+        picked = cur;
       }
     });
   }
   String? top;
   var topAmount = 0;
-  (byCategory[currency] ?? const {}).forEach((cat, total) {
+  (byCategory[picked] ?? const {}).forEach((cat, total) {
     if (total > topAmount) {
       topAmount = total;
       top = cat;
@@ -250,9 +252,9 @@ CutoffMoney cutoffMoney(
   });
   return CutoffMoney(
     cutoff: cutoff,
-    currency: currency!,
-    spent: byCurrency[currency] ?? 0,
-    todaySpent: todayBy[currency] ?? 0,
+    currency: picked!,
+    spent: byCurrency[picked] ?? 0,
+    todaySpent: todayBy[picked] ?? 0,
     budget: budget,
     topCategory: top,
     anyLogged: anyLogged,
