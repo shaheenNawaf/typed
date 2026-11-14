@@ -7,6 +7,7 @@ import 'package:typed/models/note.dart';
 import 'package:typed/screens/home_screen.dart';
 import 'package:typed/theme/palettes.dart';
 import 'package:typed/utils/note_storage.dart';
+import 'package:typed/widgets/home_modules.dart';
 import 'package:typed/widgets/mobile_nav.dart';
 import 'package:typed/widgets/sidebar.dart';
 import 'package:typed/widgets/editor.dart';
@@ -172,9 +173,11 @@ void main() {
     );
     expect(find.text('New page'), findsOneWidget);
     // One column: today and recent share a left edge.
-    final nextUpX = tester.getTopLeft(find.text('TODAY')).dx;
-    final continueX =
-        tester.getTopLeft(find.text('RECENT')).dx;
+    // TODAY now sits beside its date number, so compare the labels.
+    Finder labelOf(String t) => find.ancestor(
+        of: find.text(t), matching: find.byType(HomeLabel));
+    final nextUpX = tester.getTopLeft(labelOf('TODAY')).dx;
+    final continueX = tester.getTopLeft(labelOf('RECENT')).dx;
     expect((nextUpX - continueX).abs(), lessThan(1));
   });
 
@@ -445,7 +448,8 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('no money and no budget: no payday card', (tester) async {
+  testWidgets('no money and no budget: the payday card asks for a first entry',
+      (tester) async {
     SharedPreferences.setMockInitialValues({
       'onboarded_v1': true,
       'onboarding_flow_complete_v1': true,
@@ -455,7 +459,10 @@ void main() {
       Note(id: 'n', title: 'Plain', content: 'words', tags: const []),
     ]);
     await pumpHome(tester, surface: const Size(390, 844));
-    expect(find.text('UNTIL PAYDAY'), findsNothing);
+    expect(find.text('UNTIL PAYDAY'), findsOneWidget);
+    expect(find.text('Log what you spend and each day here fills in.'), findsOneWidget);
+    expect(find.textContaining('spent since'), findsNothing);
+    expect(find.text("Sample entries don't count here."), findsNothing);
   });
 
   testWidgets('on payday, the last cutoff is summed up until Later',
@@ -494,6 +501,7 @@ void main() {
     // The summary stands in for the countdown on payday.
     expect(find.text('UNTIL PAYDAY'), findsNothing);
 
+    await tester.ensureVisible(find.text('Later'));
     await tester.tap(find.text('Later'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
@@ -527,7 +535,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('zero notes: mobile home shows empty CTA and opens the picker',
+  testWidgets('zero notes: Home shows empty sections and opens the picker',
       (tester) async {
     SharedPreferences.setMockInitialValues({
       'onboarded_v1': true,
@@ -537,17 +545,25 @@ void main() {
     await NoteStorage().save([]);
     await pumpHome(tester, surface: const Size(390, 844));
 
-    expect(find.text('Nothing here yet'), findsOneWidget);
-    expect(find.text('Create your first note'), findsOneWidget);
+    // Each Home section says what it will hold, with one way to fill it.
+    expect(find.text('Your notes show up here'), findsOneWidget);
+    expect(find.text('Log what you spend and each day here fills in.'), findsOneWidget);
+    expect(find.text('Add something for today'), findsOneWidget);
 
-    await tester.tap(find.text('Create your first note'));
+    // At full scroll the last action clears the floating dock.
+    await tester.drag(
+      find.byType(SingleChildScrollView).first,
+      const Offset(0, -2000),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('Write a note'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('Blank note'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('one note: empty CTA is hidden', (tester) async {
+  testWidgets('one note: the notes empty state gives way to Recent', (tester) async {
     SharedPreferences.setMockInitialValues({
       'onboarded_v1': true,
       'onboarding_flow_complete_v1': true,
@@ -565,6 +581,6 @@ void main() {
     ]);
     await pumpHome(tester, surface: const Size(390, 844));
 
-    expect(find.text('Nothing here yet'), findsNothing);
+    expect(find.text('Your notes show up here'), findsNothing);
   });
 }

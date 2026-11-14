@@ -651,6 +651,7 @@ class SimpleFinanceView extends StatelessWidget {
           child: CountUpAmount(
             minor: summary.totalExpense,
             currency: currency,
+            splitCents: true,
             style: TextStyle(
               fontSize: 34,
               fontWeight: FontWeight.w700,
@@ -691,7 +692,13 @@ class SimpleFinanceView extends StatelessWidget {
                   style: quiet,
                   children: [
                     const TextSpan(text: 'Income  '),
-                    ...moneySpans(summary.totalIncome, currency, quietAmount),
+                    ...moneySpansSplit(
+                      summary.totalIncome,
+                      currency,
+                      quietAmount,
+                      scale: 0.8,
+                      alpha: 0.7,
+                    ),
                   ],
                 ),
                 maxLines: 1,
@@ -2078,8 +2085,11 @@ class _RecentTransactionRowState extends State<_RecentTransactionRow> {
                   children: [
                     TextSpan(text: widget.isIncome ? '+' : '\u2212'),
                     currencySpan(widget.currency, amountStyle),
-                    TextSpan(
-                      text: formatMinor(widget.entry.amount, widget.currency),
+                    ...splitCentsSpans(
+                      formatMinor(widget.entry.amount, widget.currency),
+                      amountStyle,
+                      scale: 0.78,
+                      alpha: 0.7,
                     ),
                   ],
                 ),

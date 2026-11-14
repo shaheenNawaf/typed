@@ -160,6 +160,10 @@ class CutoffMoney {
   /// The day the figures are for (today, or the cutoff's last day).
   final DateTime asOf;
 
+  /// Spent each day of the cutoff in [currency], first day first; days
+  /// after [asOf] stay 0. Length is [Cutoff.totalDays].
+  final List<int> spentByDay;
+
   const CutoffMoney({
     required this.cutoff,
     required this.currency,
@@ -169,6 +173,7 @@ class CutoffMoney {
     required this.topCategory,
     required this.anyLogged,
     required this.asOf,
+    this.spentByDay = const [],
   });
 
   int get dayIndex => cutoff.dayIndex(asOf);
@@ -216,6 +221,7 @@ CutoffMoney cutoffMoney(
   final byCurrency = <String, int>{};
   final todayBy = <String, int>{};
   final byCategory = <String, Map<String, int>>{};
+  final byDay = <String, List<int>>{};
   var anyLogged = false;
   for (final n in notes) {
     if (!isVisibleFinanceNote(n)) continue;
@@ -227,6 +233,12 @@ CutoffMoney cutoffMoney(
       final cur = e.currency ?? n.currency ?? 'PHP';
       byCurrency[cur] = (byCurrency[cur] ?? 0) + e.amount;
       if (!e.date.isBefore(day)) todayBy[cur] = (todayBy[cur] ?? 0) + e.amount;
+      final days = byDay.putIfAbsent(
+        cur,
+        () => List.filled(cutoff.totalDays, 0),
+      );
+      final i = _days(from, _day(e.date));
+      if (i >= 0 && i < days.length) days[i] += e.amount;
       final cats = byCategory.putIfAbsent(cur, () => {});
       cats[e.category] = (cats[e.category] ?? 0) + e.amount;
     }
@@ -259,5 +271,6 @@ CutoffMoney cutoffMoney(
     topCategory: top,
     anyLogged: anyLogged,
     asOf: day,
+    spentByDay: byDay[picked] ?? List.filled(cutoff.totalDays, 0),
   );
 }

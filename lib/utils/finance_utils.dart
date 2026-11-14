@@ -172,6 +172,47 @@ List<TextSpan> moneySpans(int minor, String? currency, TextStyle? style) {
 }
 
 
+/// Splits formatted digits ("15,000.00") into the whole part in [style] and
+/// the minor units smaller and dimmer, the way Monzo and Revolut set pence.
+/// The whole number is what gets read; the centavos stay legible but quiet.
+/// Digits without a decimal point (JPY) come back as one span.
+List<TextSpan> splitCentsSpans(
+  String digits,
+  TextStyle style, {
+  double scale = 0.62,
+  double alpha = 0.6,
+}) {
+  final dot = digits.indexOf('.');
+  final size = style.fontSize;
+  if (dot < 0 || size == null) return [TextSpan(text: digits, style: style)];
+  final color = style.color;
+  return [
+    TextSpan(text: digits.substring(0, dot), style: style),
+    TextSpan(
+      text: digits.substring(dot),
+      style: style.copyWith(
+        fontSize: size * scale,
+        letterSpacing: 0,
+        color: color?.withValues(alpha: color.a * alpha),
+      ),
+    ),
+  ];
+}
+
+/// [moneySpans] with the minor units set by [splitCentsSpans].
+List<TextSpan> moneySpansSplit(
+  int minor,
+  String? currency,
+  TextStyle style, {
+  double scale = 0.62,
+  double alpha = 0.6,
+}) {
+  final spans = moneySpans(minor, currency, style);
+  return [
+    ...spans.take(spans.length - 1),
+    ...splitCentsSpans(spans.last.text!, style, scale: scale, alpha: alpha),
+  ];
+}
 
 /// Whole units, no decimals: 534000 PHP -> "₱5,340". For glanceable
 /// figures (Home's payday card), where centavos are noise.

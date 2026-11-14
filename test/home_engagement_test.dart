@@ -107,6 +107,7 @@ void main() {
     expect(find.text('Ideas for the garden'), findsWidgets);
     expect(find.text('5 WEEKS AGO'), findsOneWidget);
 
+    await tester.ensureVisible(find.text('Not today'));
     await tester.tap(find.text('Not today'));
     await tester.pump();
     expect(find.text('FROM YOUR NOTES'), findsNothing);

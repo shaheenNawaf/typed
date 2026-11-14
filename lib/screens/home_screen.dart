@@ -7,6 +7,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../home/today_plan.dart';
 import '../home/week_recap.dart';
+import '../home/week_strip.dart';
 import '../models/money_entry.dart';
 import '../models/note.dart';
 import '../models/budget.dart';
@@ -3451,18 +3452,21 @@ class _HomeScreenState extends State<HomeScreen>
             ? 'Payday. '
             : 'New week. ';
 
+    final strip = buildWeekStrip(notes, _doneLog, now);
     final blocks = <Widget>[
       _buildHomeIntro(now, plan, lead: lead),
+      HomeWeekStrip(days: strip.days, currency: strip.currency, now: now),
       HomeCaptureBar(
         onSaveNote: _captureNote,
         onAddTask: _captureTask,
         onVoice: VoiceMemo.isSupported() ? _openVoiceMemo : null,
       ),
-      if (notes.isEmpty) _buildHomeEmptyCta(),
       ?moment,
       ..._buildDayBlocks(plan, now),
       if (moment == null) ?_buildHomeMoney(now),
-      if (recent.isNotEmpty)
+      if (recent.isEmpty)
+        _buildNotesEmpty()
+      else
         HomeRecent(
           items: [
             for (final n in recent)
@@ -3491,8 +3495,10 @@ class _HomeScreenState extends State<HomeScreen>
         20,
         isDesktop ? 56 : 28,
         20,
-        // Clears the floating dock, which the page scrolls under.
-        32 + MediaQuery.paddingOf(context).bottom,
+        // Clears the floating dock, which the page scrolls under: 32 alone
+        // left the last block's action beneath the dock at full scroll.
+        (isDesktop ? 32 : MobileNav.occupiedHeight + 16) +
+            MediaQuery.paddingOf(context).bottom,
       ),
       child: Center(
         child: ConstrainedBox(
@@ -3629,6 +3635,7 @@ class _HomeScreenState extends State<HomeScreen>
       onDoToday: (item) => _moveTaskToDay(item, today, 'Added to today'),
       onOpen: (item) => _selectNote(item.note.id),
       onViewAll: () => _onTabChanged('tasks'),
+      onAdd: (text) => _captureTask(text, when: SpokenWhen(today)),
     );
   }
 
@@ -3703,7 +3710,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// What's left until payday; hidden until money or a budget exists.
+  /// What's left until payday; an empty prompt until money or a budget exists.
   Widget? _buildHomeMoney(DateTime now) {
     final money = cutoffMoney(
       notes,
@@ -3711,7 +3718,7 @@ class _HomeScreenState extends State<HomeScreen>
       _cutoffBudget,
       now,
     );
-    if (!money.anyLogged && _cutoffBudget == null) return null;
+    if (!money.anyLogged && _cutoffBudget == null) return _buildMoneyEmpty(now);
     return HomePaydayCard(
       money: money,
       now: now,
@@ -3936,44 +3943,32 @@ class _HomeScreenState extends State<HomeScreen>
 
   /// Zero-notes home: one explanation + one primary CTA (same action as the
   /// dock + button). Hidden as soon as any note exists.
-  Widget _buildHomeEmptyCta() {
-    final c = context.colors;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: c.surface,
-        borderRadius: BorderRadius.circular(AppRadius.panel),
-        border: Border.all(color: c.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Nothing here yet',
-            style: TextStyle(
-              fontSize: AppType.t15,
-              fontWeight: FontWeight.w600,
-              color: c.fg,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Create a note, track an expense, or start a task list — '
-            'the + button does it all.',
-            style: TextStyle(fontSize: AppType.t12, height: 1.45, color: c.muted),
-          ),
-          const SizedBox(height: 14),
-          FilledButton.icon(
-            onPressed: _openTemplatePicker,
-            icon: const Icon(Icons.add, size: 16),
-            label: const Text('Create your first note'),
-            style: FilledButton.styleFrom(
-              minimumSize: const Size(44, 44),
-            ),
-          ),
-        ],
-      ),
+  /// Until payday, before anything real is logged: what the card will do
+  /// and the one action that starts it. Sample entries are demo data and
+  /// never count, so say so when they are what's there.
+  Widget _buildMoneyEmpty(DateTime now) {
+    final hasSample = notes.any(
+      (n) => isVisibleFinanceNote(n) && n.amounts.any((e) => e.isDemo),
+    );
+    return HomePaydayEmpty(
+      cutoff: cutoffFor(_payday, now),
+      now: now,
+      hasSample: hasSample,
+      onLog: _quickAddEntry,
+      onChangePayday: _editPayday,
+    );
+  }
+
+  /// Recent, before the first note of your own.
+  Widget _buildNotesEmpty() {
+    return HomeEmptySection(
+      label: 'RECENT',
+      icon: Icons.edit_note_rounded,
+      title: 'Your notes show up here',
+      body: 'Ideas, lists, things to remember. The newest three stay on '
+          'Home.',
+      action: 'Write a note',
+      onAction: _openTemplatePicker,
     );
   }
 
@@ -4063,15 +4058,6 @@ class _HomeScreenState extends State<HomeScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '${weekdayName(now.weekday)}, ${monthName(now.month)} ${now.day}',
-            style: TextStyle(
-              fontSize: AppType.t13_5,
-              fontWeight: FontWeight.w500,
-              color: c.muted,
-            ),
-          ),
-          const SizedBox(height: 4),
           Semantics(
             button: true,
             hint: _displayName == null ? 'Add your name' : 'Change your name',
