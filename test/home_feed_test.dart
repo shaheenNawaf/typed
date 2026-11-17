@@ -300,6 +300,38 @@ void main() {
     expect(todo.content, '- [ ] Buy eggs — ${todayLabel()}\n');
   });
 
+  testWidgets('money typed in the capture box offers to log itself',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'onboarded_v1': true,
+      'onboarding_flow_complete_v1': true,
+      'shell_state_v1': '{"filter":"home","tab":"home"}',
+    });
+    await NoteStorage().save([
+      Note(id: 'n', title: 'Plain', content: 'words', tags: const []),
+    ]);
+    await pumpHome(tester, surface: const Size(390, 844));
+
+    await tester.enterText(find.byType(TextField).first, 'grab 180');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Log ₱180 · Transport'), findsOneWidget);
+
+    await tester.tap(find.text('Log ₱180 · Transport'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Log ₱180 · Transport'), findsNothing);
+    final saved = (await NoteStorage().loadResult()).items;
+    final entries = saved.expand((n) => n.amounts).toList();
+    expect(entries.length, 1);
+    expect(entries.single.amount, 18000);
+    expect(entries.single.category, 'Transport');
+    // Plain words never offer to log anything.
+    await tester.enterText(find.byType(TextField).first, 'call mom');
+    await tester.pump();
+    expect(find.textContaining('Log ₱'), findsNothing);
+  });
+
   testWidgets('today says so when nothing is waiting', (tester) async {
     SharedPreferences.setMockInitialValues({
       'onboarded_v1': true,
@@ -310,7 +342,8 @@ void main() {
       Note(id: 'n', title: 'Plain', content: 'words', tags: const []),
     ]);
     await pumpHome(tester, surface: const Size(390, 844));
-    expect(find.text('Nothing waiting on you.'), findsOneWidget);
+    // Nothing anywhere: Today is just a place to add the first task.
+    expect(find.text('Add something for today'), findsOneWidget);
     expect(find.text('Done'), findsNothing);
   });
 
@@ -442,9 +475,10 @@ void main() {
     await pumpHome(tester, surface: const Size(390, 844));
     expect(find.text('UNTIL PAYDAY'), findsOneWidget);
     expect(find.textContaining('₱9,820 left until the'), findsOneWidget);
-    expect(find.textContaining(RegExp(r'^About ₱[\d,]+ a day for \d+ days?$')),
+    expect(find.textContaining(RegExp(r'^₱[\d,]+ a day for \d+ days?$')),
         findsOneWidget);
-    expect(find.text('On pace'), findsOneWidget);
+    // On pace is the quiet default: no badge.
+    expect(find.text('On pace'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -460,9 +494,8 @@ void main() {
     ]);
     await pumpHome(tester, surface: const Size(390, 844));
     expect(find.text('UNTIL PAYDAY'), findsOneWidget);
-    expect(find.text('Log what you spend and each day here fills in.'), findsOneWidget);
+    expect(find.text('Log an expense'), findsOneWidget);
     expect(find.textContaining('spent since'), findsNothing);
-    expect(find.text("Sample entries don't count here."), findsNothing);
   });
 
   testWidgets('on payday, the last cutoff is summed up until Later',
@@ -546,8 +579,8 @@ void main() {
     await pumpHome(tester, surface: const Size(390, 844));
 
     // Each Home section says what it will hold, with one way to fill it.
-    expect(find.text('Your notes show up here'), findsOneWidget);
-    expect(find.text('Log what you spend and each day here fills in.'), findsOneWidget);
+    expect(find.text('No notes yet'), findsOneWidget);
+    expect(find.text('Log an expense'), findsOneWidget);
     expect(find.text('Add something for today'), findsOneWidget);
 
     // At full scroll the last action clears the floating dock.
@@ -581,6 +614,6 @@ void main() {
     ]);
     await pumpHome(tester, surface: const Size(390, 844));
 
-    expect(find.text('Your notes show up here'), findsNothing);
+    expect(find.text('No notes yet'), findsNothing);
   });
 }

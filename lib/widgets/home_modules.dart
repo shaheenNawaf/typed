@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../home/today_plan.dart';
 import '../home/week_recap.dart';
 import '../home/week_strip.dart';
+import '../voice/spend_parser.dart';
 import '../models/note.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_metrics.dart';
@@ -64,23 +65,17 @@ class HomeLabel extends StatelessWidget {
     if (onTrailingTap != null) {
       end = Semantics(
         button: true,
-        label: trailingSemantics,
+        label: trailingSemantics ?? trailing,
         child: InkWell(
           onTap: onTrailingTap,
           borderRadius: BorderRadius.circular(8),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (trailing != null) Text(trailing!, style: trailingStyle),
-                if (trailing == null) Text('All', style: trailingStyle),
-                if (trailingIcon) ...[
-                  const SizedBox(width: 4),
-                  Icon(Icons.arrow_forward_rounded, size: 14, color: c.muted),
-                ],
-              ],
-            ),
+            // A link is just the arrow (the label says what it opens);
+            // an action without one ("Not today") keeps its words.
+            child: trailingIcon
+                ? Icon(Icons.arrow_forward_rounded, size: 16, color: c.muted)
+                : Text(trailing ?? 'All', style: trailingStyle),
           ),
         ),
       );
@@ -262,6 +257,7 @@ class HomeWeekStrip extends StatefulWidget {
 
 class _HomeWeekStripState extends State<HomeWeekStrip> {
   int _selected = 3;
+  bool _tapped = false;
 
   String _dayName(int i, StripDay d) => switch (i) {
         2 => 'Yesterday',
@@ -304,15 +300,23 @@ class _HomeWeekStripState extends State<HomeWeekStrip> {
               Expanded(child: _cell(context, i, maxSpent)),
           ],
         ),
-        const SizedBox(height: 8),
-        AnimatedSwitcher(
+        AnimatedSize(
           duration: AppMotion.duration(context, AppMotion.fast),
-          child: Text(
-            _caption(),
-            key: ValueKey(_selected),
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: AppType.t13_5, color: c.muted),
-          ),
+          alignment: Alignment.topCenter,
+          child: !_tapped
+              ? const SizedBox(width: double.infinity)
+              : Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: AnimatedSwitcher(
+                    duration: AppMotion.duration(context, AppMotion.fast),
+                    child: Text(
+                      _caption(),
+                      key: ValueKey(_selected),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: AppType.t13_5, color: c.muted),
+                    ),
+                  ),
+                ),
         ),
       ],
     );
@@ -334,7 +338,10 @@ class _HomeWeekStripState extends State<HomeWeekStrip> {
       selected: selected,
       label: _dayName(i, d),
       child: InkWell(
-        onTap: () => setState(() => _selected = i),
+        onTap: () => setState(() {
+          _selected = i;
+          _tapped = true;
+        }),
         borderRadius: BorderRadius.circular(14),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
@@ -430,15 +437,11 @@ class CutoffDays extends StatelessWidget {
 
   /// The even daily share of a budget, if one is set.
   final int? allowance;
-  final String startLabel;
-  final String endLabel;
 
   const CutoffDays({
     super.key,
     required this.spentByDay,
     required this.todayIndex,
-    required this.startLabel,
-    required this.endLabel,
     this.allowance,
   });
 
@@ -452,11 +455,7 @@ class CutoffDays extends StatelessWidget {
     // Nothing spent yet: no headroom to reserve, just the row of days.
     final h = top == 0 ? 8.0 : 40.0;
     double heightOf(int v) => top == 0 ? 2 : 3 + (h - 3) * v / top;
-    final small = TextStyle(fontSize: AppType.t11, color: c.muted);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        SizedBox(
+    return SizedBox(
           height: h,
           child: Stack(
             children: [
@@ -508,16 +507,6 @@ class CutoffDays extends StatelessWidget {
                 ),
             ],
           ),
-        ),
-        const SizedBox(height: 6),
-        Row(
-          children: [
-            Text(startLabel, style: small),
-            const Spacer(),
-            Text(endLabel, style: small),
-          ],
-        ),
-      ],
     );
   }
 }
@@ -527,17 +516,19 @@ class CutoffDays extends StatelessWidget {
 class HomePaydayEmpty extends StatelessWidget {
   final Cutoff cutoff;
   final DateTime now;
-  final bool hasSample;
   final VoidCallback onLog;
   final VoidCallback onChangePayday;
+  final int toReview;
+  final VoidCallback? onReview;
 
   const HomePaydayEmpty({
     super.key,
     required this.cutoff,
     required this.now,
-    required this.hasSample,
     required this.onLog,
     required this.onChangePayday,
+    this.toReview = 0,
+    this.onReview,
   });
 
   @override
@@ -548,7 +539,13 @@ class HomePaydayEmpty extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const HomeLabel('UNTIL PAYDAY'),
+        HomeLabel(
+          'UNTIL PAYDAY',
+          trailing: toReview > 0 ? '$toReview to review' : null,
+          trailingIcon: false,
+          onTrailingTap: toReview > 0 ? onReview : null,
+          trailingSemantics: '$toReview payments to review',
+        ),
         HomeCard(
           padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
           child: Column(
@@ -577,16 +574,8 @@ class HomePaydayEmpty extends StatelessWidget {
               CutoffDays(
                 spentByDay: List.filled(cutoff.totalDays, 0),
                 todayIndex: cutoff.dayIndex(now) - 1,
-                startLabel:
-                    '${monthShort(cutoff.start.month)} ${cutoff.start.day}',
-                endLabel: 'Payday · $payday',
               ),
-              const SizedBox(height: 14),
-              Text(
-                'Log what you spend and each day here fills in.',
-                style: TextStyle(fontSize: AppType.t13_5, color: c.muted),
-              ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -595,13 +584,6 @@ class HomePaydayEmpty extends StatelessWidget {
                   SoftPill(label: 'Change payday', onPressed: onChangePayday),
                 ],
               ),
-              if (hasSample) ...[
-                const SizedBox(height: 10),
-                Text(
-                  "Sample entries don't count here.",
-                  style: TextStyle(fontSize: AppType.t12, color: c.muted),
-                ),
-              ],
             ],
           ),
         ),
@@ -620,7 +602,7 @@ class HomeEmptySection extends StatelessWidget {
   final String label;
   final IconData icon;
   final String title;
-  final String body;
+  final String? body;
   final String action;
   final VoidCallback onAction;
   final String? secondary;
@@ -634,7 +616,7 @@ class HomeEmptySection extends StatelessWidget {
     required this.label,
     required this.icon,
     required this.title,
-    required this.body,
+    this.body,
     required this.action,
     required this.onAction,
     this.secondary,
@@ -678,15 +660,17 @@ class HomeEmptySection extends StatelessWidget {
                             color: c.fg,
                           ),
                         ),
+                        if (body != null) ...[
                         const SizedBox(height: 4),
                         Text(
-                          body,
+                          body!,
                           style: TextStyle(
                             fontSize: AppType.t13_5,
                             height: 1.45,
                             color: c.muted,
                           ),
                         ),
+                        ],
                       ],
                     ),
                   ),
@@ -734,11 +718,19 @@ class HomeCaptureBar extends StatefulWidget {
   /// Opens a voice memo; null hides the mic (unsupported platform).
   final VoidCallback? onVoice;
 
+  /// Logs money typed into the box ("grab 180"); null hides the offer.
+  final ValueChanged<List<VoiceSpend>>? onLogSpends;
+
+  /// Currency the offer shows amounts in.
+  final String currency;
+
   const HomeCaptureBar({
     super.key,
     required this.onSaveNote,
     required this.onAddTask,
     this.onVoice,
+    this.onLogSpends,
+    this.currency = 'PHP',
   });
 
   @override
@@ -750,6 +742,25 @@ class _HomeCaptureBarState extends State<HomeCaptureBar> {
   final _focus = FocusNode();
 
   bool get _hasText => _ctrl.text.trim().isNotEmpty;
+
+  /// Money in what's typed, when the line is short enough to be just that
+  /// ("grab 180", "lunch 250, coffee 120"). Text first, decide later
+  /// (Drafts): Enter still saves a note; the chip logs it instead.
+  List<VoiceSpend> get _spends {
+    if (widget.onLogSpends == null) return const [];
+    final text = _ctrl.text.trim();
+    if (text.isEmpty || text.split(RegExp(r'\s+')).length > 8) {
+      return const [];
+    }
+    return parseSpends(text);
+  }
+
+  void _logSpends(List<VoiceSpend> spends) {
+    HapticFeedback.lightImpact();
+    widget.onLogSpends!(spends);
+    _ctrl.clear();
+    _focus.unfocus();
+  }
 
   @override
   void initState() {
@@ -780,6 +791,30 @@ class _HomeCaptureBarState extends State<HomeCaptureBar> {
 
   @override
   Widget build(BuildContext context) {
+    final spends = _spends;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _bar(context),
+        AnimatedSize(
+          duration: AppMotion.duration(context, AppMotion.fast),
+          alignment: Alignment.topLeft,
+          child: spends.isEmpty
+              ? const SizedBox(width: double.infinity)
+              : Padding(
+                  padding: const EdgeInsets.only(top: 10, left: 4),
+                  child: _MoneyChip(
+                    spends: spends,
+                    currency: widget.currency,
+                    onTap: () => _logSpends(spends),
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _bar(BuildContext context) {
     final c = context.colors;
     final focused = _focus.hasFocus;
     return AnimatedContainer(
@@ -887,6 +922,69 @@ class _HomeCaptureBarState extends State<HomeCaptureBar> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// "Log ₱180 · Transport" under the capture box.
+class _MoneyChip extends StatelessWidget {
+  final List<VoiceSpend> spends;
+  final String currency;
+  final VoidCallback onTap;
+
+  const _MoneyChip({
+    required this.spends,
+    required this.currency,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    var total = 0;
+    for (final s in spends) {
+      final m = parseAmountToMinor(s.amount.replaceAll(',', ''), currency) ?? 0;
+      total += s.type == 'income' ? -m : m;
+    }
+    final single = spends.length == 1;
+    final income = single && spends.first.type == 'income';
+    final amount = formatWholeAmount(total.abs(), currency);
+    final what = single ? spends.first.category : '${spends.length} entries';
+    final label = 'Log ${income ? '+' : ''}$amount · $what';
+    return Semantics(
+      button: true,
+      label: label,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 8, 14, 8),
+          decoration: BoxDecoration(
+            color: c.fg.withValues(alpha: 0.07),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.account_balance_wallet_outlined,
+                size: 16,
+                color: c.muted,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: c.fg,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1063,6 +1161,7 @@ class _HomeTodayState extends State<HomeToday> {
                           crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             ?chip,
+                            if (listName.toLowerCase() != 'today')
                             Text(
                               'in $listName',
                               maxLines: 1,
@@ -1179,6 +1278,16 @@ class _HomeTodayState extends State<HomeToday> {
       title = 'Nothing waiting on you.';
       sub = null;
     }
+    // Nothing done, nothing anywhere: the add row says it all.
+    if (done == 0 && undated == 0 && widget.onAdd != null) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(4, 2, 10, 2),
+        child: TaskAddRow(
+          hint: 'Add something for today',
+          onSubmit: widget.onAdd!,
+        ),
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1223,15 +1332,6 @@ class _HomeTodayState extends State<HomeToday> {
           Divider(height: 1, thickness: 1, color: c.border),
           _suggestion(context, item),
         ],
-        // Nothing done and nothing anywhere: give the day a way to start.
-        if (done == 0 && undated == 0 && widget.onAdd != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 0, 10, 2),
-            child: TaskAddRow(
-              hint: 'Add something for today',
-              onSubmit: widget.onAdd!,
-            ),
-          ),
       ],
     );
   }
@@ -1767,7 +1867,7 @@ class HomeResurfaceCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         HomeLabel(
-          'FROM YOUR NOTES',
+          'FROM ${age.toUpperCase()}',
           trailing: 'Not today',
           onTrailingTap: onDismiss,
           trailingSemantics: 'Hide until tomorrow',
@@ -1779,16 +1879,6 @@ class HomeResurfaceCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                age.toUpperCase(),
-                style: TextStyle(
-                  fontSize: AppType.t11,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.6,
-                  color: c.muted,
-                ),
-              ),
-              const SizedBox(height: 8),
               Text(
                 title,
                 maxLines: 1,
@@ -1802,7 +1892,7 @@ class HomeResurfaceCard extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 preview,
-                maxLines: 3,
+                maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: AppType.t15,
@@ -1830,12 +1920,18 @@ class HomePaydayCard extends StatelessWidget {
   final VoidCallback onOpen;
   final VoidCallback onSetBudget;
 
+  /// Captured payments waiting for a tap (they are not in the figures yet).
+  final int toReview;
+  final VoidCallback? onReview;
+
   const HomePaydayCard({
     super.key,
     required this.money,
     required this.now,
     required this.onOpen,
     required this.onSetBudget,
+    this.toReview = 0,
+    this.onReview,
   });
 
   @override
@@ -1886,8 +1982,7 @@ class HomePaydayCard extends StatelessWidget {
               child: Text(
                 evening
                     ? '${formatWholeAmount(money.todaySpent, cur)} logged today'
-                    : 'About ${formatWholeAmount(money.perDaySpent, cur)} a day '
-                          '· payday on the $payday',
+                    : '${formatWholeAmount(money.perDaySpent, cur)} a day so far',
                 style: small,
               ),
             ),
@@ -1922,12 +2017,13 @@ class HomePaydayCard extends StatelessWidget {
                     ? '${formatWholeAmount(money.todaySpent, cur)} logged today'
                     : over
                     ? '$days ${days == 1 ? 'day' : 'days'} until payday'
-                    : 'About ${formatWholeAmount(money.perDayLeft!, cur)} a day '
+                    : '${formatWholeAmount(money.perDayLeft!, cur)} a day '
                           'for $days ${days == 1 ? 'day' : 'days'}',
                 style: small,
               ),
             ),
-            _paceBadge(context, money),
+            // On pace is the quiet default; only say something when not.
+            if (status != PaceStatus.onPace) _paceBadge(context, money),
           ],
         ),
       ];
@@ -1938,9 +2034,12 @@ class HomePaydayCard extends StatelessWidget {
       children: [
         HomeLabel(
           'UNTIL PAYDAY',
-          trailing: 'Money',
-          onTrailingTap: onOpen,
-          trailingSemantics: 'Open Finance',
+          trailing: toReview > 0 ? '$toReview to review' : 'Money',
+          trailingIcon: toReview == 0,
+          onTrailingTap: toReview > 0 ? (onReview ?? onOpen) : onOpen,
+          trailingSemantics: toReview > 0
+              ? '$toReview payments to review'
+              : 'Open Finance',
         ),
         HomeCard(
           onTap: onOpen,
@@ -1960,9 +2059,6 @@ class HomePaydayCard extends StatelessWidget {
         : money.spentByDay,
     todayIndex: money.dayIndex - 1,
     allowance: allowance,
-    startLabel:
-        '${monthShort(money.cutoff.start.month)} ${money.cutoff.start.day}',
-    endLabel: 'Payday · ${ordinal(money.cutoff.nextPayday.day)}',
   );
 
   Widget _paceBadge(BuildContext context, CutoffMoney money) {

@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../home/today_plan.dart';
 import '../home/week_recap.dart';
 import '../home/week_strip.dart';
+import '../home/review_queue.dart';
 import '../models/money_entry.dart';
 import '../models/note.dart';
 import '../models/budget.dart';
@@ -100,6 +101,9 @@ class _HomeScreenState extends State<HomeScreen>
   /// five weeks.
   static const _doneLogKey = 'done_log_v1';
   final Map<int, int> _doneLog = {};
+
+  /// Captured payments waiting for one tap (see [ReviewItem]).
+  List<ReviewItem> _review = [];
 
   /// Monday's recap was hidden on this local day.
   static const _recapHiddenKey = 'recap_hidden_v1';
@@ -343,6 +347,7 @@ class _HomeScreenState extends State<HomeScreen>
       if (_doneTodayDay >= 0 && _doneToday > 0) {
         _doneLog.putIfAbsent(_doneTodayDay, () => _doneToday);
       }
+      _review = decodeReviewQueue(prefs.getString(reviewQueueKey));
       _recapHiddenDay = prefs.getInt(_recapHiddenKey) ?? -1;
       _resurfaceHiddenDay = prefs.getInt(_resurfaceHiddenKey) ?? -1;
       _paydaySeenDay = prefs.getInt(_paydaySeenKey) ?? -1;
@@ -3401,7 +3406,80 @@ class _HomeScreenState extends State<HomeScreen>
         onSelectEntry: _editEntryFromDashboard,
         financeDailyTotals: _last14DaySpend,
         onChecklistToggle: _toggleChecklistItem,
+        financeReview: _review,
+        onConfirmReview: (item) => _confirmReview([item]),
+        onDismissReview: _dismissReview,
+        onConfirmAllReview: () => _confirmReview(List.of(_review)),
       ),
+    );
+  }
+
+  void _saveReview() {
+    final raw = encodeReviewQueue(_review);
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setString(reviewQueueKey, raw))
+          .catchError((_) => false),
+    );
+  }
+
+  /// Counts captured payments: each becomes an entry in this month's
+  /// finance note (as quick-add would log it) and leaves the queue. Undo
+  /// puts them back exactly.
+  void _confirmReview(List<ReviewItem> items) {
+    if (items.isEmpty) return;
+    final note = _monthlyFinanceNoteOrDraft();
+    final added = <MoneyEntry>[];
+    for (final it in items) {
+      added.add(MoneyEntry(
+        id: generateId('m'),
+        amount: it.amount,
+        category: it.category,
+        date: it.date,
+        note: it.merchant.isEmpty ? null : it.merchant,
+        type: 'expense',
+        currency: it.currency != note.currency ? it.currency : null,
+      ));
+    }
+    final ids = items.map((i) => i.id).toSet();
+    setState(() {
+      if (!notes.any((n) => n.id == note.id)) notes.insert(0, note);
+      note.amounts.addAll(added);
+      note.updatedAt = DateTime.now();
+      _review = _review.where((r) => !ids.contains(r.id)).toList();
+    });
+    _persistNow();
+    _saveReview();
+    HapticFeedback.lightImpact();
+    final total = items.fold<int>(0, (a, i) => a + i.amount);
+    _showSnackBar(
+      items.length == 1
+          ? 'Logged · ${formatWholeAmount(total, items.first.currency)}'
+          : '${items.length} logged · '
+              '${formatWholeAmount(total, items.first.currency)}',
+      onUndo: () {
+        final entryIds = added.map((e) => e.id).toSet();
+        setState(() {
+          note.amounts.removeWhere((e) => entryIds.contains(e.id));
+          _review = [...items, ..._review]
+            ..sort((a, b) => b.date.compareTo(a.date));
+        });
+        _persistNow();
+        _saveReview();
+      },
+    );
+  }
+
+  void _dismissReview(ReviewItem item) {
+    setState(() => _review = _review.where((r) => r.id != item.id).toList());
+    _saveReview();
+    _showSnackBar(
+      'Removed from review',
+      onUndo: () {
+        setState(() => _review = [item, ..._review]
+          ..sort((a, b) => b.date.compareTo(a.date)));
+        _saveReview();
+      },
     );
   }
 
@@ -3460,6 +3538,8 @@ class _HomeScreenState extends State<HomeScreen>
         onSaveNote: _captureNote,
         onAddTask: _captureTask,
         onVoice: VoiceMemo.isSupported() ? _openVoiceMemo : null,
+        onLogSpends: _logVoiceSpends,
+        currency: _financeCurrency != 'all' ? _financeCurrency : 'PHP',
       ),
       ?moment,
       ..._buildDayBlocks(plan, now),
@@ -3724,6 +3804,8 @@ class _HomeScreenState extends State<HomeScreen>
       now: now,
       onOpen: () => _onTabChanged('finance'),
       onSetBudget: _editCutoffBudget,
+      toReview: _review.length,
+      onReview: () => _onTabChanged('finance'),
     );
   }
 
@@ -3947,15 +4029,13 @@ class _HomeScreenState extends State<HomeScreen>
   /// and the one action that starts it. Sample entries are demo data and
   /// never count, so say so when they are what's there.
   Widget _buildMoneyEmpty(DateTime now) {
-    final hasSample = notes.any(
-      (n) => isVisibleFinanceNote(n) && n.amounts.any((e) => e.isDemo),
-    );
     return HomePaydayEmpty(
       cutoff: cutoffFor(_payday, now),
       now: now,
-      hasSample: hasSample,
       onLog: _quickAddEntry,
       onChangePayday: _editPayday,
+      toReview: _review.length,
+      onReview: () => _onTabChanged('finance'),
     );
   }
 
@@ -3964,9 +4044,7 @@ class _HomeScreenState extends State<HomeScreen>
     return HomeEmptySection(
       label: 'RECENT',
       icon: Icons.edit_note_rounded,
-      title: 'Your notes show up here',
-      body: 'Ideas, lists, things to remember. The newest three stay on '
-          'Home.',
+      title: 'No notes yet',
       action: 'Write a note',
       onAction: _openTemplatePicker,
     );
@@ -4020,10 +4098,10 @@ class _HomeScreenState extends State<HomeScreen>
       if (plan.undated.isEmpty) {
         return (
           strong: '',
-          rest: 'Nothing on your plate. A good moment to write.',
+          rest: 'Nothing on your plate.',
         );
       }
-      return (strong: '', rest: 'Nothing due today. A good day to write.');
+      return (strong: '', rest: 'A free day.');
     }
     final over = plan.overdue.length;
     final left = plan.forToday + over;

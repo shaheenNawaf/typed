@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../home/review_queue.dart';
 import '../models/budget.dart';
 import '../models/money_entry.dart';
 import '../models/note.dart';
@@ -411,6 +412,12 @@ class FinanceModeToggle extends StatelessWidget {
 /// actually worth attention, so the pane stays quiet.
 class SimpleFinanceView extends StatelessWidget {
   final FinanceSummary summary;
+
+  /// Captured payments waiting for a tap; none of them is in [summary].
+  final List<ReviewItem> review;
+  final ValueChanged<ReviewItem>? onConfirmReview;
+  final ValueChanged<ReviewItem>? onDismissReview;
+  final VoidCallback? onConfirmAllReview;
   final List<Budget> budgets;
   final Map<String, int> budgetActuals;
   final VoidCallback? onAddExpense;
@@ -430,6 +437,10 @@ class SimpleFinanceView extends StatelessWidget {
   const SimpleFinanceView({
     super.key,
     required this.summary,
+    this.review = const [],
+    this.onConfirmReview,
+    this.onDismissReview,
+    this.onConfirmAllReview,
     this.budgets = const [],
     this.budgetActuals = const {},
     this.onAddExpense,
@@ -511,6 +522,42 @@ class SimpleFinanceView extends StatelessWidget {
             ),
           ],
         ),
+        if (review.isNotEmpty) ...[
+          const SizedBox(height: 22),
+          // Copilot's To Review: captured, not counted until you say so.
+          HomeLabel(
+            'TO REVIEW',
+            trailing: review.length > 1 ? 'Confirm all' : null,
+            trailingIcon: false,
+            onTrailingTap: review.length > 1 ? onConfirmAllReview : null,
+            trailingSemantics: 'Confirm all ${review.length}',
+          ),
+          HomeCard(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Column(
+              children: [
+                for (var i = 0; i < review.length; i++) ...[
+                  if (i > 0)
+                    Divider(
+                      height: 1,
+                      indent: 58,
+                      endIndent: 16,
+                      color: c.border.withValues(alpha: 0.8),
+                    ),
+                  _ReviewRow(
+                    item: review[i],
+                    onConfirm: onConfirmReview == null
+                        ? null
+                        : () => onConfirmReview!(review[i]),
+                    onDismiss: onDismissReview == null
+                        ? null
+                        : () => onDismissReview!(review[i]),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
         if (candidates.isNotEmpty || hasBudgets) ...[
           const SizedBox(height: 22),
           const HomeLabel('BUDGETS'),
@@ -1454,6 +1501,104 @@ class _SummaryCard extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+// -- To review -----------------------------------------------------------------
+
+/// One captured payment: who, from where, how much, and a tick to count it.
+/// Swipe it away if it isn't yours to log.
+class _ReviewRow extends StatelessWidget {
+  final ReviewItem item;
+  final VoidCallback? onConfirm;
+  final VoidCallback? onDismiss;
+
+  const _ReviewRow({required this.item, this.onConfirm, this.onDismiss});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final amountStyle = TextStyle(
+      fontSize: AppType.t13_5,
+      fontFamily: c.monoFontFamily,
+      fontWeight: FontWeight.w600,
+      color: c.fg,
+    );
+    final row = Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 6, 10),
+      child: Row(
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: c.fg.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(15),
+            ),
+            child: Icon(
+              _categoryIcon(item.category),
+              size: 15,
+              color: c.muted,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  item.merchant.isEmpty ? item.category : item.merchant,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: AppType.t13_5,
+                    fontWeight: FontWeight.w600,
+                    color: c.fg,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${item.source} · ${relativeDayLabel(item.date)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: AppType.t11, color: c.muted),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text.rich(
+            TextSpan(
+              style: amountStyle,
+              children: moneySpansSplit(
+                -item.amount,
+                item.currency,
+                amountStyle,
+                scale: 0.78,
+                alpha: 0.7,
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Confirm',
+            onPressed: onConfirm,
+            icon: Icon(Icons.check_circle_outline_rounded, color: c.fg),
+          ),
+        ],
+      ),
+    );
+    if (onDismiss == null) return row;
+    return Dismissible(
+      key: ValueKey('review-${item.id}'),
+      direction: DismissDirection.endToStart,
+      onDismissed: (_) => onDismiss!(),
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        child: Icon(Icons.close_rounded, color: c.muted),
+      ),
+      child: row,
     );
   }
 }

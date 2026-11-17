@@ -13,6 +13,7 @@ import '../utils/finance_utils.dart';
 import '../utils/markdown_display.dart';
 import '../utils/note_kind.dart';
 import 'finance_dashboard.dart';
+import '../home/review_queue.dart';
 import 'home_modules.dart';
 import 'long_press_menu.dart';
 
@@ -68,6 +69,12 @@ class NoteList extends StatefulWidget {
   /// Tap a transaction row -> edit that entry (noteId, entryId).
   final void Function(String noteId, String entryId)? onSelectEntry;
 
+  /// Captured payments waiting on the simple Finance view.
+  final List<ReviewItem> financeReview;
+  final ValueChanged<ReviewItem>? onConfirmReview;
+  final ValueChanged<ReviewItem>? onDismissReview;
+  final VoidCallback? onConfirmAllReview;
+
   /// Minor-unit expense buckets, oldest -> newest, length 14 (sparkline).
   final List<int> financeDailyTotals;
 
@@ -112,6 +119,10 @@ class NoteList extends StatefulWidget {
     this.showFinanceDashboard = true,
     this.onSelectEntry,
     this.financeDailyTotals = const [],
+    this.financeReview = const [],
+    this.onConfirmReview,
+    this.onDismissReview,
+    this.onConfirmAllReview,
   });
 
   @override
@@ -414,6 +425,10 @@ class _NoteListState extends State<NoteList> {
       if (_financeSimpleMode) {
         body = SimpleFinanceView(
           summary: widget.financeSummary!,
+          review: widget.financeReview,
+          onConfirmReview: widget.onConfirmReview,
+          onDismissReview: widget.onDismissReview,
+          onConfirmAllReview: widget.onConfirmAllReview,
           budgets: widget.budgets ?? const [],
           budgetActuals: widget.budgetActuals,
           period: widget.financeSimplePeriod ?? 'month',
