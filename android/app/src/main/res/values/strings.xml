@@ -13,6 +13,8 @@
     <string name="voice_memo">Voice memo</string>
     <string name="voice_memo_long">Record a voice memo</string>
     <string name="new_note_long">Start a new note</string>
+    <string name="log_expense">Log expense</string>
+    <string name="log_expense_long">Log an expense</string>
     <string name="widget_recent_title">Recent</string>
     <string name="widget_todo_title">To-do</string>
     <string name="widget_empty">No notes yet. Tap to start writing.</string>

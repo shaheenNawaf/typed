@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 
 import '../home/today_plan.dart';
 import '../home/week_recap.dart';
+import '../home/week_strip.dart';
+import '../voice/spend_parser.dart';
 import '../models/note.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_metrics.dart';
@@ -29,6 +31,11 @@ class HomeLabel extends StatelessWidget {
   final String? trailingSemantics;
   final bool trailingIcon;
 
+  /// When set, the label heads a day: the date number large, with [text]
+  /// and [caption] stacked small beside it (Things' Upcoming, Mela's plan).
+  final int? dayNumber;
+  final String? caption;
+
   const HomeLabel(
     this.text, {
     super.key,
@@ -36,6 +43,8 @@ class HomeLabel extends StatelessWidget {
     this.onTrailingTap,
     this.trailingSemantics,
     this.trailingIcon = true,
+    this.dayNumber,
+    this.caption,
   });
 
   @override
@@ -56,28 +65,69 @@ class HomeLabel extends StatelessWidget {
     if (onTrailingTap != null) {
       end = Semantics(
         button: true,
-        label: trailingSemantics,
+        label: trailingSemantics ?? trailing,
         child: InkWell(
           onTap: onTrailingTap,
           borderRadius: BorderRadius.circular(8),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (trailing != null) Text(trailing!, style: trailingStyle),
-                if (trailing == null) Text('All', style: trailingStyle),
-                if (trailingIcon) ...[
-                  const SizedBox(width: 4),
-                  Icon(Icons.arrow_forward_rounded, size: 14, color: c.muted),
-                ],
-              ],
-            ),
+            // A link is just the arrow (the label says what it opens);
+            // an action without one ("Not today") keeps its words.
+            child: trailingIcon
+                ? Icon(Icons.arrow_forward_rounded, size: 16, color: c.muted)
+                : Text(trailing ?? 'All', style: trailingStyle),
           ),
         ),
       );
     } else if (trailing != null) {
       end = Text(trailing!, style: trailingStyle);
+    }
+    if (dayNumber != null) {
+      return Padding(
+        padding: const EdgeInsets.only(left: 4, bottom: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Text(
+              '$dayNumber',
+              style: TextStyle(
+                fontSize: 30,
+                height: 1,
+                fontWeight: FontWeight.w600,
+                letterSpacing: -0.8,
+                color: c.fg,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    text,
+                    style: style.copyWith(color: c.fg),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (caption != null)
+                    Text(
+                      caption!,
+                      style: style.copyWith(
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.4,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ],
+              ),
+            ),
+            ?end,
+          ],
+        ),
+      );
     }
     return Padding(
       padding: const EdgeInsets.only(left: 4, bottom: 8),
@@ -95,6 +145,44 @@ class HomeLabel extends StatelessWidget {
             ),
             ?end,
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A quiet secondary action: ink words on a soft pill, the same look as a
+/// chosen [QuietChoice] option ("Do today", "Set a budget").
+class SoftPill extends StatelessWidget {
+  final String label;
+  final VoidCallback? onPressed;
+
+  const SoftPill({super.key, required this.label, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final enabled = onPressed != null;
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: c.fg.withValues(alpha: 0.07),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: enabled ? c.fg : c.muted,
+            ),
+          ),
         ),
       ),
     );
@@ -120,11 +208,17 @@ class HomeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    // Dark mode separates panels by fill, not outline (Revolut, Copilot):
+    // a touch lighter than the surface, no stroke. Light mode keeps the
+    // hairline, since white on near-white needs it.
+    final dark = Theme.of(context).brightness == Brightness.dark;
     final card = Material(
-      color: c.surface,
+      color: dark ? Color.lerp(c.surface, c.fg, 0.035) : c.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
-        side: BorderSide(color: c.border.withValues(alpha: 0.8)),
+        side: dark
+            ? BorderSide.none
+            : BorderSide(color: c.border.withValues(alpha: 0.8)),
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -134,6 +228,482 @@ class HomeCard extends StatelessWidget {
     );
     if (semanticsLabel == null) return card;
     return Semantics(button: true, label: semanticsLabel, child: card);
+  }
+}
+
+// ── week strip ─────────────────────────────────────────────────────────────
+
+/// Seven days around today as date numbers, each with a few marks: filled
+/// dots for tasks finished, rings for tasks due, a short line for money
+/// spent (longer for more). Tapping a day says what its marks are. A new
+/// app shows the same strip with no marks yet, which reads as something to
+/// fill rather than a blank. (Structured's and Tiimo's week strips,
+/// (Not Boring) Habits' week dots.)
+class HomeWeekStrip extends StatefulWidget {
+  final List<StripDay> days;
+  final String currency;
+  final DateTime now;
+
+  const HomeWeekStrip({
+    super.key,
+    required this.days,
+    required this.currency,
+    required this.now,
+  });
+
+  @override
+  State<HomeWeekStrip> createState() => _HomeWeekStripState();
+}
+
+class _HomeWeekStripState extends State<HomeWeekStrip> {
+  int _selected = 3;
+  bool _tapped = false;
+
+  String _dayName(int i, StripDay d) => switch (i) {
+        2 => 'Yesterday',
+        3 => 'Today',
+        4 => 'Tomorrow',
+        _ => '${kWeekdayNamesShort[d.day.weekday - 1]} ${d.day.day}',
+      };
+
+  String _caption() {
+    final i = _selected;
+    final d = widget.days[i];
+    final parts = <String>[
+      if (d.done > 0) '${d.done} done',
+      if (d.due > 0) '${d.due} due',
+      if (d.spent > 0) '${formatWholeAmount(d.spent, widget.currency)} spent',
+    ];
+    final name = i == 3
+        ? 'Today, ${monthShort(d.day.month)} ${d.day.day}'
+        : _dayName(i, d);
+    if (parts.isNotEmpty) return '$name · ${parts.join(' · ')}';
+    if (widget.days.every((x) => x.isEmpty)) {
+      return '$name · Your week fills in as you go';
+    }
+    return '$name · ${i > 3 ? 'Nothing planned' : 'Nothing logged'}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    var maxSpent = 0;
+    for (final d in widget.days) {
+      if (d.spent > maxSpent) maxSpent = d.spent;
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            for (var i = 0; i < widget.days.length; i++)
+              Expanded(child: _cell(context, i, maxSpent)),
+          ],
+        ),
+        AnimatedSize(
+          duration: AppMotion.duration(context, AppMotion.fast),
+          alignment: Alignment.topCenter,
+          child: !_tapped
+              ? const SizedBox(width: double.infinity)
+              : Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: AnimatedSwitcher(
+                    duration: AppMotion.duration(context, AppMotion.fast),
+                    child: Text(
+                      _caption(),
+                      key: ValueKey(_selected),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: AppType.t13_5, color: c.muted),
+                    ),
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _cell(BuildContext context, int i, int maxSpent) {
+    final c = context.colors;
+    final d = widget.days[i];
+    final today = i == 3;
+    final selected = i == _selected;
+    final past = i < 3;
+    final dots = <Widget>[
+      for (var k = 0; k < d.done && k < 3; k++)
+        _dot(c.fg.withValues(alpha: past ? 0.55 : 0.9), null),
+      for (var k = 0; k < d.due && d.done + k < 3; k++) _dot(null, c.muted),
+    ];
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: _dayName(i, d),
+      child: InkWell(
+        onTap: () => setState(() {
+          _selected = i;
+          _tapped = true;
+        }),
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            children: [
+              Text(
+                kWeekdayNamesShort[d.day.weekday - 1].toUpperCase(),
+                style: TextStyle(
+                  fontSize: AppType.t10 + 0.5,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.6,
+                  color: today ? c.fg : c.muted,
+                ),
+              ),
+              const SizedBox(height: 6),
+              AnimatedContainer(
+                duration: AppMotion.duration(context, AppMotion.fast),
+                width: 38,
+                height: 38,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: today
+                      ? c.fg
+                      : selected
+                          ? c.fg.withValues(alpha: 0.09)
+                          : c.fg.withValues(alpha: 0),
+                ),
+                child: Text(
+                  '${d.day.day}',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: -0.3,
+                    color: today ? c.bg : c.fg.withValues(alpha: past ? 0.6 : 1),
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 7),
+              SizedBox(
+                height: 5,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    for (var k = 0; k < dots.length; k++) ...[
+                      if (k > 0) const SizedBox(width: 3),
+                      dots[k],
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 5),
+              AnimatedContainer(
+                duration: AppMotion.duration(context, AppMotion.slow),
+                height: 2,
+                width: d.spent == 0 || maxSpent == 0
+                    ? 0
+                    : 6 + 18 * d.spent / maxSpent,
+                decoration: BoxDecoration(
+                  color: c.fg.withValues(alpha: 0.35),
+                  borderRadius: BorderRadius.circular(1),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _dot(Color? fill, Color? ring) => Container(
+        width: 5,
+        height: 5,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: fill,
+          border: ring == null ? null : Border.all(color: ring, width: 1),
+        ),
+      );
+}
+
+// ── cutoff days ────────────────────────────────────────────────────────────
+
+/// The pay period as one bar per day: what was spent so far (today in full
+/// ink), the days still to come as dots, and with a budget a thin line at
+/// the even daily share. (Copilot's spending-against-budget line.)
+class CutoffDays extends StatelessWidget {
+  final List<int> spentByDay;
+
+  /// Index of today in [spentByDay].
+  final int todayIndex;
+
+  /// The even daily share of a budget, if one is set.
+  final int? allowance;
+
+  const CutoffDays({
+    super.key,
+    required this.spentByDay,
+    required this.todayIndex,
+    this.allowance,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    var top = allowance ?? 0;
+    for (final v in spentByDay) {
+      if (v > top) top = v;
+    }
+    // Nothing spent yet: no headroom to reserve, just the row of days.
+    final h = top == 0 ? 8.0 : 40.0;
+    double heightOf(int v) => top == 0 ? 2 : 3 + (h - 3) * v / top;
+    return SizedBox(
+          height: h,
+          child: Stack(
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  for (var i = 0; i < spentByDay.length; i++)
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: i > todayIndex
+                              ? Container(
+                                  width: 4,
+                                  height: 4,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: c.fg.withValues(alpha: 0.16),
+                                  ),
+                                )
+                              : Container(
+                                  height: spentByDay[i] == 0
+                                      ? 2
+                                      : heightOf(spentByDay[i]),
+                                  decoration: BoxDecoration(
+                                    color: spentByDay[i] == 0
+                                        ? c.fg.withValues(alpha: 0.14)
+                                        : i == todayIndex
+                                            ? c.fg
+                                            : c.fg.withValues(alpha: 0.45),
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              if (allowance != null && top > 0)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: heightOf(allowance!),
+                  child: Container(
+                    height: 1,
+                    color: c.muted.withValues(alpha: 0.6),
+                  ),
+                ),
+            ],
+          ),
+    );
+  }
+}
+
+/// Until payday before anything real is logged: the period as empty days,
+/// so it already looks like the card it will become.
+class HomePaydayEmpty extends StatelessWidget {
+  final Cutoff cutoff;
+  final DateTime now;
+  final VoidCallback onLog;
+  final VoidCallback onChangePayday;
+  final int toReview;
+  final VoidCallback? onReview;
+
+  const HomePaydayEmpty({
+    super.key,
+    required this.cutoff,
+    required this.now,
+    required this.onLog,
+    required this.onChangePayday,
+    this.toReview = 0,
+    this.onReview,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final days = cutoff.daysLeft(now);
+    final payday = ordinal(cutoff.nextPayday.day);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        HomeLabel(
+          'UNTIL PAYDAY',
+          trailing: toReview > 0 ? '$toReview to review' : null,
+          trailingIcon: false,
+          onTrailingTap: toReview > 0 ? onReview : null,
+          trailingSemantics: '$toReview payments to review',
+        ),
+        HomeCard(
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: '$days ${days == 1 ? 'day' : 'days'}',
+                      style: TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.6,
+                        color: c.fg,
+                      ),
+                    ),
+                    TextSpan(
+                      text: ' until the $payday',
+                      style: TextStyle(fontSize: AppType.t15, color: c.muted),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              CutoffDays(
+                spentByDay: List.filled(cutoff.totalDays, 0),
+                todayIndex: cutoff.dayIndex(now) - 1,
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  SoftPill(label: 'Log an expense', onPressed: onLog),
+                  SoftPill(label: 'Change payday', onPressed: onChangePayday),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── empty sections ─────────────────────────────────────────────────────────
+
+/// A Home section with nothing in it yet. It keeps its place on the page,
+/// says what it will show once there is something, and offers the one
+/// action that fills it, so an empty Home still points somewhere instead
+/// of just ending.
+class HomeEmptySection extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final String title;
+  final String? body;
+  final String action;
+  final VoidCallback onAction;
+  final String? secondary;
+  final VoidCallback? onSecondary;
+
+  /// A small extra line under the actions ("Sample entries don't count").
+  final String? footnote;
+
+  const HomeEmptySection({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.title,
+    this.body,
+    required this.action,
+    required this.onAction,
+    this.secondary,
+    this.onSecondary,
+    this.footnote,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        HomeLabel(label),
+        HomeCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: c.fg.withValues(alpha: 0.06),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(icon, size: 18, color: c.muted),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: AppType.t15 + 1,
+                            fontWeight: FontWeight.w600,
+                            color: c.fg,
+                          ),
+                        ),
+                        if (body != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          body!,
+                          style: TextStyle(
+                            fontSize: AppType.t13_5,
+                            height: 1.45,
+                            color: c.muted,
+                          ),
+                        ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Padding(
+                padding: const EdgeInsets.only(left: 50),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    SoftPill(label: action, onPressed: onAction),
+                    if (secondary != null)
+                      SoftPill(label: secondary!, onPressed: onSecondary),
+                  ],
+                ),
+              ),
+              if (footnote != null) ...[
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.only(left: 50),
+                  child: Text(
+                    footnote!,
+                    style: TextStyle(fontSize: AppType.t12, color: c.muted),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -148,11 +718,19 @@ class HomeCaptureBar extends StatefulWidget {
   /// Opens a voice memo; null hides the mic (unsupported platform).
   final VoidCallback? onVoice;
 
+  /// Logs money typed into the box ("grab 180"); null hides the offer.
+  final ValueChanged<List<VoiceSpend>>? onLogSpends;
+
+  /// Currency the offer shows amounts in.
+  final String currency;
+
   const HomeCaptureBar({
     super.key,
     required this.onSaveNote,
     required this.onAddTask,
     this.onVoice,
+    this.onLogSpends,
+    this.currency = 'PHP',
   });
 
   @override
@@ -164,6 +742,25 @@ class _HomeCaptureBarState extends State<HomeCaptureBar> {
   final _focus = FocusNode();
 
   bool get _hasText => _ctrl.text.trim().isNotEmpty;
+
+  /// Money in what's typed, when the line is short enough to be just that
+  /// ("grab 180", "lunch 250, coffee 120"). Text first, decide later
+  /// (Drafts): Enter still saves a note; the chip logs it instead.
+  List<VoiceSpend> get _spends {
+    if (widget.onLogSpends == null) return const [];
+    final text = _ctrl.text.trim();
+    if (text.isEmpty || text.split(RegExp(r'\s+')).length > 8) {
+      return const [];
+    }
+    return parseSpends(text);
+  }
+
+  void _logSpends(List<VoiceSpend> spends) {
+    HapticFeedback.lightImpact();
+    widget.onLogSpends!(spends);
+    _ctrl.clear();
+    _focus.unfocus();
+  }
 
   @override
   void initState() {
@@ -194,6 +791,30 @@ class _HomeCaptureBarState extends State<HomeCaptureBar> {
 
   @override
   Widget build(BuildContext context) {
+    final spends = _spends;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _bar(context),
+        AnimatedSize(
+          duration: AppMotion.duration(context, AppMotion.fast),
+          alignment: Alignment.topLeft,
+          child: spends.isEmpty
+              ? const SizedBox(width: double.infinity)
+              : Padding(
+                  padding: const EdgeInsets.only(top: 10, left: 4),
+                  child: _MoneyChip(
+                    spends: spends,
+                    currency: widget.currency,
+                    onTap: () => _logSpends(spends),
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _bar(BuildContext context) {
     final c = context.colors;
     final focused = _focus.hasFocus;
     return AnimatedContainer(
@@ -306,6 +927,69 @@ class _HomeCaptureBarState extends State<HomeCaptureBar> {
   }
 }
 
+/// "Log ₱180 · Transport" under the capture box.
+class _MoneyChip extends StatelessWidget {
+  final List<VoiceSpend> spends;
+  final String currency;
+  final VoidCallback onTap;
+
+  const _MoneyChip({
+    required this.spends,
+    required this.currency,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    var total = 0;
+    for (final s in spends) {
+      final m = parseAmountToMinor(s.amount.replaceAll(',', ''), currency) ?? 0;
+      total += s.type == 'income' ? -m : m;
+    }
+    final single = spends.length == 1;
+    final income = single && spends.first.type == 'income';
+    final amount = formatWholeAmount(total.abs(), currency);
+    final what = single ? spends.first.category : '${spends.length} entries';
+    final label = 'Log ${income ? '+' : ''}$amount · $what';
+    return Semantics(
+      button: true,
+      label: label,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 8, 14, 8),
+          decoration: BoxDecoration(
+            color: c.fg.withValues(alpha: 0.07),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.account_balance_wallet_outlined,
+                size: 16,
+                color: c.muted,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: c.fg,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ── today ──────────────────────────────────────────────────────────────────
 
 /// Today: the one task to do first (overdue, then by time), with the rest
@@ -327,6 +1011,9 @@ class HomeToday extends StatefulWidget {
   final void Function(TodayItem item) onOpen;
   final VoidCallback onViewAll;
 
+  /// Adds a task due today; shown as an add row when nothing is waiting.
+  final ValueChanged<String>? onAdd;
+
   const HomeToday({
     super.key,
     required this.plan,
@@ -338,6 +1025,7 @@ class HomeToday extends StatefulWidget {
     required this.onDoToday,
     required this.onOpen,
     required this.onViewAll,
+    this.onAdd,
   });
 
   @override
@@ -473,6 +1161,7 @@ class _HomeTodayState extends State<HomeToday> {
                           crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             ?chip,
+                            if (listName.toLowerCase() != 'today')
                             Text(
                               'in $listName',
                               maxLines: 1,
@@ -589,6 +1278,16 @@ class _HomeTodayState extends State<HomeToday> {
       title = 'Nothing waiting on you.';
       sub = null;
     }
+    // Nothing done, nothing anywhere: the add row says it all.
+    if (done == 0 && undated == 0 && widget.onAdd != null) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(4, 2, 10, 2),
+        child: TaskAddRow(
+          hint: 'Add something for today',
+          onSubmit: widget.onAdd!,
+        ),
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -685,25 +1384,14 @@ class _HomeTodayState extends State<HomeToday> {
             ),
           ),
           const SizedBox(width: 8),
-          OutlinedButton(
+          SoftPill(
+            label: 'Do today',
             onPressed: done
                 ? null
                 : () {
                     HapticFeedback.selectionClick();
                     widget.onDoToday(item);
                   },
-            style: OutlinedButton.styleFrom(
-              foregroundColor: c.fg,
-              side: BorderSide(color: c.border),
-              minimumSize: const Size(0, 34),
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              shape: const StadiumBorder(),
-              textStyle: const TextStyle(
-                fontSize: AppType.t12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            child: const Text('Do today'),
           ),
         ],
       ),
@@ -1113,14 +1801,11 @@ class HomeTomorrow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label =
-        '${kWeekdayNamesShort[day.weekday - 1]}, ${monthShort(day.month)} '
-        '${day.day}';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         HomeLabel(
-          'TOMORROW · ${label.toUpperCase()}',
+          'TOMORROW · ${weekdayName(day.weekday).toUpperCase()}',
           trailing: 'All tasks',
           onTrailingTap: onViewAll,
           trailingSemantics: 'See all tasks',
@@ -1182,7 +1867,7 @@ class HomeResurfaceCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         HomeLabel(
-          'FROM YOUR NOTES',
+          'FROM ${age.toUpperCase()}',
           trailing: 'Not today',
           onTrailingTap: onDismiss,
           trailingSemantics: 'Hide until tomorrow',
@@ -1194,16 +1879,6 @@ class HomeResurfaceCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                age.toUpperCase(),
-                style: TextStyle(
-                  fontSize: AppType.t11,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.6,
-                  color: c.muted,
-                ),
-              ),
-              const SizedBox(height: 8),
               Text(
                 title,
                 maxLines: 1,
@@ -1217,7 +1892,7 @@ class HomeResurfaceCard extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 preview,
-                maxLines: 3,
+                maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: AppType.t15,
@@ -1245,12 +1920,18 @@ class HomePaydayCard extends StatelessWidget {
   final VoidCallback onOpen;
   final VoidCallback onSetBudget;
 
+  /// Captured payments waiting for a tap (they are not in the figures yet).
+  final int toReview;
+  final VoidCallback? onReview;
+
   const HomePaydayCard({
     super.key,
     required this.money,
     required this.now,
     required this.onOpen,
     required this.onSetBudget,
+    this.toReview = 0,
+    this.onReview,
   });
 
   @override
@@ -1292,31 +1973,20 @@ class HomePaydayCard extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 14),
+        _days(money, null),
+        const SizedBox(height: 10),
         Row(
           children: [
             Expanded(
               child: Text(
                 evening
                     ? '${formatWholeAmount(money.todaySpent, cur)} logged today'
-                    : 'About ${formatWholeAmount(money.perDaySpent, cur)} a day '
-                          '· payday on the $payday',
+                    : '${formatWholeAmount(money.perDaySpent, cur)} a day so far',
                 style: small,
               ),
             ),
-            TextButton(
-              onPressed: onSetBudget,
-              style: TextButton.styleFrom(
-                foregroundColor: c.fg,
-                minimumSize: const Size(0, 36),
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                textStyle: const TextStyle(
-                  fontSize: AppType.t12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              child: const Text('Set a budget'),
-            ),
+            SoftPill(label: 'Set a budget', onPressed: onSetBudget),
           ],
         ),
       ];
@@ -1336,13 +2006,8 @@ class HomePaydayCard extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 12),
-        PaceBar(
-          spent: money.spent,
-          budget: budget.amount,
-          ideal: money.ideal,
-          status: status,
-        ),
+        const SizedBox(height: 14),
+        _days(money, budget.amount ~/ money.cutoff.totalDays),
         const SizedBox(height: 10),
         Row(
           children: [
@@ -1352,12 +2017,13 @@ class HomePaydayCard extends StatelessWidget {
                     ? '${formatWholeAmount(money.todaySpent, cur)} logged today'
                     : over
                     ? '$days ${days == 1 ? 'day' : 'days'} until payday'
-                    : 'About ${formatWholeAmount(money.perDayLeft!, cur)} a day '
+                    : '${formatWholeAmount(money.perDayLeft!, cur)} a day '
                           'for $days ${days == 1 ? 'day' : 'days'}',
                 style: small,
               ),
             ),
-            _paceBadge(context, money),
+            // On pace is the quiet default; only say something when not.
+            if (status != PaceStatus.onPace) _paceBadge(context, money),
           ],
         ),
       ];
@@ -1368,9 +2034,12 @@ class HomePaydayCard extends StatelessWidget {
       children: [
         HomeLabel(
           'UNTIL PAYDAY',
-          trailing: 'Money',
-          onTrailingTap: onOpen,
-          trailingSemantics: 'Open Finance',
+          trailing: toReview > 0 ? '$toReview to review' : 'Money',
+          trailingIcon: toReview == 0,
+          onTrailingTap: toReview > 0 ? (onReview ?? onOpen) : onOpen,
+          trailingSemantics: toReview > 0
+              ? '$toReview payments to review'
+              : 'Open Finance',
         ),
         HomeCard(
           onTap: onOpen,
@@ -1383,6 +2052,14 @@ class HomePaydayCard extends StatelessWidget {
       ],
     );
   }
+
+  Widget _days(CutoffMoney money, int? allowance) => CutoffDays(
+    spentByDay: money.spentByDay.isEmpty
+        ? List.filled(money.cutoff.totalDays, 0)
+        : money.spentByDay,
+    todayIndex: money.dayIndex - 1,
+    allowance: allowance,
+  );
 
   Widget _paceBadge(BuildContext context, CutoffMoney money) {
     final c = context.colors;

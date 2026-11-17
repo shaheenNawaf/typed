@@ -13,6 +13,7 @@ import '../utils/finance_utils.dart';
 import '../utils/markdown_display.dart';
 import '../utils/note_kind.dart';
 import 'finance_dashboard.dart';
+import '../home/review_queue.dart';
 import 'home_modules.dart';
 import 'long_press_menu.dart';
 
@@ -68,6 +69,12 @@ class NoteList extends StatefulWidget {
   /// Tap a transaction row -> edit that entry (noteId, entryId).
   final void Function(String noteId, String entryId)? onSelectEntry;
 
+  /// Captured payments waiting on the simple Finance view.
+  final List<ReviewItem> financeReview;
+  final ValueChanged<ReviewItem>? onConfirmReview;
+  final ValueChanged<ReviewItem>? onDismissReview;
+  final VoidCallback? onConfirmAllReview;
+
   /// Minor-unit expense buckets, oldest -> newest, length 14 (sparkline).
   final List<int> financeDailyTotals;
 
@@ -112,6 +119,10 @@ class NoteList extends StatefulWidget {
     this.showFinanceDashboard = true,
     this.onSelectEntry,
     this.financeDailyTotals = const [],
+    this.financeReview = const [],
+    this.onConfirmReview,
+    this.onDismissReview,
+    this.onConfirmAllReview,
   });
 
   @override
@@ -414,6 +425,10 @@ class _NoteListState extends State<NoteList> {
       if (_financeSimpleMode) {
         body = SimpleFinanceView(
           summary: widget.financeSummary!,
+          review: widget.financeReview,
+          onConfirmReview: widget.onConfirmReview,
+          onDismissReview: widget.onDismissReview,
+          onConfirmAllReview: widget.onConfirmAllReview,
           budgets: widget.budgets ?? const [],
           budgetActuals: widget.budgetActuals,
           period: widget.financeSimplePeriod ?? 'month',
@@ -1044,6 +1059,12 @@ class _NoteCardState extends State<_NoteCard> {
         ? widget.budgetActuals[budget.id] ?? 0
         : 0;
 
+    final ledgerAmount = TextStyle(
+      fontSize: AppType.t13_5,
+      fontWeight: FontWeight.w600,
+      color: context.colors.fg,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1066,35 +1087,53 @@ class _NoteCardState extends State<_NoteCard> {
             ),
             const SizedBox(width: 8),
             if (widget.note.amounts.isNotEmpty)
-              // Flexible: at phone widths the amount spans overflow the card
-              // row otherwise; the title above already ellipsizes first.
-              Flexible(
-                child: Text.rich(
-                  TextSpan(
-                    style: TextStyle(
-                      fontSize: AppType.t12,
-                      fontFamily: context.colors.monoFontFamily,
-                      fontWeight: FontWeight.w500,
-                      // The arrow carries the direction; the figures stay
-                      // quiet so a list of ledgers is not a wall of red.
-                      color: context.colors.muted,
+              // Just the net, set like the Recent rows (smaller centavos);
+              // the entry count moved to the date line. A single amount
+              // takes only its own width so the title gets the rest (a
+              // Flexible split the row in half and cut the title short);
+              // mixed currencies keep the per-currency line, which can be
+              // long, so that one stays Flexible.
+              if (mixedCurrencies || amounts.isEmpty)
+                Flexible(
+                  child: Text.rich(
+                    TextSpan(
+                      style: ledgerAmount.copyWith(
+                        fontSize: AppType.t12,
+                        fontFamily: context.colors.monoFontFamily,
+                        fontWeight: FontWeight.w500,
+                        color: context.colors.muted,
+                      ),
+                      children: _buildCardAmountSpans(
+                        widget.note,
+                        widget.financeEntries,
+                      ),
                     ),
-                    children: _buildCardAmountSpans(
-                      widget.note,
-                      widget.financeEntries,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                )
+              else
+                Text.rich(
+                  TextSpan(
+                    style: ledgerAmount,
+                    children: moneySpansSplit(
+                      net,
+                      amounts.first.currency ?? widget.note.currency ?? 'PHP',
+                      ledgerAmount,
+                      scale: 0.78,
+                      alpha: 0.7,
                     ),
                   ),
                   maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
           ],
         ),
         if (amounts.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(left: 18, top: 2),
             child: Text(
-              _financeDateRange(amounts),
+              '${_financeDateRange(amounts)} · ${amounts.length} '
+              '${amounts.length == 1 ? 'entry' : 'entries'}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -1135,16 +1174,11 @@ class _NoteCardState extends State<_NoteCard> {
                           ? context.colors.destructive
                           : context.colors.muted,
                     ),
+                    // Whole pesos: a progress line, not a statement.
                     children: [
-                      currencySpan(budget.currency, null),
-                      TextSpan(
-                        text: formatMinor(budgetActual, budget.currency),
-                      ),
-                      const TextSpan(text: ' / '),
-                      currencySpan(budget.currency, null),
-                      TextSpan(
-                        text: formatMinor(budget.limit, budget.currency),
-                      ),
+                      ...wholeMoneySpans(budgetActual, budget.currency, null),
+                      const TextSpan(text: ' of '),
+                      ...wholeMoneySpans(budget.limit, budget.currency, null),
                     ],
                   ),
                 ),

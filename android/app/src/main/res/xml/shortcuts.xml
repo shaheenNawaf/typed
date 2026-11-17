@@ -24,4 +24,15 @@
             android:targetClass="com.z4yed.typed.MainActivity"
             android:targetPackage="com.z4yed.typed" />
     </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_expense"
+        android:shortcutId="log_expense"
+        android:shortcutLongLabel="@string/log_expense_long"
+        android:shortcutShortLabel="@string/log_expense">
+        <intent
+            android:action="com.z4yed.typed.ACTION_EXPENSE"
+            android:targetClass="com.z4yed.typed.MainActivity"
+            android:targetPackage="com.z4yed.typed" />
+    </shortcut>
 </shortcuts>

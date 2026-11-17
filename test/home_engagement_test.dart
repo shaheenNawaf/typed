@@ -70,7 +70,7 @@ void main() {
   testWidgets('a day with only undated tasks says nothing is due',
       (tester) async {
     await pumpHome(tester, [list('- [ ] a\n- [ ] b\n')]);
-    expect(find.text('Nothing due today. A good day to write.'),
+    expect(find.text('A free day.'),
         findsOneWidget);
   });
 
@@ -103,13 +103,13 @@ void main() {
         updatedAt: DateTime.now().subtract(const Duration(days: 40)),
       ),
     ]);
-    expect(find.text('FROM YOUR NOTES'), findsOneWidget);
+    expect(find.text('FROM 5 WEEKS AGO'), findsOneWidget);
     expect(find.text('Ideas for the garden'), findsWidgets);
-    expect(find.text('5 WEEKS AGO'), findsOneWidget);
 
+    await tester.ensureVisible(find.text('Not today'));
     await tester.tap(find.text('Not today'));
     await tester.pump();
-    expect(find.text('FROM YOUR NOTES'), findsNothing);
+    expect(find.text('FROM 5 WEEKS AGO'), findsNothing);
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getInt('resurface_hidden_day_v1'), isNotNull);
   });
@@ -123,7 +123,7 @@ void main() {
         tags: const [],
       ),
     ]);
-    expect(find.text('FROM YOUR NOTES'), findsNothing);
+    expect(find.text('FROM 5 WEEKS AGO'), findsNothing);
   });
 
   testWidgets('tapping the greeting sets the name it greets you by',

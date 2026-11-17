@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import 'package:typed/screens/home_screen.dart';
 import 'package:typed/theme/palettes.dart';
 import 'package:typed/utils/note_storage.dart';
 import 'package:typed/voice/transcriber.dart';
+import 'package:typed/voice/voice_feedback.dart';
 import 'package:typed/voice/voice_shaper.dart';
 import 'package:typed/widgets/voice_memo_sheet.dart';
 
@@ -359,6 +361,37 @@ void main() {
 
     expect(find.widgetWithText(TextField, 'Buy eggs'), findsOneWidget);
     expect(find.widgetWithText(TextField, 'Buy x'), findsNothing);
+  });
+
+  testWidgets('a saved memo is logged with what was heard and what was fixed',
+      (tester) async {
+    await pumpHome(tester);
+    await tester.tap(find.byTooltip('Voice memo'));
+    await settle(tester);
+    fake.say('I need to buy x. Call the bank.');
+    await tester.tap(find.text('Done'));
+    await settle(tester);
+    await tester.tap(find.text('Transcript'));
+    await settle(tester);
+    await tester.enterText(
+      find.widgetWithText(TextField, 'I need to buy x. Call the bank.'),
+      'I need to buy eggs. Call the bank.',
+    );
+    await tester.tap(find.text('Re-shape from transcript'));
+    await settle(tester);
+    await tester.tap(find.text('Save'));
+    await settle(tester);
+
+    final prefs = await SharedPreferences.getInstance();
+    final rows = prefs.getStringList(VoiceFeedback.key)!;
+    expect(rows.length, 1);
+    final row = jsonDecode(rows.single) as Map<String, dynamic>;
+    expect(row['heard'], 'I need to buy x. Call the bank.');
+    expect(row['transcript'], 'I need to buy eggs. Call the bank.');
+    expect(row['source'], 'rules');
+    expect(row['edited'], isTrue);
+    expect((row['draft'] as Map)['tasks'], ['Buy eggs', 'Call the bank']);
+    expect((row['saved'] as Map)['content'], contains('- [ ] Buy eggs'));
   });
 
   testWidgets('keep talking adds to an edited draft instead of replacing it',

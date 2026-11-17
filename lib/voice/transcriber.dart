@@ -8,6 +8,7 @@ import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
 import 'llm_shaper.dart';
+import 'voice_feedback.dart';
 import 'voice_model.dart';
 import 'voice_shaper.dart';
 
@@ -104,9 +105,17 @@ class SystemTranscriber implements Transcriber {
 
   static const _channel = MethodChannel('com.z4yed.typed/widget');
 
+  /// The language chosen in Settings; null follows the phone.
+  String? _localeId;
+
+  /// The language last listened in, for the voice log.
+  static String? lastLocale;
+
   @override
   Future<TranscriberProblem?> prepare() async {
     try {
+      _localeId = await VoiceLanguage.get();
+      lastLocale = _localeId;
       // Android: refuse rather than let the plugin fall back to a cloud
       // recogniser (Android 12+ with an on-device model only).
       if (Platform.isAndroid &&
@@ -152,6 +161,7 @@ class SystemTranscriber implements Transcriber {
         listenOptions: SpeechListenOptions(
           // Never fall back to a cloud recogniser.
           onDevice: true,
+          localeId: _localeId,
           partialResults: true,
           autoPunctuation: true,
           listenMode: ListenMode.dictation,
@@ -218,6 +228,13 @@ class SystemTranscriber implements Transcriber {
         return;
       case 'error_language_unavailable':
       case 'error_language_not_supported':
+        // The chosen language has no on-device model here: carry on in
+        // the phone's own rather than end the memo.
+        if (_localeId != null) {
+          _localeId = null;
+          lastLocale = null;
+          return;
+        }
         _fail(TranscriberProblem.language);
       case 'error_permission':
       case 'error_insufficient_permissions':

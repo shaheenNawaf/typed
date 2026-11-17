@@ -160,6 +160,10 @@ class CutoffMoney {
   /// The day the figures are for (today, or the cutoff's last day).
   final DateTime asOf;
 
+  /// Spent each day of the cutoff in [currency], first day first; days
+  /// after [asOf] stay 0. Length is [Cutoff.totalDays].
+  final List<int> spentByDay;
+
   const CutoffMoney({
     required this.cutoff,
     required this.currency,
@@ -169,6 +173,7 @@ class CutoffMoney {
     required this.topCategory,
     required this.anyLogged,
     required this.asOf,
+    this.spentByDay = const [],
   });
 
   int get dayIndex => cutoff.dayIndex(asOf);
@@ -201,19 +206,22 @@ class CutoffMoney {
 }
 
 /// Totals [cutoff]'s expenses up to [asOf] (inclusive). Sample data never
-/// counts. Without a budget, the currency is the one most spent in.
+/// counts. The currency is the budget's, else [currency], else the one most
+/// spent in.
 CutoffMoney cutoffMoney(
   List<Note> notes,
   Cutoff cutoff,
   CutoffBudget? budget,
-  DateTime asOf,
-) {
+  DateTime asOf, {
+  String? currency,
+}) {
   final day = _day(asOf).isAfter(cutoff.end) ? cutoff.end : _day(asOf);
   final from = cutoff.start;
   final until = day.add(const Duration(days: 1));
   final byCurrency = <String, int>{};
   final todayBy = <String, int>{};
   final byCategory = <String, Map<String, int>>{};
+  final byDay = <String, List<int>>{};
   var anyLogged = false;
   for (final n in notes) {
     if (!isVisibleFinanceNote(n)) continue;
@@ -225,24 +233,30 @@ CutoffMoney cutoffMoney(
       final cur = e.currency ?? n.currency ?? 'PHP';
       byCurrency[cur] = (byCurrency[cur] ?? 0) + e.amount;
       if (!e.date.isBefore(day)) todayBy[cur] = (todayBy[cur] ?? 0) + e.amount;
+      final days = byDay.putIfAbsent(
+        cur,
+        () => List.filled(cutoff.totalDays, 0),
+      );
+      final i = _days(from, _day(e.date));
+      if (i >= 0 && i < days.length) days[i] += e.amount;
       final cats = byCategory.putIfAbsent(cur, () => {});
       cats[e.category] = (cats[e.category] ?? 0) + e.amount;
     }
   }
-  var currency = budget?.currency;
-  if (currency == null) {
-    currency = 'PHP';
+  var picked = budget?.currency ?? currency;
+  if (picked == null) {
+    picked = 'PHP';
     var best = -1;
     byCurrency.forEach((cur, total) {
       if (total > best) {
         best = total;
-        currency = cur;
+        picked = cur;
       }
     });
   }
   String? top;
   var topAmount = 0;
-  (byCategory[currency] ?? const {}).forEach((cat, total) {
+  (byCategory[picked] ?? const {}).forEach((cat, total) {
     if (total > topAmount) {
       topAmount = total;
       top = cat;
@@ -250,12 +264,13 @@ CutoffMoney cutoffMoney(
   });
   return CutoffMoney(
     cutoff: cutoff,
-    currency: currency!,
-    spent: byCurrency[currency] ?? 0,
-    todaySpent: todayBy[currency] ?? 0,
+    currency: picked!,
+    spent: byCurrency[picked] ?? 0,
+    todaySpent: todayBy[picked] ?? 0,
     budget: budget,
     topCategory: top,
     anyLogged: anyLogged,
     asOf: day,
+    spentByDay: byDay[picked] ?? List.filled(cutoff.totalDays, 0),
   );
 }

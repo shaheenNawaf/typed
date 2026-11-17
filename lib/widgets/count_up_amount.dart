@@ -16,11 +16,15 @@ class CountUpAmount extends StatelessWidget {
   /// Style for the digits AND the base for the currency symbol span.
   final TextStyle style;
 
+  /// Sets the centavos smaller and dimmer ([splitCentsSpans]).
+  final bool splitCents;
+
   const CountUpAmount({
     super.key,
     required this.minor,
     required this.currency,
     required this.style,
+    this.splitCents = false,
   });
 
   @override
@@ -32,7 +36,10 @@ class CountUpAmount extends StatelessWidget {
       builder: (context, value, _) => Text.rich(
         TextSpan(
           style: style,
-          children: moneySpans(value.round(), currency, style),
+          children: splitCents
+              ? moneySpansSplit(value.round(), currency, style, scale: 0.5,
+                  alpha: 0.55)
+              : moneySpans(value.round(), currency, style),
         ),
       ),
     );

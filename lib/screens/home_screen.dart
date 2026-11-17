@@ -7,6 +7,8 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../home/today_plan.dart';
 import '../home/week_recap.dart';
+import '../home/week_strip.dart';
+import '../home/review_queue.dart';
 import '../models/money_entry.dart';
 import '../models/note.dart';
 import '../models/budget.dart';
@@ -30,7 +32,7 @@ import '../widgets/brand_mark.dart';
 import '../widgets/settings_sheet.dart';
 import '../widgets/sidebar.dart';
 import '../widgets/note_list.dart';
-import '../widgets/payday_dialogs.dart';
+import '../widgets/payday_sheets.dart';
 import '../widgets/editor.dart';
 import '../widgets/mobile_nav.dart';
 import '../widgets/template_picker_sheet.dart';
@@ -99,6 +101,9 @@ class _HomeScreenState extends State<HomeScreen>
   /// five weeks.
   static const _doneLogKey = 'done_log_v1';
   final Map<int, int> _doneLog = {};
+
+  /// Captured payments waiting for one tap (see [ReviewItem]).
+  List<ReviewItem> _review = [];
 
   /// Monday's recap was hidden on this local day.
   static const _recapHiddenKey = 'recap_hidden_v1';
@@ -342,6 +347,7 @@ class _HomeScreenState extends State<HomeScreen>
       if (_doneTodayDay >= 0 && _doneToday > 0) {
         _doneLog.putIfAbsent(_doneTodayDay, () => _doneToday);
       }
+      _review = decodeReviewQueue(prefs.getString(reviewQueueKey));
       _recapHiddenDay = prefs.getInt(_recapHiddenKey) ?? -1;
       _resurfaceHiddenDay = prefs.getInt(_resurfaceHiddenKey) ?? -1;
       _paydaySeenDay = prefs.getInt(_paydaySeenKey) ?? -1;
@@ -1788,6 +1794,12 @@ class _HomeScreenState extends State<HomeScreen>
       onEditName: _editDisplayName,
       onVoiceModel: VoiceMemo.isSupported() && VoiceModel.isSupported()
           ? () => VoiceModelSheet.show(context)
+          : null,
+      onVoiceLanguage: VoiceMemo.isSupported()
+          ? () => VoiceLanguageSheet.show(context)
+          : null,
+      onVoiceLog: VoiceMemo.isSupported()
+          ? () => VoiceLogSheet.show(context)
           : null,
       paydayLabel: _payday.label,
       onPayday: _editPayday,
@@ -3400,7 +3412,80 @@ class _HomeScreenState extends State<HomeScreen>
         onSelectEntry: _editEntryFromDashboard,
         financeDailyTotals: _last14DaySpend,
         onChecklistToggle: _toggleChecklistItem,
+        financeReview: _review,
+        onConfirmReview: (item) => _confirmReview([item]),
+        onDismissReview: _dismissReview,
+        onConfirmAllReview: () => _confirmReview(List.of(_review)),
       ),
+    );
+  }
+
+  void _saveReview() {
+    final raw = encodeReviewQueue(_review);
+    unawaited(
+      SharedPreferences.getInstance()
+          .then((prefs) => prefs.setString(reviewQueueKey, raw))
+          .catchError((_) => false),
+    );
+  }
+
+  /// Counts captured payments: each becomes an entry in this month's
+  /// finance note (as quick-add would log it) and leaves the queue. Undo
+  /// puts them back exactly.
+  void _confirmReview(List<ReviewItem> items) {
+    if (items.isEmpty) return;
+    final note = _monthlyFinanceNoteOrDraft();
+    final added = <MoneyEntry>[];
+    for (final it in items) {
+      added.add(MoneyEntry(
+        id: generateId('m'),
+        amount: it.amount,
+        category: it.category,
+        date: it.date,
+        note: it.merchant.isEmpty ? null : it.merchant,
+        type: 'expense',
+        currency: it.currency != note.currency ? it.currency : null,
+      ));
+    }
+    final ids = items.map((i) => i.id).toSet();
+    setState(() {
+      if (!notes.any((n) => n.id == note.id)) notes.insert(0, note);
+      note.amounts.addAll(added);
+      note.updatedAt = DateTime.now();
+      _review = _review.where((r) => !ids.contains(r.id)).toList();
+    });
+    _persistNow();
+    _saveReview();
+    HapticFeedback.lightImpact();
+    final total = items.fold<int>(0, (a, i) => a + i.amount);
+    _showSnackBar(
+      items.length == 1
+          ? 'Logged · ${formatWholeAmount(total, items.first.currency)}'
+          : '${items.length} logged · '
+              '${formatWholeAmount(total, items.first.currency)}',
+      onUndo: () {
+        final entryIds = added.map((e) => e.id).toSet();
+        setState(() {
+          note.amounts.removeWhere((e) => entryIds.contains(e.id));
+          _review = [...items, ..._review]
+            ..sort((a, b) => b.date.compareTo(a.date));
+        });
+        _persistNow();
+        _saveReview();
+      },
+    );
+  }
+
+  void _dismissReview(ReviewItem item) {
+    setState(() => _review = _review.where((r) => r.id != item.id).toList());
+    _saveReview();
+    _showSnackBar(
+      'Removed from review',
+      onUndo: () {
+        setState(() => _review = [item, ..._review]
+          ..sort((a, b) => b.date.compareTo(a.date)));
+        _saveReview();
+      },
     );
   }
 
@@ -3451,18 +3536,23 @@ class _HomeScreenState extends State<HomeScreen>
             ? 'Payday. '
             : 'New week. ';
 
+    final strip = buildWeekStrip(notes, _doneLog, now);
     final blocks = <Widget>[
       _buildHomeIntro(now, plan, lead: lead),
+      HomeWeekStrip(days: strip.days, currency: strip.currency, now: now),
       HomeCaptureBar(
         onSaveNote: _captureNote,
         onAddTask: _captureTask,
         onVoice: VoiceMemo.isSupported() ? _openVoiceMemo : null,
+        onLogSpends: _logVoiceSpends,
+        currency: _financeCurrency != 'all' ? _financeCurrency : 'PHP',
       ),
-      if (notes.isEmpty) _buildHomeEmptyCta(),
       ?moment,
       ..._buildDayBlocks(plan, now),
       if (moment == null) ?_buildHomeMoney(now),
-      if (recent.isNotEmpty)
+      if (recent.isEmpty)
+        _buildNotesEmpty()
+      else
         HomeRecent(
           items: [
             for (final n in recent)
@@ -3491,8 +3581,10 @@ class _HomeScreenState extends State<HomeScreen>
         20,
         isDesktop ? 56 : 28,
         20,
-        // Clears the floating dock, which the page scrolls under.
-        32 + MediaQuery.paddingOf(context).bottom,
+        // Clears the floating dock, which the page scrolls under: 32 alone
+        // left the last block's action beneath the dock at full scroll.
+        (isDesktop ? 32 : MobileNav.occupiedHeight + 16) +
+            MediaQuery.paddingOf(context).bottom,
       ),
       child: Center(
         child: ConstrainedBox(
@@ -3629,6 +3721,7 @@ class _HomeScreenState extends State<HomeScreen>
       onDoToday: (item) => _moveTaskToDay(item, today, 'Added to today'),
       onOpen: (item) => _selectNote(item.note.id),
       onViewAll: () => _onTabChanged('tasks'),
+      onAdd: (text) => _captureTask(text, when: SpokenWhen(today)),
     );
   }
 
@@ -3703,7 +3796,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  /// What's left until payday; hidden until money or a budget exists.
+  /// What's left until payday; an empty prompt until money or a budget exists.
   Widget? _buildHomeMoney(DateTime now) {
     final money = cutoffMoney(
       notes,
@@ -3711,12 +3804,14 @@ class _HomeScreenState extends State<HomeScreen>
       _cutoffBudget,
       now,
     );
-    if (!money.anyLogged && _cutoffBudget == null) return null;
+    if (!money.anyLogged && _cutoffBudget == null) return _buildMoneyEmpty(now);
     return HomePaydayCard(
       money: money,
       now: now,
       onOpen: () => _onTabChanged('finance'),
       onSetBudget: _editCutoffBudget,
+      toReview: _review.length,
+      onReview: () => _onTabChanged('finance'),
     );
   }
 
@@ -3772,7 +3867,11 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _editPayday() async {
-    final picked = await showPaydayPicker(context, _payday);
+    final picked = await showPaydaySheet(
+      context,
+      _payday,
+      now: HomeScreen.clock(),
+    );
     if (picked == null || !mounted) return;
     setState(() => _payday = picked);
     final prefs = await SharedPreferences.getInstance();
@@ -3782,12 +3881,22 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _editCutoffBudget() async {
     final now = HomeScreen.clock();
-    final currency = _cutoffBudget?.currency ??
-        cutoffMoney(notes, cutoffFor(_payday, now), null, now).currency;
-    final choice = await showCutoffBudgetDialog(
+    final cutoff = cutoffFor(_payday, now);
+    final currency =
+        _cutoffBudget?.currency ?? cutoffMoney(notes, cutoff, null, now).currency;
+    final last = cutoffMoney(
+      notes,
+      previousCutoff(_payday, cutoff),
+      null,
+      now,
+      currency: currency,
+    );
+    final choice = await showCutoffBudgetSheet(
       context,
       current: _cutoffBudget,
       currency: currency,
+      cutoffDays: cutoff.totalDays,
+      lastSpent: last.spent,
     );
     if (choice == null || !mounted) return;
     setState(() => _cutoffBudget = choice.budget);
@@ -3922,44 +4031,28 @@ class _HomeScreenState extends State<HomeScreen>
 
   /// Zero-notes home: one explanation + one primary CTA (same action as the
   /// dock + button). Hidden as soon as any note exists.
-  Widget _buildHomeEmptyCta() {
-    final c = context.colors;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: c.surface,
-        borderRadius: BorderRadius.circular(AppRadius.panel),
-        border: Border.all(color: c.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Nothing here yet',
-            style: TextStyle(
-              fontSize: AppType.t15,
-              fontWeight: FontWeight.w600,
-              color: c.fg,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Create a note, track an expense, or start a task list — '
-            'the + button does it all.',
-            style: TextStyle(fontSize: AppType.t12, height: 1.45, color: c.muted),
-          ),
-          const SizedBox(height: 14),
-          FilledButton.icon(
-            onPressed: _openTemplatePicker,
-            icon: const Icon(Icons.add, size: 16),
-            label: const Text('Create your first note'),
-            style: FilledButton.styleFrom(
-              minimumSize: const Size(44, 44),
-            ),
-          ),
-        ],
-      ),
+  /// Until payday, before anything real is logged: what the card will do
+  /// and the one action that starts it. Sample entries are demo data and
+  /// never count, so say so when they are what's there.
+  Widget _buildMoneyEmpty(DateTime now) {
+    return HomePaydayEmpty(
+      cutoff: cutoffFor(_payday, now),
+      now: now,
+      onLog: _quickAddEntry,
+      onChangePayday: _editPayday,
+      toReview: _review.length,
+      onReview: () => _onTabChanged('finance'),
+    );
+  }
+
+  /// Recent, before the first note of your own.
+  Widget _buildNotesEmpty() {
+    return HomeEmptySection(
+      label: 'RECENT',
+      icon: Icons.edit_note_rounded,
+      title: 'No notes yet',
+      action: 'Write a note',
+      onAction: _openTemplatePicker,
     );
   }
 
@@ -4011,10 +4104,10 @@ class _HomeScreenState extends State<HomeScreen>
       if (plan.undated.isEmpty) {
         return (
           strong: '',
-          rest: 'Nothing on your plate. A good moment to write.',
+          rest: 'Nothing on your plate.',
         );
       }
-      return (strong: '', rest: 'Nothing due today. A good day to write.');
+      return (strong: '', rest: 'A free day.');
     }
     final over = plan.overdue.length;
     final left = plan.forToday + over;
@@ -4049,15 +4142,6 @@ class _HomeScreenState extends State<HomeScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '${weekdayName(now.weekday)}, ${monthName(now.month)} ${now.day}',
-            style: TextStyle(
-              fontSize: AppType.t13_5,
-              fontWeight: FontWeight.w500,
-              color: c.muted,
-            ),
-          ),
-          const SizedBox(height: 4),
           Semantics(
             button: true,
             hint: _displayName == null ? 'Add your name' : 'Change your name',
