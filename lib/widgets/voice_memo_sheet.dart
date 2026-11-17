@@ -8,6 +8,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_motion.dart';
 import '../voice/spend_parser.dart';
 import '../voice/transcriber.dart';
+import '../voice/voice_feedback.dart';
 import '../voice/voice_shaper.dart';
 import '../voice/when_parser.dart';
 import 'entry_sheet.dart' show kDefaultCategories;
@@ -193,6 +194,11 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
   bool _touched = false;
   int _refineRun = 0;
 
+  /// For the voice log: how long the model took, and the recogniser's text
+  /// from before the user corrected it (null: never corrected).
+  int? _refineMs;
+  String? _heardBeforeFix;
+
   /// Recent input loudness (0..1), newest last, for the level meter.
   final _levels = <double>[];
   bool _heardSound = false;
@@ -372,6 +378,7 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
   /// draft, so it is an explicit action.
   void _reshape() {
     final text = _transcriptCtrl.text.trim();
+    if (text != _transcript) _heardBeforeFix ??= _transcript;
     _before = text;
     _live = '';
     _saveDraft();
@@ -387,12 +394,14 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
     if (transcript.isEmpty) return;
     setState(() => _refining = true);
     VoiceDraft? better;
+    final clock = Stopwatch()..start();
     try {
       better = await VoiceMemo.refine(transcript);
     } catch (_) {
       better = null;
     }
     if (!mounted || run != _refineRun) return;
+    if (better != null) _refineMs = clock.elapsedMilliseconds;
     setState(() {
       _refining = false;
       if (better != null && !_touched) {
@@ -494,6 +503,32 @@ class _VoiceMemoSheetState extends State<VoiceMemoSheet>
     final content = todo
         ? _taskTexts.map((t) => '- [ ] $t\n').join()
         : _body.text.trim();
+    final draft = _draft;
+    unawaited(
+      VoiceFeedback.record(
+        VoiceFeedback.entry(
+          at: DateTime.now(),
+          heard: _heardBeforeFix ?? _transcript,
+          transcript: _transcript,
+          draft: draft,
+          usedModel: _refined,
+          modelMs: _refineMs,
+          // Changed by hand, or saved as something the draft did not say.
+          edited: _touched ||
+              _heardBeforeFix != null ||
+              (draft != null &&
+                  (draft.kind != _kind || draft.title != title)),
+          locale: SystemTranscriber.lastLocale,
+          savedKind: _kind.name,
+          savedTitle: title,
+          savedContent: _kind == VoiceKind.expense
+              ? _spendsOut
+                    .map((s) => '${s.amount} ${s.category} ${s.note}')
+                    .join('\n')
+              : content,
+        ),
+      ),
+    );
     _clearDraft();
     final now = DateTime.now();
     Navigator.of(context).pop(

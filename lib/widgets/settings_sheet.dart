@@ -23,6 +23,11 @@ class SettingsSheet extends StatelessWidget {
   /// Opens "Smarter voice memos"; null where the model can't run.
   final VoidCallback? onVoiceModel;
 
+  /// Voice memos: which language to listen for, and sharing the local log
+  /// of saved memos. Null where voice memos aren't offered.
+  final VoidCallback? onVoiceLanguage;
+  final VoidCallback? onVoiceLog;
+
   /// When pay arrives ("15th and 30th") and the budget per cutoff
   /// ("₱10,000"; null when none). Home counts down to payday with these.
   final String? paydayLabel;
@@ -42,6 +47,8 @@ class SettingsSheet extends StatelessWidget {
     this.displayName,
     this.onEditName,
     this.onVoiceModel,
+    this.onVoiceLanguage,
+    this.onVoiceLog,
     this.paydayLabel,
     this.onPayday,
     this.budgetLabel,
@@ -60,6 +67,8 @@ class SettingsSheet extends StatelessWidget {
     String? displayName,
     VoidCallback? onEditName,
     VoidCallback? onVoiceModel,
+    VoidCallback? onVoiceLanguage,
+    VoidCallback? onVoiceLog,
     String? paydayLabel,
     VoidCallback? onPayday,
     String? budgetLabel,
@@ -87,6 +96,8 @@ class SettingsSheet extends StatelessWidget {
           displayName: displayName,
           onEditName: onEditName,
           onVoiceModel: onVoiceModel,
+          onVoiceLanguage: onVoiceLanguage,
+          onVoiceLog: onVoiceLog,
           paydayLabel: paydayLabel,
           onPayday: onPayday,
           budgetLabel: budgetLabel,
@@ -130,6 +141,24 @@ class SettingsSheet extends StatelessWidget {
                 onTap: () {
                   Navigator.pop(context);
                   onVoiceModel!();
+                },
+              ),
+            if (onVoiceLanguage != null)
+              _Option(
+                icon: Icons.language_rounded,
+                label: 'Voice language',
+                onTap: () {
+                  Navigator.pop(context);
+                  onVoiceLanguage!();
+                },
+              ),
+            if (onVoiceLog != null)
+              _Option(
+                icon: Icons.mic_none_rounded,
+                label: 'Voice memo log',
+                onTap: () {
+                  Navigator.pop(context);
+                  onVoiceLog!();
                 },
               ),
             if (onEditName != null)

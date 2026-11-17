@@ -1795,6 +1795,12 @@ class _HomeScreenState extends State<HomeScreen>
       onVoiceModel: VoiceMemo.isSupported() && VoiceModel.isSupported()
           ? () => VoiceModelSheet.show(context)
           : null,
+      onVoiceLanguage: VoiceMemo.isSupported()
+          ? () => VoiceLanguageSheet.show(context)
+          : null,
+      onVoiceLog: VoiceMemo.isSupported()
+          ? () => VoiceLogSheet.show(context)
+          : null,
       paydayLabel: _payday.label,
       onPayday: _editPayday,
       budgetLabel: _cutoffBudget == null
